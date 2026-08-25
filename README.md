@@ -73,6 +73,28 @@ For Colab, process and checkpoint on local `/content`, then use `result.save`
 to copy completed artifacts to a mounted Drive destination. DAMICORE never
 imports `google.colab`, accesses the network, or uploads data.
 
+## Citation
+
+If you use this code in scientific works, please cite:
+
+> Lopes, E. P., Tokuda, E. K., & Delbem, A. C. B. (2026). *DAMICORE*
+> (Version 0.2.0) [Computer software].
+> https://pypi.org/project/damicore/
+
+The DAMICORE methodology was originally introduced in:
+
+> Sanches, A. K., Cardoso, J. M. P., & Delbem, A. C. B. (2011).
+> “Identifying Merge-Beneficial Software Kernels for Hardware Implementation.”
+> *2011 International Conference on Reconfigurable Computing and FPGAs
+> (ReConFig)*, 74–79.
+> https://doi.org/10.1109/ReConFig.2011.51
+
+Complete machine-readable citation metadata, including author ORCIDs,
+project metadata, the original methodological publication, and references to
+earlier implementations that contributed to or served as methodological
+references for the current software, is available in
+[`CITATION.cff`](CITATION.cff).
+
 ## Development
 
 ```bash
