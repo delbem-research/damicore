@@ -1,30 +1,151 @@
 cff-version: 1.2.0
-message: If you use this software, please cite it using these metadata.
+
+message: >-
+  If you use this software, please cite it using these metadata.
+  DAMICORE builds on earlier implementations and contributions listed
+  in the references.
+
 title: DAMICORE
+
 abstract: >-
   ...
+
 type: software
 license: Apache-2.0
+
 authors:
   - given-names: Ennio Politi
     family-names: Lopes
     email: enniolopes@gmail.com
     affiliation: Universidade de Sao Paulo
     orcid: "https://orcid.org/0000-0003-2059-8313"
+
   - given-names: Eric Keiji
     family-names: Tokuda
     affiliation: Universidade de Sao Paulo
     orcid: "https://orcid.org/0000-0002-6159-2500"
+
   - given-names: Alexandre Cláudio Botazzo
     family-names: Delbem
     affiliation: Universidade de Sao Paulo
     orcid: "https://orcid.org/0000-0003-1810-1742"
-repository-code: https://github.com/delbem-research/damicore
-url: https://pypi.org/project/damicore/
+
+contact:
+  - given-names: Ennio Politi
+    family-names: Lopes
+    email: enniolopes@gmail.com
+    affiliation: Universidade de Sao Paulo
+    orcid: "https://orcid.org/0000-0003-2059-8313"
+
+repository-code: "https://github.com/delbem-research/damicore"
+url: "https://pypi.org/project/damicore/"
 version: 0.2.0
 date-released: "2026-08-12"
+
 keywords:
   - clustering
   - normalized compression distance
   - neighbor joining
   - community detection
+
+references:
+  - type: software
+    title: "Earlier Python 2.7 implementation"
+    authors:
+      - given-names: Bruno Kim Medeiros
+        family-names: Cesar
+
+      - given-names: Sidgley Camargo
+        family-names: de Andrade
+
+    repository-code: "https://github.com/brunokim/damicore-python"
+    notes: >-
+      Popular earlier implementation used as a methodological reference
+      in the development of the current implementation.
+
+  - type: software
+    title: "Fork of Bruno Kim's implementation"
+    authors:
+      - given-names: Manas Ranjan
+        family-names: Kar
+
+    repository-code: "https://github.com/manasRK/damicore-python"
+    notes: >-
+      Fork of Bruno Kim's implementation.
+
+  - type: conference-paper
+    title: "Identifying Merge-Beneficial Software Kernels for Hardware Implementation"
+    authors:
+      - given-names: Adriano K.
+        family-names: Sanches
+
+      - given-names: João M. P.
+        family-names: Cardoso
+
+      - given-names: Alexandre C. B.
+        family-names: Delbem
+
+    conference:
+      name: "2011 International Conference on Reconfigurable Computing and FPGAs (ReConFig)"
+
+    year: 2011
+    start: 74
+    end: 79
+    doi: "10.1109/ReConFig.2011.51"
+    url: "https://doi.org/10.1109/ReConFig.2011.51"
+    notes: >-
+      This conference paper introduces DAMICORE, a method that groups
+      similar software kernels so they can share a single FPGA hardware
+      core, reducing hardware usage while maintaining comparable
+      performance.
+
+  - type: software
+    title: "Python 3.8 and containerized implementation"
+    authors:
+      - given-names: Cristiano Jose
+        family-names: dos Santos
+
+    repository-code: "https://github.com/CristianoXico/DAMICORE"
+    notes: >-
+      Implementation using a recent version of Python 3 and providing
+      support for execution through Docker containers.
+
+  - type: software
+    title: "Earlier DAMICORE implementation"
+    authors:
+      - given-names: Francisco José
+        family-names: Monaco
+
+      - given-names: Rene de Souza
+        family-names: Pinto
+
+      - given-names: Vitor Pinto
+        family-names: Ribeiro
+
+      - given-names: Rafael
+        family-names: Miranda
+
+    repository-code: "https://gitlab.com/adaptsys/damicorepy"
+    notes: >-
+      Predecessor implementation used as a methodological reference
+      in the development of the current implementation.
+
+  - type: software
+    title: "Fork of the Adaptsys repository"
+    authors:
+      - given-names: Andre
+        family-names: Perina
+
+    repository-code: "https://gitlab.com/comododragon/damicorepy"
+    notes: >-
+      Fork of the Adaptsys implementation.
+
+  - type: software
+    title: "Fork of the Adaptsys repository"
+    authors:
+      - given-names: Victor Hugo Cândido
+        family-names: de Oliveira
+
+    repository-code: "https://gitlab.com/vhcandido/damicorepy"
+    notes: >-
+      Another fork of the Adaptsys implementation.
