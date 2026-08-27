@@ -35,6 +35,27 @@ Do not create a generic abstraction before it has concrete consumers. When a sta
 is visible across roughly three cases and extracting it reduces ambiguity or blast radius,
 replace the cases with the axis. Collapse unused abstractions back to direct code.
 
+## Engineering objective and economy
+
+- Optimize for correctness, clarity, robustness, reproducibility, compatibility, and
+  maintainability with the smallest necessary set of concepts, states, dependencies,
+  execution paths, and mechanisms. Minimalism must not weaken a required guarantee;
+  robustness does not justify machinery without a demonstrated failure mode.
+- Before adding a class, abstraction, protocol, configuration surface, dependency, cache,
+  package, workflow, persistence mechanism, compatibility layer, or similar machinery,
+  establish the invariant it owns, the observable failure it prevents, why an existing
+  owner cannot enforce it, how the guarantee will be falsified, and that the mechanism
+  removes more relevant complexity than it introduces. If those points are not established,
+  do not add it.
+- Prefer, in order: deletion; reuse of an existing owner; simplification; consolidation;
+  an explicit invariant; then the smallest new mechanism that closes the remaining gap.
+  YAGNI applies to mechanisms, never to required guarantees. `NO_CHANGE` and deletion are
+  valid engineering outcomes.
+- Put machine-decidable repository rules in their strongest practical form -- code, types,
+  schemas, tests, lint, or CI -- while keeping concise intent here when it helps prevent the
+  bad decision before code is written. Do not create documentation, configuration, checks,
+  or skills merely to make the repository appear more structured.
+
 ## Product and package boundaries
 
 - The required pipeline is object materialization -> exact NCD matrix -> deterministic
@@ -57,6 +78,18 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
   must not depend on it, and user-facing documentation must not expose it.
 - The five public distributions are independently installable, use lockstep SemVer, and
   expose only the symbols asserted by `tests/architecture/test_boundaries.py`.
+- Separate semantic state from operational state. Input and result meaning, algorithm
+  parameters, scientific identity, public behavior, and durable artifact semantics are
+  semantic; workers, chunking, sharding, scheduling, temporary state, memory strategy, and
+  checkpoint mechanics are operational. Operational choices may change cost or recovery,
+  but must not silently redefine scientific identity or result meaning.
+- Treat durable results and transient recovery state as different contracts. A checkpoint
+  exists to continue computation; a final artifact exists to represent a result. Do not
+  make operational state part of the durable public contract merely because both are
+  persisted.
+- Treat every public symbol and persisted public schema as a compatibility commitment.
+  Internal decomposition does not imply public API; expose only concepts users should
+  deliberately depend on.
 - Do not add repository domains or architecture outside the closed product and package map
   stated above.
 
@@ -75,6 +108,22 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
   any relevant check that could not be run.
 - Treat generated caches and build outputs (`.venv`, `*.egg-info`, coverage, pytest,
   Ruff, and bytecode artifacts) as disposable outputs, never source files.
+
+For a material change to behavior, algorithms, public contracts, persistence, resources,
+or package boundaries, reason in this order before material coding:
+
+1. establish the current semantics from authoritative evidence;
+2. name the affected contract, invariants, owner, and plausible observable failure modes;
+3. define evidence capable of falsifying each material claim;
+4. implement the smallest coherent change in the natural owner;
+5. actively try to disprove the result with relevant boundary, invalid, corruption,
+   interruption, scale, compatibility, or adversarial cases;
+6. re-read the resulting diff as a maintainer and check for accidental semantic changes,
+   duplicated truths, unnecessary public surface or dependencies, and a simpler equivalent
+   design.
+
+Trivial formatting, typo, and non-behavioral documentation edits do not require ceremony
+that cannot change their outcome.
 
 ## Python design and implementation
 
@@ -109,6 +158,16 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
 
 - Tests specify observable contracts, invariants, and failure behavior, not current
   implementation shape.
+- Evidence must match the claim. Static typing, coverage, behavior tests, property tests,
+  benchmarks, build checks, and distribution smoke tests prove different properties; none
+  substitutes for another. State the material property first, then choose evidence capable
+  of falsifying it.
+- For changes affecting mathematical or scientific behavior, establish the chain
+  definition -> representation -> invariant -> oracle -> evidence. Prefer, where available,
+  a known exact result, then an independent reference implementation, differential
+  equivalence, a metamorphic relation, an algebraic or structural invariant, and only then
+  a justified numerical tolerance. A second copy of the same implementation is not an
+  independent oracle; do not widen a tolerance merely to make a test pass.
 - Name tests `test_<behavior_under_condition>` and use a registered marker appropriate to
   the suite. Keep shared fixtures in `conftest.py`; keep one-file fixtures local.
 - Prefer deterministic inputs and equality-based assertions. Mock only I/O or process
@@ -120,6 +179,9 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
 - Do not delete or weaken a valid test to make code pass. Coverage must meet the global and
   critical-module thresholds configured in `pyproject.toml` and the `Makefile`, but coverage
   never substitutes for contract assertions.
+- The source tree is not the shipped product. When package metadata, public imports,
+  dependencies, typing distribution, or installed behavior is affected, verify the built
+  wheel/sdist and isolated installed behavior through the existing build/release checks.
 
 ## Documentation and writing
 
@@ -145,3 +207,7 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
   files owned by a compatible managed run, and only once that ownership is established.
 - Keep changes within the requested contract. Report unrelated opportunities separately;
   do not mutate external trackers, branches, or remote state unless explicitly requested.
+- A material change is complete only when its material claims have current-target evidence,
+  each required guarantee has a clear owner, public/distribution consequences are accounted
+  for, and no simpler design preserves the same guarantees. A passing test suite is
+  necessary evidence where relevant, not proof of every affected property.
