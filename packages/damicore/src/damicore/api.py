@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
 from damicore_clusterizer import (
     ClusterConfig,
@@ -392,25 +391,6 @@ def _verify_cross_artifacts(
     if not all(checks.values()):
         raise ArtifactValidationError("Cross-artifact verification failed", checks=checks)
     return checks
-
-
-def _matrix_statistics(path: Path, block_size: int = 512) -> tuple[float, float, int]:
-    # np.load is untyped; bind the result once so the block arithmetic below is checked.
-    matrix: npt.NDArray[np.float64] = np.load(path, mmap_mode="r", allow_pickle=False)
-    minimum = float("inf")
-    maximum = float("-inf")
-    out_of_range = 0
-    for start in range(0, matrix.shape[0], block_size):
-        stop = min(start + block_size, matrix.shape[0])
-        block = matrix[start:stop]
-        minimum = min(minimum, float(np.min(block)))
-        maximum = max(maximum, float(np.max(block)))
-        # np.count_nonzero's stub is partially unknown under strict mode; the block is typed.
-        outside = np.count_nonzero(  # pyright: ignore[reportUnknownMemberType]
-            np.logical_or(block < 0, block > 1)
-        )
-        out_of_range += int(outside)
-    return minimum, maximum, out_of_range
 
 
 def _peak_rss() -> int | None:
@@ -872,12 +852,19 @@ def run(
 
         current_stage = "distancing"
         if journal.reusable("distancing"):
+            # The matrix range is recorded as stage metrics rather than remeasured: the
+            # resume fingerprint pins the damicore version, so a receipt this branch accepts
+            # was written by this same build and always carries them.
+            metrics = journal.receipts["distancing"]["metrics"]
             distance = DistanceResult(
                 matrix_path=run_dir / "distance.npy",
                 labels_path=run_dir / "labels.json",
                 object_count=preview.object_count,
                 pair_count=preview.pair_count,
                 timing=_stage_seconds(journal, "distancing"),
+                ncd_min=float(metrics["ncd_min"]),
+                ncd_max=float(metrics["ncd_max"]),
+                ncd_out_of_range_count=int(metrics["ncd_out_of_range_count"]),
             )
         else:
             for stale in (run_dir / "tree.json", run_dir / "tree.nwk", run_dir / "tree-work.npy"):
@@ -912,7 +899,13 @@ def run(
                 "distancing",
                 started,
                 distance_outputs,
-                {"object_count": distance.object_count, "pair_count": distance.pair_count},
+                {
+                    "object_count": distance.object_count,
+                    "pair_count": distance.pair_count,
+                    "ncd_min": distance.ncd_min,
+                    "ncd_max": distance.ncd_max,
+                    "ncd_out_of_range_count": distance.ncd_out_of_range_count,
+                },
             )
 
         current_stage = "tree_building"
@@ -983,7 +976,6 @@ def run(
             num_clusters,
             clustered.community_count,
         )
-        ncd_min, ncd_max, out_of_range = _matrix_statistics(distance.matrix_path)
         if not keep_normalized:
             shutil.rmtree(normalization_dir)
 
@@ -1005,9 +997,9 @@ def run(
             matrix_bytes=preview.matrix_bytes,
             required_free_disk_bytes=preview.required_free_disk_bytes,
             peak_rss_bytes=_peak_rss(),
-            ncd_min=ncd_min,
-            ncd_max=ncd_max,
-            ncd_out_of_range_count=out_of_range,
+            ncd_min=distance.ncd_min,
+            ncd_max=distance.ncd_max,
+            ncd_out_of_range_count=distance.ncd_out_of_range_count,
             negative_branch_count=tree.negative_branch_count,
             modularity=clustered.modularity,
             timings_seconds=timings,
