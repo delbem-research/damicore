@@ -23,6 +23,14 @@ _PANDAS_REQUIRED = (
 
 
 class DistanceResult(BaseModel):
+    """What one distance stage produced, including the range of the matrix it wrote.
+
+    The three ``ncd_*`` fields are measured during the validation pass this stage already
+    performs over every cell, so reporting the range costs no additional traversal. They
+    describe the whole matrix, diagonal included, which is why ``ncd_min`` is ``0.0`` for
+    any matrix whose values are all non-negative.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     matrix_path: Path
@@ -30,6 +38,9 @@ class DistanceResult(BaseModel):
     object_count: int = Field(ge=0)
     pair_count: int = Field(ge=0)
     timing: float = Field(ge=0)
+    ncd_min: float = Field(default=0.0, allow_inf_nan=False)
+    ncd_max: float = Field(default=0.0, allow_inf_nan=False)
+    ncd_out_of_range_count: int = Field(default=0, ge=0)
 
 
 class DistanceMatrixView:

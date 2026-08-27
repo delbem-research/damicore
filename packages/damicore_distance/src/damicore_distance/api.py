@@ -208,20 +208,43 @@ def _typed_results(results: Iterator[WorkerResult]) -> Iterator[WorkerResult]:
         yield value
 
 
-def _validate_matrix(matrix: npt.NDArray[np.float64], block_size: int = 512) -> None:
+def _validated_matrix_statistics(
+    matrix: npt.NDArray[np.float64], block_size: int = 512
+) -> tuple[float, float, int]:
+    """Enforce the matrix invariants and return its range from the same traversal.
+
+    Validation already reads every cell to prove finiteness, so the minimum, the maximum,
+    and the count of values outside ``[0, 1]`` are accumulated here rather than by a second
+    pass elsewhere. NCD is unclamped, so a value outside the unit interval is reported and
+    never repaired; it is the caller's signal that the compressor behaved unusually.
+
+    The statistics cover the whole matrix, diagonal included.
+    """
     if matrix.dtype != np.float64 or matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
         raise DistanceError(
             "Distance matrix has invalid shape or dtype",
             code="distance_matrix_validation_error",
         )
     size = matrix.shape[0]
+    minimum = float("inf")
+    maximum = float("-inf")
+    out_of_range = 0
     for start in range(0, size, block_size):
         stop = min(start + block_size, size)
-        if not np.isfinite(matrix[start:stop]).all():
+        block = matrix[start:stop]
+        if not np.isfinite(block).all():
             raise DistanceError(
                 "Distance matrix contains NaN or infinity",
                 code="distance_matrix_validation_error",
             )
+        minimum = min(minimum, float(np.min(block)))
+        maximum = max(maximum, float(np.max(block)))
+        # np.count_nonzero's stub is partially unknown under strict mode; the block is typed.
+        out_of_range += int(
+            np.count_nonzero(  # pyright: ignore[reportUnknownMemberType]
+                np.logical_or(block < 0, block > 1)
+            )
+        )
         for row in range(start, stop):
             if float(matrix[row, row]) != 0.0:
                 raise DistanceError(
@@ -238,6 +261,7 @@ def _validate_matrix(matrix: npt.NDArray[np.float64], block_size: int = 512) -> 
                     "Distance matrix must be bitwise symmetric",
                     code="distance_matrix_validation_error",
                 )
+    return minimum, maximum, out_of_range
 
 
 def _runtime_fingerprint() -> dict[str, str]:
@@ -434,7 +458,9 @@ def compute_distance_matrix(
     ``checkpoints/distance-shards.json``; ``config.save_diagnostics`` adds a ``diagnostics/``
     directory. ``distance.npy`` is a float64 square memory map, validated as finite,
     zero-diagonal, and bitwise symmetric before this returns, and it is what
-    :func:`damicore_tree_builder.build_tree` consumes together with ``labels.json``.
+    :func:`damicore_tree_builder.build_tree` consumes together with ``labels.json``. That
+    validation pass also measures the matrix range, reported as ``ncd_min``, ``ncd_max``
+    and ``ncd_out_of_range_count`` on the result.
 
     Pairs are computed shard by shard straight into the memory map, and each finished shard
     is checkpointed with a digest, so an interrupted run resumes from the shards already
@@ -566,7 +592,7 @@ def compute_distance_matrix(
         if executor is not None:
             executor.shutdown(cancel_futures=True)
 
-    _validate_matrix(matrix)
+    ncd_min, ncd_max, out_of_range = _validated_matrix_statistics(matrix)
     labels_path = destination / "labels.json"
     labels_artifact = LabelsArtifact(
         schema_version=1,
@@ -584,4 +610,7 @@ def compute_distance_matrix(
         object_count=len(paths),
         pair_count=pair_count,
         timing=time.monotonic() - started,
+        ncd_min=ncd_min,
+        ncd_max=ncd_max,
+        ncd_out_of_range_count=out_of_range,
     )

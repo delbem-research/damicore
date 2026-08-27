@@ -37,6 +37,11 @@ def _sha256(path: Path, chunk_size: int = 4_194_304) -> str:
 
 
 def _atomic_json(path: Path, value: object) -> None:
+    # Every caller here creates the directory first, so this is alignment rather than a fix:
+    # the three packages carry a same-named writer with the same purpose, and one of them
+    # silently requiring a precondition the others supply is a trap for the next caller.
+    # ADR 0012 records why the three stay separate copies.
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = (
         json.dumps(
             value,
@@ -120,7 +125,6 @@ def scan_source(
             objects=corpus.objects,
             total_bytes=corpus.total_bytes,
             max_serialized_chunk_bytes=corpus.largest_file_bytes,
-            record_count=len(corpus.objects),
             manifest_input=FileCorpusInput(
                 kind="files",
                 root=str(corpus.root),
@@ -176,7 +180,6 @@ def scan_source(
         objects=table.objects,
         total_bytes=table.total_bytes,
         max_serialized_chunk_bytes=table.max_serialized_chunk_bytes,
-        record_count=table.row_count,
         manifest_input=dataset_input,
         object_encoding="json-lines/1",
         source_paths=(path,),

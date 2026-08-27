@@ -23,7 +23,6 @@ class ScanResult:
     objects: tuple[ObjectDescriptor, ...]
     total_bytes: int
     max_serialized_chunk_bytes: int
-    record_count: int
     manifest_input: NormalizationInput
     object_encoding: ObjectEncoding
     source_paths: tuple[Path, ...]

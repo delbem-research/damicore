@@ -284,7 +284,7 @@ INVALID_MATRICES = [
 @pytest.mark.parametrize(("matrix", "discriminator"), INVALID_MATRICES)
 def test_an_invalid_matrix_is_rejected(matrix: np.ndarray, discriminator: str) -> None:
     with pytest.raises(DistanceError, match=discriminator) as raised:
-        distance_api._validate_matrix(matrix)
+        distance_api._validated_matrix_statistics(matrix)
     assert raised.value.code == "distance_matrix_validation_error"
 
 

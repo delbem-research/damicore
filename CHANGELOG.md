@@ -5,6 +5,20 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## Unreleased
+
+### Changed
+
+- A run no longer writes `checkpoints/pipeline.json`. Stage receipts live in
+  `manifest.json` under `stages`, which already carried them, so resume reads one file
+  instead of two copies of the same state. A completed manifest no longer declares that
+  artifact. Runs produced by 0.2.0 still load, and an incomplete one still resumes,
+  because the receipts it resumes from were always in the manifest too.
+- `DistanceResult` reports `ncd_min`, `ncd_max` and `ncd_out_of_range_count`. They are
+  measured during the matrix validation pass the distance stage already performs, so the
+  orchestrator no longer walks the matrix a second time to fill `report.json`. The
+  reported values are unchanged.
+
 ## 0.2.0
 
 ### Breaking

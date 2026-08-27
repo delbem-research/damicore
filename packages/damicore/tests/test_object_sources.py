@@ -8,13 +8,16 @@ source is refused instead of quietly dropped.
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
 import pytest
+from damicore_normalizer import DelimitedSource, FileCorpusSource, SpreadsheetSource
 from openpyxl import Workbook
 
 from damicore import ConfigurationError, ExecutionConfig, estimate, run
+from damicore.api import _object_source
 from damicore.cli import main
 
 pytestmark = pytest.mark.contract
@@ -407,3 +410,26 @@ def test_the_cli_reports_a_rejected_setting_as_a_configuration_error(
     corpus = _corpus(tmp_path / "corpus")
     assert main(["estimate", str(corpus), "--source", "files", "--delimiter", ";"]) == 2
     assert json.loads(capsys.readouterr().err)["code"] == "configuration_error"
+
+
+def test_every_source_setting_is_reachable_and_threaded() -> None:
+    """The flat public signature is an adapter onto the discriminated union, and an adapter
+    can lose a setting in two ways that no other check would notice.
+
+    A field added to a source model with no matching keyword is a capability that exists in
+    the stage package and silently never reaches a `damicore` caller. A keyword added to
+    `run` or `estimate` but not threaded into `_object_source` is worse: the caller passes it,
+    nothing rejects it, and it is silently ignored -- which is exactly what the 0.2 contract
+    forbids. Both are invisible because each surface is individually consistent.
+
+    Asserted against the models rather than a list, so the union stays the one declaration.
+    """
+    fields = set[str]()
+    for model in (DelimitedSource, SpreadsheetSource, FileCorpusSource):
+        fields |= set(model.model_fields) - {"kind"}
+    # Guards the discovery: an empty set would make every assertion below vacuous.
+    assert len(fields) >= 6, fields
+
+    for surface in (run, estimate, _object_source):
+        parameters = set(inspect.signature(surface).parameters)
+        assert not fields - parameters, (surface.__name__, sorted(fields - parameters))

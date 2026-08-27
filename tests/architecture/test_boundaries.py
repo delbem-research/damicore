@@ -448,10 +448,10 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
     """`damicore` requires the four stage distributions within its own release, so it must
     reach an index only once they are on it.
 
-    Publishing all five as one matrix left them unordered, and the 0.1.0 release put
-    `damicore` on PyPI eleven minutes before `damicore-tree-builder`; for those eleven
-    minutes `pip install damicore` could not resolve. Merging the two publish jobs back
-    together would restore that window silently, because no other check reads the workflow.
+    Publishing all five as one matrix leaves them unordered and opens a window in which the
+    aggregate is on the index and a stage it pins is not; `docs/releasing.md` records the
+    0.1.0 release where that happened. Merging the two publish jobs back together would
+    restore the window silently, because no other check reads the workflow.
 
     Parsed by hand rather than with a YAML library: PyYAML reaches this environment only as
     a transitive dependency of pre-commit, and depending on one of those undeclared is the
@@ -474,237 +474,6 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
     # The stages must still be the matrix leg, or "after the stages" would mean one of them.
     assert "matrix:" in blocks["publish-pypi-stages"]
     assert "matrix:" not in blocks["publish-pypi"]
-
-
-# Written in halves so this guard is not itself the last file naming the retired document.
-RETIRED_SPECIFICATION = "DAMICORE_IMPLEMENTATION" + "_SPECIFICATION"
-# Either noun followed by a number, in any case, because the retired document was cited
-# both ways and often without the two words adjacent -- a citation that wraps across lines
-# puts arbitrary text between them. Anchoring on the number instead of on a fixed pair of
-# words is what makes the guard total. No example is spelled out here: this file is scanned
-# like every other, so a literal citation in this comment would match itself.
-SECTION_CITATION = re.compile(r"\b(sections?|specifications?)\s+\d+(\.\d+)*\b", re.IGNORECASE)
-# Published standards number their own sections, and this is a CSV project, so a line citing
-# RFC 4180 or a PEP is expected prose rather than a dangling pointer. Judged per line, so an
-# external citation does not excuse the rest of the file.
-EXTERNAL_STANDARD = re.compile(r"\b(RFC|PEP|ISO|IEEE)\b|Apache License|License, Version")
-SCANNED_SUFFIXES = {
-    ".cfg",
-    ".ipynb",
-    ".json",
-    ".md",
-    ".mk",
-    ".py",
-    ".pyi",
-    ".toml",
-    ".yaml",
-    ".yml",
-}
-# Suffixless files worth scanning. Deliberately not every suffixless file: LICENSE numbers
-# its own clauses and refers to them by number, which is the licence citing itself, and
-# .gitignore carries unrelated patterns.
-SCANNED_NAMES = {"Makefile"}
-# `.github` is the one dot-directory that holds sources; the rest are caches and virtualenvs.
-SCANNED_DOT_DIRECTORY = ".github"
-
-
-def test_no_repository_file_cites_the_retired_implementation_specification() -> None:
-    """The implementation specification was retired, so every rule has to be stated where it
-    is enforced rather than cited by section number into a document that no longer exists.
-
-    Source comments ship inside the published wheels, which makes a dangling citation a
-    user-visible defect rather than an internal one.
-    """
-    surfaces = [
-        path
-        for path in ROOT.rglob("*")
-        if (path.suffix in SCANNED_SUFFIXES or path.name in SCANNED_NAMES)
-        # Directories only. Applying this to the filename too would skip every dotfile,
-        # including `.pre-commit-config.yaml`, which cited the retired document.
-        and not any(
-            part.endswith(".egg-info")
-            or part in {"dist", "build", "__pycache__", ".agents"}
-            or (part.startswith(".") and part != SCANNED_DOT_DIRECTORY)
-            for part in path.relative_to(ROOT).parts[:-1]
-        )
-    ]
-    # Guards the discovery. Named representatives rather than a count: one file per region
-    # the scan has to reach, including the two that a filename-level dot filter and a
-    # suffix-only filter each used to drop. A count would rot, since nobody raises it.
-    found = {path.relative_to(ROOT).as_posix() for path in surfaces}
-    for representative in (
-        "Makefile",
-        ".pre-commit-config.yaml",
-        ".github/workflows/release.yml",
-        "packages/damicore/src/damicore/api.py",
-        "packages/package.mk",
-        "stubs/igraph/__init__.pyi",
-        "notebooks/colab_quickstart.ipynb",
-        "docs/releasing.md",
-    ):
-        assert representative in found, representative
-
-    citing: list[str] = []
-    for path in surfaces:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if RETIRED_SPECIFICATION in text:
-            citing.append(str(path.relative_to(ROOT)))
-            continue
-        for number, line in enumerate(text.splitlines(), 1):
-            if SECTION_CITATION.search(line) and not EXTERNAL_STANDARD.search(line):
-                citing.append(f"{path.relative_to(ROOT)}:{number}")
-    assert not citing, citing
-
-
-def test_every_test_module_declares_a_registered_marker() -> None:
-    """AGENTS.md requires a registered marker per suite; prose alone lets new files forget.
-
-    The registered set is read from the root configuration rather than restated, so adding a
-    marker there is the only edit needed to make it usable.
-
-    Registered in **both** scopes a suite runs in. Pytest resolves its configuration from the
-    rootdir of the invocation and inherits nothing from a parent, so a member's own
-    `[tool.pytest.ini_options]` is the whole registry for `make -C packages/<name> test` --
-    the command AGENTS.md sends a change to first.
-
-    What registration buys is not selection: `-m contract` matches a mark whether or not it
-    is declared. It is the ability to tell a marker from a typo. Only a registered set makes
-    `pytest.mark.contarct` reportable -- as a warning, and as a collection error under
-    `--strict-markers` -- so a member missing a marker cannot distinguish the two in the one
-    scope where its own tests are usually run.
-    """
-    configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    pytest_options = configuration["tool"]["pytest"]["ini_options"]
-    declared_markers = pytest_options["markers"]
-    assert isinstance(declared_markers, list)
-    registered = {
-        str(entry).split(":", 1)[0].strip() for entry in cast(list[object], declared_markers)
-    }
-
-    members = sorted(
-        directory
-        for directory in (ROOT / "packages").iterdir()
-        if (directory / "pyproject.toml").is_file()
-    )
-    assert len(members) >= len(PUBLIC), members
-    for member in members:
-        options = _tool(member / "pyproject.toml")["pytest"]
-        assert isinstance(options, dict)
-        member_markers = cast(dict[str, object], options)["ini_options"]
-        assert isinstance(member_markers, dict)
-        assert cast(dict[str, object], member_markers)["markers"] == declared_markers, member.name
-
-    modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
-        ROOT.glob("tests/*/test_*.py")
-    )
-    # Guards the discovery: an empty glob would make every assertion below vacuous.
-    assert len(modules) >= 11, [str(path) for path in modules]
-
-    unmarked: list[str] = []
-    unregistered: list[str] = []
-    for path in modules:
-        found = re.search(
-            r"^pytestmark\s*=\s*pytest\.mark\.(\w+)",
-            path.read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
-        if found is None:
-            unmarked.append(str(path.relative_to(ROOT)))
-        elif found.group(1) not in registered:
-            unregistered.append(f"{path.relative_to(ROOT)}:{found.group(1)}")
-    assert not unmarked, unmarked
-    assert not unregistered, unregistered
-
-
-def test_marker_registration_is_enforced_rather_than_advisory() -> None:
-    """The registry above only means something if using a marker outside it fails.
-
-    Without `--strict-markers`, `pytest.mark.contarct` marks nothing, reports a warning that
-    scrolls past in a green run, and leaves the test silently unselectable by the name its
-    author meant. The flag turns that into a collection error, which is what makes the
-    registry a contract instead of a list. Required in every configuration a suite is run
-    from, because pytest reads exactly one of them per invocation.
-    """
-    configurations = [ROOT / "pyproject.toml"] + [
-        directory / "pyproject.toml"
-        for directory in sorted((ROOT / "packages").iterdir())
-        if (directory / "pyproject.toml").is_file()
-    ]
-    assert len(configurations) > len(PUBLIC), configurations
-    for path in configurations:
-        options = cast(dict[str, object], _tool(path)["pytest"])["ini_options"]
-        assert isinstance(options, dict)
-        addopts = str(cast(dict[str, object], options).get("addopts", ""))
-        assert "--strict-markers" in addopts, path.relative_to(ROOT).as_posix()
-
-
-class _ResolvedThenTested(ast.NodeVisitor):
-    """Find names bound from a ``.resolve()`` call and later asked whether they are symlinks.
-
-    ``Path.resolve()`` returns the path with every link already followed, so the result is
-    never itself a symlink and such a test can never be true. The pattern is not a style
-    preference: it reads as a guard, which is worse than having none, and six of them
-    accumulated across three packages before anything looked. Containment survives without it
-    -- a link out of a directory resolves outside and fails ``is_relative_to`` -- so refusing
-    a link genuinely requires testing the path *before* resolving it, which is what
-    ``DamicoreResult.save`` does and what this check leaves alone.
-    """
-
-    def __init__(self) -> None:
-        self.resolved: set[str] = set()
-        self.hits: list[tuple[str, int]] = []
-
-    def visit_Assign(self, node: ast.Assign) -> None:
-        value = node.value
-        if (
-            isinstance(value, ast.Call)
-            and isinstance(value.func, ast.Attribute)
-            and value.func.attr == "resolve"
-        ):
-            self.resolved.update(
-                target.id for target in node.targets if isinstance(target, ast.Name)
-            )
-        self.generic_visit(node)
-
-    def visit_Call(self, node: ast.Call) -> None:
-        function = node.func
-        if (
-            isinstance(function, ast.Attribute)
-            and function.attr == "is_symlink"
-            and isinstance(function.value, ast.Name)
-            and function.value.id in self.resolved
-        ):
-            self.hits.append((function.value.id, node.lineno))
-        self.generic_visit(node)
-
-
-def test_no_symlink_check_sits_behind_a_resolve_call() -> None:
-    """A guard that cannot fire is worse than no guard, so nothing may grow a seventh.
-
-    Coverage cannot catch this: the clause lives inside a compound condition that is
-    evaluated on every call, so the line counts as covered while that operand stays false
-    forever. Only reading the code -- or this -- can tell.
-    """
-    modules = [
-        path
-        for directory in sorted((ROOT / "packages").iterdir())
-        if (directory / "src").is_dir()
-        for path in (directory / "src").rglob("*.py")
-        if "__pycache__" not in path.parts
-    ]
-    # Guards the discovery: an empty scan would make the assertion below vacuous.
-    assert len(modules) >= len(PUBLIC), len(modules)
-
-    dead: list[str] = []
-    for module in modules:
-        visitor = _ResolvedThenTested()
-        visitor.visit(ast.parse(module.read_text(encoding="utf-8"), filename=str(module)))
-        dead.extend(
-            f"{module.relative_to(ROOT)}:{line} tests {name}.is_symlink(), "
-            f"but {name} came from a resolve() call"
-            for name, line in visitor.hits
-        )
-    assert not dead, dead
 
 
 def test_type_check_configuration_covers_every_workspace_package() -> None:
@@ -739,78 +508,187 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
                 assert relative in entries, relative
 
 
-def test_the_repository_root_declares_the_ruff_settings_it_lints_everything_else_by() -> None:
-    """The workspace's Ruff settings must reach the code that lives outside `packages/`.
+def test_pytest_is_configured_once_for_the_whole_workspace() -> None:
+    """The marker registry and the pytest flags exist at the root and nowhere else.
 
-    Ruff resolves its configuration per file, by walking up from that file to the nearest
-    `pyproject.toml` that declares `[tool.ruff]`. The six package sections therefore govern
-    `packages/<member>/**` and nothing else: with no section at the root, `tests/`,
-    `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults, so `make check`
-    lints them under a rule set and a line length the repository never chose -- passing on a
-    line it would reject inside a package, and never sorting their imports at all.
-
-    Asserted equal to a member's section rather than restated here, because Ruff requires the
-    section at each root it resolves and this test is what keeps those copies one rule. Which
-    member is immaterial: the test above already holds all six equal to each other.
+    Pytest resolves one configuration per invocation, from the rootdir, and inherits no ini
+    options from a parent. A section in a member therefore used to be the whole registry for
+    `make -C packages/<name> test`, which is why six copies existed and why a test had to
+    hold them equal. `packages/package.mk` now runs pytest from the workspace root against an
+    explicit package path, so the root section is the only one, and a member reintroducing
+    one would silently take that member's suite off the shared registry again.
     """
     root = _tool(ROOT / "pyproject.toml")
-    assert "ruff" in root, "the repository root declares no [tool.ruff]"
-    member = _tool(ROOT / "packages" / "damicore" / "pyproject.toml")
-    assert root["ruff"] == member["ruff"], (root["ruff"], member["ruff"])
+    assert "pytest" in root, "the repository root declares no [tool.pytest.ini_options]"
+
+    members = sorted(
+        directory for directory in (ROOT / "packages").iterdir() if (directory / "src").is_dir()
+    )
+    # Guards the discovery: an empty scan would make the loop below vacuous.
+    assert len(members) > len(PUBLIC), members
+    for member in members:
+        assert "pytest" not in _tool(member / "pyproject.toml"), (
+            f"{member.name} redeclares [tool.pytest.ini_options]"
+        )
 
 
-def test_package_tool_configuration_does_not_drift() -> None:
-    """Every workspace member configures Ruff and pytest identically, bar the coverage target.
+def test_package_ruff_and_sdist_configuration_does_not_drift() -> None:
+    """Two conventions still live in six copies, for different reasons, and neither is
+    compared anywhere else.
 
-    `packages/package.mk` exists because "Six copies had already drifted into two variants
-    differing only by stray indentation". The same six copies live on in `pyproject.toml`,
-    where nothing compares them: a rule added to one package's `select`, a line length raised
-    in one `[tool.ruff]`, or a floor lowered in one `addopts` stays invisible until someone
-    diffs the files by hand.
+    Ruff resolves configuration per file, and its isort infers first-party packages from
+    `src` **relative to the directory holding that configuration**. No section declares `src`
+    explicitly; the location is the difference, which is why a member's copy is what sorts a
+    sibling distribution into the third-party block rather than beside that member's own
+    modules. Consolidating them to the root reorders the imports of every package -- measured,
+    sixteen files. The copies must still agree on the rules themselves, which is all this
+    checks.
 
-    The coverage target is the one value that must differ, so it is normalised away rather
-    than restated. A literal template here would make this test a seventh copy of the flag
-    list it exists to protect, which is the defect, not the fix.
+    The sdist exclude list is the second: a member that quietly ships its `tests/` or
+    `Makefile` again would surface only to a user unpacking the published sdist, which is the
+    one artifact no other check here unpacks.
     """
     members = sorted(
         directory.name
         for directory in (ROOT / "packages").iterdir()
         if (directory / "pyproject.toml").is_file()
     )
-    # Guards the discovery: an empty or truncated scan would make every assertion below
-    # vacuous. Derived from PUBLIC rather than a literal count, so adding a package is one
-    # edit, not two.
     assert set(members) >= PUBLIC, members
 
-    ruff: dict[str, object] = {}
-    pytest_options: dict[str, dict[str, object]] = {}
-    hatch: dict[str, object] = {}
-    for member in members:
-        with (ROOT / "packages" / member / "pyproject.toml").open("rb") as stream:
-            tool = tomllib.load(stream)["tool"]
-        options: dict[str, object] = dict(tool["pytest"]["ini_options"])
-        addopts = str(options["addopts"])
-        # Checked before normalising: otherwise a package measuring another package's
-        # coverage would be erased by the substitution instead of caught by it.
-        assert re.findall(r"--cov=(\S+)", addopts) == [member], (member, addopts)
-        options["addopts"] = addopts.replace(f"--cov={member}", "--cov=<member>")
-        ruff[member] = tool["ruff"]
-        pytest_options[member] = options
-        # The sdist exclude list is the third six-copy convention; a member that quietly
-        # ships its tests or Makefile again would otherwise surface only to a user
-        # unpacking the published sdist.
-        hatch[member] = tool["hatch"]
+    tools = {member: _tool(ROOT / "packages" / member / "pyproject.toml") for member in members}
+    # The root's rules must reach the code outside `packages/` too: with no section there,
+    # `tests/`, `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults.
+    root_ruff = _tool(ROOT / "pyproject.toml").get("ruff")
+    assert root_ruff is not None, "the repository root declares no [tool.ruff]"
 
     reference = members[0]
-    for member in members[1:]:
-        assert ruff[member] == ruff[reference], (member, ruff[member], ruff[reference])
-        assert pytest_options[member] == pytest_options[reference], (
-            member,
-            pytest_options[member],
-            pytest_options[reference],
+    for member in members:
+        assert tools[member]["ruff"] == tools[reference]["ruff"], member
+        assert tools[member]["hatch"] == tools[reference]["hatch"], member
+    # Every copy equals the root's, so the rule set is one decision made in seven places for
+    # a resolution reason rather than seven decisions.
+    assert tools[reference]["ruff"] == root_ruff, (tools[reference]["ruff"], root_ruff)
+
+
+# The three checks below close rules AGENTS.md states and nothing else enforced. They are
+# here rather than in a file of their own because this module already owns the repository
+# conventions that are mechanically decidable, and a second file would add its own marker,
+# imports and ROOT for three functions.
+
+# AGENTS.md forbids these as module or package names when a domain name exists. Checked as
+# whole stems rather than substrings, so `file_corpus` and `tree_graph` are unaffected.
+GENERIC_BUCKET_NAMES = frozenset(
+    {"utils", "helpers", "common", "core", "services", "internal", "misc", "util", "shared"}
+)
+
+
+def _source_modules() -> list[Path]:
+    return [
+        path
+        for directory in sorted((ROOT / "packages").iterdir())
+        if (directory / "src").is_dir()
+        for path in (directory / "src").rglob("*.py")
+        if "__pycache__" not in path.parts
+    ]
+
+
+def test_no_module_is_named_for_a_generic_bucket() -> None:
+    """A bucket name tells a reader nothing about what the module owns, and it attracts
+    unrelated code because anything can plausibly go in it.
+
+    Directories are checked as well as files: a `utils/` package is the same defect one level
+    up, and it is the shape this repository would reach for first, since every package is
+    flat today.
+    """
+    modules = _source_modules()
+    # Guards the discovery: an empty scan would make the assertion below vacuous.
+    assert len(modules) > len(PUBLIC), len(modules)
+
+    offenders = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in modules
+        if path.stem in GENERIC_BUCKET_NAMES
+        or GENERIC_BUCKET_NAMES & set(path.relative_to(ROOT).parts[:-1])
+    )
+    assert not offenders, offenders
+
+
+def test_package_inits_only_re_export() -> None:
+    """`__init__.py` runs on import of anything inside the package, so work placed there is
+    work no consumer asked for and cannot avoid.
+
+    A passive one holds imports, dunder assignments and a docstring. Anything else -- a call,
+    a conditional import, a function or class definition, a try/except fallback -- is either
+    a side effect at import time or logic that belongs in a named module. `damicore` assigns
+    `__version__` from its own API, which is a dunder re-export and stays allowed.
+    """
+    inits = sorted((ROOT / "packages").glob("*/src/*/__init__.py"))
+    # Guards the discovery: one per workspace member, so a truncated glob is visible.
+    assert len(inits) > len(PUBLIC), [path.name for path in inits]
+
+    offenders: list[str] = []
+    for path in inits:
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            if (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                continue
+            targets = (
+                node.targets
+                if isinstance(node, ast.Assign)
+                else [node.target]
+                if isinstance(node, ast.AnnAssign)
+                else []
+            )
+            if targets and all(
+                isinstance(target, ast.Name)
+                and target.id.startswith("__")
+                and target.id.endswith("__")
+                for target in targets
+            ):
+                continue
+            offenders.append(
+                f"{path.relative_to(ROOT)}:{node.lineno} {type(node).__name__} is not a "
+                "re-export, a dunder assignment or the docstring"
+            )
+    assert not offenders, offenders
+
+
+def test_every_test_module_declares_a_registered_marker() -> None:
+    """`--strict-markers` rejects a marker outside the registry; it does not require one.
+
+    A module with no `pytestmark` at all is collected and passes, so it silently belongs to no
+    suite and `-m unit`, `-m e2e` and the release lanes that select by marker all skip it.
+    Only reading the module -- or this -- can tell. The registry is read from the root
+    configuration rather than restated, so adding a marker there is the one edit needed.
+    """
+    options = cast(dict[str, object], _tool(ROOT / "pyproject.toml")["pytest"])["ini_options"]
+    assert isinstance(options, dict)
+    declared = cast(dict[str, object], options)["markers"]
+    assert isinstance(declared, list)
+    registered = {str(entry).split(":", 1)[0].strip() for entry in cast(list[object], declared)}
+
+    modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
+        ROOT.glob("tests/*/test_*.py")
+    )
+    # Guards the discovery: an empty glob would make every assertion below vacuous.
+    assert len(modules) >= 11, [str(path) for path in modules]
+
+    offenders: list[str] = []
+    for path in modules:
+        found = re.search(
+            r"^pytestmark\s*=\s*pytest\.mark\.(\w+)",
+            path.read_text(encoding="utf-8"),
+            re.MULTILINE,
         )
-        assert hatch[member] == hatch[reference], (
-            member,
-            hatch[member],
-            hatch[reference],
-        )
+        if found is None:
+            offenders.append(f"{path.relative_to(ROOT)}: no pytestmark")
+        elif found.group(1) not in registered:
+            offenders.append(
+                f"{path.relative_to(ROOT)}: marker {found.group(1)!r} is not registered"
+            )
+    assert not offenders, offenders

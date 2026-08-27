@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
 from damicore_clusterizer import (
     ClusterConfig,
@@ -138,14 +137,18 @@ def _validated_compressor(compressor: str) -> Literal["zlib", "gzip"]:
     raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
 
 
-# Every argument that belongs to a given source, named once. An argument that does not apply
-# is rejected rather than ignored: silently dropping `delimiter` for a workbook would let a
-# caller believe a setting took effect, and the artifacts would look valid while answering a
-# question nobody asked.
+# Which arguments belong to which source, derived from the models that define them rather
+# than restated. The public signature is flat because a notebook is the primary caller, so
+# something has to map those arguments back onto the discriminated union; reading the union
+# for the answer keeps one declaration instead of two that can disagree.
+#
+# An argument that does not apply is rejected rather than ignored: silently dropping
+# `delimiter` for a workbook would let a caller believe a setting took effect, and the
+# artifacts would look valid while answering a question nobody asked.
 _SOURCE_ARGUMENTS: dict[str, frozenset[str]] = {
-    "delimited": frozenset({"split", "delimiter", "encoding"}),
-    "xlsx": frozenset({"split", "sheet"}),
-    "files": frozenset({"recursive", "include_hidden"}),
+    "delimited": frozenset(DelimitedSource.model_fields) - {"kind"},
+    "xlsx": frozenset(SpreadsheetSource.model_fields) - {"kind"},
+    "files": frozenset(FileCorpusSource.model_fields) - {"kind"},
 }
 
 
@@ -392,25 +395,6 @@ def _verify_cross_artifacts(
     if not all(checks.values()):
         raise ArtifactValidationError("Cross-artifact verification failed", checks=checks)
     return checks
-
-
-def _matrix_statistics(path: Path, block_size: int = 512) -> tuple[float, float, int]:
-    # np.load is untyped; bind the result once so the block arithmetic below is checked.
-    matrix: npt.NDArray[np.float64] = np.load(path, mmap_mode="r", allow_pickle=False)
-    minimum = float("inf")
-    maximum = float("-inf")
-    out_of_range = 0
-    for start in range(0, matrix.shape[0], block_size):
-        stop = min(start + block_size, matrix.shape[0])
-        block = matrix[start:stop]
-        minimum = min(minimum, float(np.min(block)))
-        maximum = max(maximum, float(np.max(block)))
-        # np.count_nonzero's stub is partially unknown under strict mode; the block is typed.
-        outside = np.count_nonzero(  # pyright: ignore[reportUnknownMemberType]
-            np.logical_or(block < 0, block > 1)
-        )
-        out_of_range += int(outside)
-    return minimum, maximum, out_of_range
 
 
 def _peak_rss() -> int | None:
@@ -661,29 +645,26 @@ def run(
     DatasetFormatError
         The dataset violates the input contract.
     ResourceLimitError
-        Preflight projected the run outside ``execution.limits``. ``context["estimate"]``
-        holds the ``ResourceEstimate`` behind the decision.
+        Preflight projected the run outside ``execution.limits``.
     OutputDirectoryConflictError
         ``output_dir`` is not a directory, holds no readable DAMICORE manifest, belongs to a
         different input or configuration, or holds a compatible run that ``reuse_completed``
         or ``resume`` forbids continuing.
     CheckpointMismatchError
-        An incomplete run in ``output_dir`` was produced under a different runtime
-        fingerprint, or a checkpoint disagrees with the artifacts beside it.
+        An incomplete run in ``output_dir`` exists but cannot be trusted to resume.
     CompressionError
         The compressor rejected an object.
     DistanceComputationError
         The NCD stage failed, including a worker pool that died.
     DistanceMatrixValidationError
-        The NCD stage's own check found the computed matrix not finite, zero-diagonal, and
-        symmetric.
+        The NCD stage's own check rejected the matrix it computed.
     NormalizationError, TreeBuildError, TreeFormatError, ClusterizationError
         The corresponding stage failed with no more specific cause. ``TreeBuildError`` also
         covers the tree stage rejecting the matrix it was given, which does not surface as
         ``DistanceMatrixValidationError``.
     ArtifactValidationError
-        An artifact failed its schema, its recorded hash or size, path containment, or the
-        cross-artifact verification.
+        An artifact failed one of its checks, including the cross-artifact verification a run
+        must pass before it is marked ``completed``.
     DamicoreError
         Any other failure inside the pipeline, named by the underlying exception type.
     KeyboardInterrupt
@@ -872,12 +853,19 @@ def run(
 
         current_stage = "distancing"
         if journal.reusable("distancing"):
+            # The matrix range is recorded as stage metrics rather than remeasured: the
+            # resume fingerprint pins the damicore version, so a receipt this branch accepts
+            # was written by this same build and always carries them.
+            metrics = journal.receipts["distancing"]["metrics"]
             distance = DistanceResult(
                 matrix_path=run_dir / "distance.npy",
                 labels_path=run_dir / "labels.json",
                 object_count=preview.object_count,
                 pair_count=preview.pair_count,
                 timing=_stage_seconds(journal, "distancing"),
+                ncd_min=float(metrics["ncd_min"]),
+                ncd_max=float(metrics["ncd_max"]),
+                ncd_out_of_range_count=int(metrics["ncd_out_of_range_count"]),
             )
         else:
             for stale in (run_dir / "tree.json", run_dir / "tree.nwk", run_dir / "tree-work.npy"):
@@ -912,7 +900,13 @@ def run(
                 "distancing",
                 started,
                 distance_outputs,
-                {"object_count": distance.object_count, "pair_count": distance.pair_count},
+                {
+                    "object_count": distance.object_count,
+                    "pair_count": distance.pair_count,
+                    "ncd_min": distance.ncd_min,
+                    "ncd_max": distance.ncd_max,
+                    "ncd_out_of_range_count": distance.ncd_out_of_range_count,
+                },
             )
 
         current_stage = "tree_building"
@@ -983,7 +977,6 @@ def run(
             num_clusters,
             clustered.community_count,
         )
-        ncd_min, ncd_max, out_of_range = _matrix_statistics(distance.matrix_path)
         if not keep_normalized:
             shutil.rmtree(normalization_dir)
 
@@ -1005,9 +998,9 @@ def run(
             matrix_bytes=preview.matrix_bytes,
             required_free_disk_bytes=preview.required_free_disk_bytes,
             peak_rss_bytes=_peak_rss(),
-            ncd_min=ncd_min,
-            ncd_max=ncd_max,
-            ncd_out_of_range_count=out_of_range,
+            ncd_min=distance.ncd_min,
+            ncd_max=distance.ncd_max,
+            ncd_out_of_range_count=distance.ncd_out_of_range_count,
             negative_branch_count=tree.negative_branch_count,
             modularity=clustered.modularity,
             timings_seconds=timings,

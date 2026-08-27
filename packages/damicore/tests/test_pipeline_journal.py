@@ -32,47 +32,6 @@ def test_journal_receipts_validate_outputs(tmp_path: Path) -> None:
         journal.reusable("normalizing")
 
 
-def test_journal_rejects_malformed_checkpoint(tmp_path: Path) -> None:
-    run_dir, manifest = _manifest(tmp_path)
-    checkpoint = run_dir / "checkpoints/pipeline.json"
-    checkpoint.parent.mkdir()
-    checkpoint.write_text("not json", encoding="utf-8")
-    with pytest.raises(CheckpointMismatchError):
-        PipelineJournal(run_dir, manifest)
-
-
-def test_journal_rejects_checkpoint_schema_extensions(tmp_path: Path) -> None:
-    run_dir, manifest = _manifest(tmp_path)
-    journal = PipelineJournal(run_dir, manifest)
-    checkpoint = json.loads(journal.checkpoint_path.read_text(encoding="utf-8"))
-    checkpoint["unexpected"] = True
-    journal.checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
-    with pytest.raises(CheckpointMismatchError):
-        PipelineJournal(run_dir, manifest)
-
-
-def test_a_checkpoint_from_a_different_runtime_blocks_resume(tmp_path: Path) -> None:
-    """A resume reuses artifacts produced by another interpreter or library build only if the
-    fingerprint still matches; otherwise the bytes on disk are not the bytes this run would
-    have produced."""
-    run_dir, manifest = _manifest(tmp_path)
-    PipelineJournal(run_dir, manifest)
-    checkpoint_path = run_dir / "checkpoints" / "pipeline.json"
-    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-    payload["runtime"]["python"] = "0.0.0-not-this-interpreter"
-    checkpoint_path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(CheckpointMismatchError, match="Runtime fingerprint differs"):
-        PipelineJournal(run_dir, manifest)
-
-
-def test_an_unreadable_checkpoint_is_rejected(tmp_path: Path) -> None:
-    run_dir, manifest = _manifest(tmp_path)
-    PipelineJournal(run_dir, manifest)
-    (run_dir / "checkpoints" / "pipeline.json").write_text("not json", encoding="utf-8")
-    with pytest.raises(CheckpointMismatchError, match="unreadable"):
-        PipelineJournal(run_dir, manifest)
-
-
 # Each row is one reason a completed receipt must not be reused. They are separate because a
 # reuse decision that silently says "yes" skips a whole stage.
 def test_a_receipt_from_a_changed_runtime_is_not_reusable(tmp_path: Path) -> None:
