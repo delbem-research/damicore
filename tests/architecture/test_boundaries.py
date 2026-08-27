@@ -536,11 +536,13 @@ def test_package_ruff_and_sdist_configuration_does_not_drift() -> None:
     """Two conventions still live in six copies, for different reasons, and neither is
     compared anywhere else.
 
-    Ruff resolves configuration per file and infers first-party packages from the `src` of
-    the nearest one, so a member's section is what sorts a sibling distribution into the
-    third-party block rather than beside that member's own modules. Consolidating it to the
-    root would silently reorder the imports of every package. The sections must still agree
-    on the rules themselves.
+    Ruff resolves configuration per file, and its isort infers first-party packages from
+    `src` **relative to the directory holding that configuration**. No section declares `src`
+    explicitly; the location is the difference, which is why a member's copy is what sorts a
+    sibling distribution into the third-party block rather than beside that member's own
+    modules. Consolidating them to the root reorders the imports of every package -- measured,
+    sixteen files. The copies must still agree on the rules themselves, which is all this
+    checks.
 
     The sdist exclude list is the second: a member that quietly ships its `tests/` or
     `Makefile` again would surface only to a user unpacking the published sdist, which is the
@@ -563,9 +565,130 @@ def test_package_ruff_and_sdist_configuration_does_not_drift() -> None:
     for member in members:
         assert tools[member]["ruff"] == tools[reference]["ruff"], member
         assert tools[member]["hatch"] == tools[reference]["hatch"], member
-    # `src` is the one key that must differ, since it is what makes the inference per package.
-    assert {key: value for key, value in tools[reference]["ruff"].items() if key != "src"} == {  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
-        key: value
-        for key, value in root_ruff.items()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
-        if key != "src"
-    }
+    # Every copy equals the root's, so the rule set is one decision made in seven places for
+    # a resolution reason rather than seven decisions.
+    assert tools[reference]["ruff"] == root_ruff, (tools[reference]["ruff"], root_ruff)
+
+
+# The three checks below close rules AGENTS.md states and nothing else enforced. They are
+# here rather than in a file of their own because this module already owns the repository
+# conventions that are mechanically decidable, and a second file would add its own marker,
+# imports and ROOT for three functions.
+
+# AGENTS.md forbids these as module or package names when a domain name exists. Checked as
+# whole stems rather than substrings, so `file_corpus` and `tree_graph` are unaffected.
+GENERIC_BUCKET_NAMES = frozenset(
+    {"utils", "helpers", "common", "core", "services", "internal", "misc", "util", "shared"}
+)
+
+
+def _source_modules() -> list[Path]:
+    return [
+        path
+        for directory in sorted((ROOT / "packages").iterdir())
+        if (directory / "src").is_dir()
+        for path in (directory / "src").rglob("*.py")
+        if "__pycache__" not in path.parts
+    ]
+
+
+def test_no_module_is_named_for_a_generic_bucket() -> None:
+    """A bucket name tells a reader nothing about what the module owns, and it attracts
+    unrelated code because anything can plausibly go in it.
+
+    Directories are checked as well as files: a `utils/` package is the same defect one level
+    up, and it is the shape this repository would reach for first, since every package is
+    flat today.
+    """
+    modules = _source_modules()
+    # Guards the discovery: an empty scan would make the assertion below vacuous.
+    assert len(modules) > len(PUBLIC), len(modules)
+
+    offenders = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in modules
+        if path.stem in GENERIC_BUCKET_NAMES
+        or GENERIC_BUCKET_NAMES & set(path.relative_to(ROOT).parts[:-1])
+    )
+    assert not offenders, offenders
+
+
+def test_package_inits_only_re_export() -> None:
+    """`__init__.py` runs on import of anything inside the package, so work placed there is
+    work no consumer asked for and cannot avoid.
+
+    A passive one holds imports, dunder assignments and a docstring. Anything else -- a call,
+    a conditional import, a function or class definition, a try/except fallback -- is either
+    a side effect at import time or logic that belongs in a named module. `damicore` assigns
+    `__version__` from its own API, which is a dunder re-export and stays allowed.
+    """
+    inits = sorted((ROOT / "packages").glob("*/src/*/__init__.py"))
+    # Guards the discovery: one per workspace member, so a truncated glob is visible.
+    assert len(inits) > len(PUBLIC), [path.name for path in inits]
+
+    offenders: list[str] = []
+    for path in inits:
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            if (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                continue
+            targets = (
+                node.targets
+                if isinstance(node, ast.Assign)
+                else [node.target]
+                if isinstance(node, ast.AnnAssign)
+                else []
+            )
+            if targets and all(
+                isinstance(target, ast.Name)
+                and target.id.startswith("__")
+                and target.id.endswith("__")
+                for target in targets
+            ):
+                continue
+            offenders.append(
+                f"{path.relative_to(ROOT)}:{node.lineno} {type(node).__name__} is not a "
+                "re-export, a dunder assignment or the docstring"
+            )
+    assert not offenders, offenders
+
+
+def test_every_test_module_declares_a_registered_marker() -> None:
+    """`--strict-markers` rejects a marker outside the registry; it does not require one.
+
+    A module with no `pytestmark` at all is collected and passes, so it silently belongs to no
+    suite and `-m unit`, `-m e2e` and the release lanes that select by marker all skip it.
+    Only reading the module -- or this -- can tell. The registry is read from the root
+    configuration rather than restated, so adding a marker there is the one edit needed.
+    """
+    options = cast(dict[str, object], _tool(ROOT / "pyproject.toml")["pytest"])["ini_options"]
+    assert isinstance(options, dict)
+    declared = cast(dict[str, object], options)["markers"]
+    assert isinstance(declared, list)
+    registered = {str(entry).split(":", 1)[0].strip() for entry in cast(list[object], declared)}
+
+    modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
+        ROOT.glob("tests/*/test_*.py")
+    )
+    # Guards the discovery: an empty glob would make every assertion below vacuous.
+    assert len(modules) >= 11, [str(path) for path in modules]
+
+    offenders: list[str] = []
+    for path in modules:
+        found = re.search(
+            r"^pytestmark\s*=\s*pytest\.mark\.(\w+)",
+            path.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if found is None:
+            offenders.append(f"{path.relative_to(ROOT)}: no pytestmark")
+        elif found.group(1) not in registered:
+            offenders.append(
+                f"{path.relative_to(ROOT)}: marker {found.group(1)!r} is not registered"
+            )
+    assert not offenders, offenders

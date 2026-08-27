@@ -65,4 +65,4 @@ line-length = 100
 exclude = [".venv", "dist", "__pycache__"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "RUF100", "UP"]
+select = ["E", "F", "I", "PGH", "RUF100", "TID", "UP"]
