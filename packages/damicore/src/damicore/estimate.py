@@ -40,6 +40,8 @@ class ResourceEstimate(BaseModel):
     pair_count: int = Field(ge=0)
     effective_workers: int = Field(gt=0)
     matrix_bytes: int = Field(ge=0)
+    # Equal to matrix_bytes by construction. Not a bug and not removable before a breaking
+    # release; see ADR 0011.
     tree_workspace_bytes: int = Field(ge=0)
     normalized_bytes: int = Field(ge=0)
     max_serialized_chunk_bytes: int = Field(ge=0)
