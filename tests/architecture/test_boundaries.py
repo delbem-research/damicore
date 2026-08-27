@@ -508,78 +508,54 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
                 assert relative in entries, relative
 
 
-def test_the_repository_root_declares_the_ruff_settings_it_lints_everything_else_by() -> None:
-    """The workspace's Ruff settings must reach the code that lives outside `packages/`.
+def test_ruff_and_pytest_are_configured_once_for_the_whole_workspace() -> None:
+    """One copy of each tool's settings, at the root, governing every file.
 
-    Ruff resolves its configuration per file, by walking up from that file to the nearest
-    `pyproject.toml` that declares `[tool.ruff]`. The six package sections therefore govern
-    `packages/<member>/**` and nothing else: with no section at the root, `tests/`,
-    `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults, so `make check`
-    lints them under a rule set and a line length the repository never chose -- passing on a
-    line it would reject inside a package, and never sorting their imports at all.
+    Both tools resolve configuration by walking up from a starting point, so a section in a
+    member's `pyproject.toml` would shadow the root for that member and nothing else. Six
+    such copies existed and had to be held equal by a test; `packages/package.mk` removes the
+    need for them by running both tools from the workspace root with an explicit package
+    path, which is also how Pyright has always been invoked there.
 
-    Asserted equal to a member's section rather than restated here, because Ruff requires the
-    section at each root it resolves and this test is what keeps those copies one rule. Which
-    member is immaterial: the test above already holds all six equal to each other.
+    Both halves are asserted. The root section must exist, or `tests/`, `benchmarks/` and
+    `.github/scripts` fall back to Ruff's built-in defaults and `make check` lints them under
+    a rule set the repository never chose. And no member may reintroduce a section, or that
+    member silently stops being governed by the copy every other file obeys.
     """
     root = _tool(ROOT / "pyproject.toml")
     assert "ruff" in root, "the repository root declares no [tool.ruff]"
-    member = _tool(ROOT / "packages" / "damicore" / "pyproject.toml")
-    assert root["ruff"] == member["ruff"], (root["ruff"], member["ruff"])
+    assert "pytest" in root, "the repository root declares no [tool.pytest.ini_options]"
+
+    members = sorted(
+        directory for directory in (ROOT / "packages").iterdir() if (directory / "src").is_dir()
+    )
+    # Guards the discovery: an empty scan would make the loop below vacuous.
+    assert len(members) > len(PUBLIC), members
+    for member in members:
+        tool = _tool(member / "pyproject.toml")
+        assert "ruff" not in tool, f"{member.name} redeclares [tool.ruff]"
+        assert "pytest" not in tool, f"{member.name} redeclares [tool.pytest.ini_options]"
 
 
-def test_package_tool_configuration_does_not_drift() -> None:
-    """Every workspace member configures Ruff and pytest identically, bar the coverage target.
+def test_package_sdist_exclusions_do_not_drift() -> None:
+    """The sdist exclude list is a six-copy convention that nothing else compares.
 
-    `packages/package.mk` exists because "Six copies had already drifted into two variants
-    differing only by stray indentation". The same six copies live on in `pyproject.toml`,
-    where nothing compares them: a rule added to one package's `select`, a line length raised
-    in one `[tool.ruff]`, or a floor lowered in one `addopts` stays invisible until someone
-    diffs the files by hand.
-
-    The coverage target is the one value that must differ, so it is normalised away rather
-    than restated. A literal template here would make this test a seventh copy of the flag
-    list it exists to protect, which is the defect, not the fix.
+    A member that quietly ships its `tests/` or `Makefile` again would surface only to a user
+    unpacking the published sdist, which is the one artifact no other check in this suite
+    unpacks. The files it excludes -- a Makefile that only includes `../package.mk`, a
+    pyrightconfig that extends the workspace one, tests that need the workspace conftest --
+    are exactly the ones that cannot work outside the monorepo.
     """
     members = sorted(
         directory.name
         for directory in (ROOT / "packages").iterdir()
         if (directory / "pyproject.toml").is_file()
     )
-    # Guards the discovery: an empty or truncated scan would make every assertion below
-    # vacuous. Derived from PUBLIC rather than a literal count, so adding a package is one
-    # edit, not two.
     assert set(members) >= PUBLIC, members
 
-    ruff: dict[str, object] = {}
-    pytest_options: dict[str, dict[str, object]] = {}
-    hatch: dict[str, object] = {}
-    for member in members:
-        with (ROOT / "packages" / member / "pyproject.toml").open("rb") as stream:
-            tool = tomllib.load(stream)["tool"]
-        options: dict[str, object] = dict(tool["pytest"]["ini_options"])
-        addopts = str(options["addopts"])
-        # Checked before normalising: otherwise a package measuring another package's
-        # coverage would be erased by the substitution instead of caught by it.
-        assert re.findall(r"--cov=(\S+)", addopts) == [member], (member, addopts)
-        options["addopts"] = addopts.replace(f"--cov={member}", "--cov=<member>")
-        ruff[member] = tool["ruff"]
-        pytest_options[member] = options
-        # The sdist exclude list is the third six-copy convention; a member that quietly
-        # ships its tests or Makefile again would otherwise surface only to a user
-        # unpacking the published sdist.
-        hatch[member] = tool["hatch"]
-
+    hatch = {
+        member: _tool(ROOT / "packages" / member / "pyproject.toml")["hatch"] for member in members
+    }
     reference = members[0]
     for member in members[1:]:
-        assert ruff[member] == ruff[reference], (member, ruff[member], ruff[reference])
-        assert pytest_options[member] == pytest_options[reference], (
-            member,
-            pytest_options[member],
-            pytest_options[reference],
-        )
-        assert hatch[member] == hatch[reference], (
-            member,
-            hatch[member],
-            hatch[reference],
-        )
+        assert hatch[member] == hatch[reference], (member, hatch[member], hatch[reference])

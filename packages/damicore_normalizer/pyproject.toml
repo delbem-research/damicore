@@ -46,29 +46,3 @@ build-backend = "hatchling.build"
 # `exclude` deliberately cannot override that.
 [tool.hatch.build.targets.sdist]
 exclude = ["Makefile", "pyrightconfig.json", "tests"]
-
-[tool.ruff]
-line-length = 100
-exclude = [".venv", "dist", "__pycache__"]
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "RUF100", "UP"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
-# The whole workspace marker registry. Pytest inherits no ini options from a parent, so the
-# list has to exist in every rootdir a suite is run from; why that matters, and what a missing
-# entry actually costs, is in test_every_test_module_declares_a_registered_marker, which also
-# holds these copies equal to the root.
-markers = [
-    "unit: fast isolated unit tests",
-    "contract: cross-package contract tests",
-    "e2e: complete pipeline tests",
-    "notebook: executable notebook tests",
-    "slow: stress and benchmark-adjacent tests",
-]
-# --cov-branch and the floor mirror the root configuration on purpose: coverage resolves
-# its config from the working directory, so a package-scoped run would otherwise report
-# line coverage with no threshold and read as a stronger result than it is.
-addopts = "--strict-markers --cov=damicore_normalizer --cov-branch --cov-report=term-missing --cov-fail-under=90"
