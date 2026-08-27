@@ -10,6 +10,9 @@ cross-tool source; tool-specific files may import it but must not restate it.
   relevant to a change before editing.
 - Apply this precedence when sources disagree: this file; schemas and public models;
   contract and behavior tests; implementation; READMEs, examples, and notebooks.
+- Apply the priority order in `docs/quality-drivers.md` when two desirable properties
+  disagree. Correctness outranks bounded memory, which outranks reproducibility, and so on
+  down to portability. No check can decide that trade-off, which is why it is written down.
 - Treat a disagreement as a defect in the lower-authority source. Do not weaken a rule here
   to preserve accidental behavior in the implementation.
 - The 0.2 scope is closed. Reopening a deferred decision -- approximate NCD, Dask or Ray,

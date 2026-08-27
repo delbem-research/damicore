@@ -32,8 +32,13 @@ damicore-clusterizer = { workspace = true }
 line-length = 100
 exclude = [".venv", "dist", "__pycache__"]
 
+# PGH and TID close two rules this file states in prose and nothing else checked: a
+# suppression must name the rule it silences (PGH003 covers `type:` and `pyright:` ignores
+# alike, PGH004 covers `noqa`), and an import must be absolute (TID252). Both passed over
+# the whole tree the moment they were added, so they ratchet existing discipline rather
+# than asking for a cleanup.
 [tool.ruff.lint]
-select = ["E", "F", "I", "RUF100", "UP"]
+select = ["E", "F", "I", "PGH", "RUF100", "TID", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "tests"]

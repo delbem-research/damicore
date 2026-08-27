@@ -523,8 +523,8 @@ def test_configuration_rejects_an_invalid_value(
 
 
 # The preflight in damicore calls scan_source without an objects_dir to size a run before
-# creating anything. max_serialized_chunk_bytes and record_count are its only outputs and they
-# feed the memory estimate, so a wrong value there ships a wrong estimate silently.
+# creating anything. max_serialized_chunk_bytes feeds the memory estimate, so a wrong value
+# there ships a wrong estimate silently.
 @pytest.mark.parametrize(
     ("chunk_rows", "expected_max_chunk"),
     [
@@ -543,7 +543,6 @@ def test_scanning_without_an_objects_dir_measures_without_writing(
     # Two columns of two cells; every cell serializes to `"x"\n`, four bytes.
     assert [item.object_id for item in result.objects] == ["column_000001", "column_000002"]
     assert result.total_bytes == 16
-    assert result.record_count == 2
     assert result.max_serialized_chunk_bytes == expected_max_chunk
     assert list(tmp_path.iterdir()) == [source]
 

@@ -44,10 +44,8 @@ class ResourceLimitError(DamicoreError):
     """Preflight projected a run outside the configured ``ResourceLimits``.
 
     ``context["estimate"]`` holds the ``ResourceEstimate``, whose ``violations`` names every
-    gate that failed. Reshape the source -- a different split for a dataset, fewer files for a
-    corpus -- or reduce the input; individual limits may be raised through
-    ``ExecutionConfig.limits`` after reviewing ``estimate()``, but the free-disk gate is
-    always enforced.
+    gate that failed. The message carries what to do about it, and ``docs/scalability.md``
+    explains why the object count is what decides feasibility.
     """
 
 
@@ -72,9 +70,8 @@ class CompressionError(DamicoreError):
 class DistanceComputationError(DamicoreError):
     """The NCD stage failed, including a worker process that died.
 
-    A dead pool usually means a script-level call missing its ``if __name__ == "__main__":``
-    guard, or a worker killed for running out of memory; ``ExecutionConfig(workers=1)``
-    avoids the pool entirely.
+    A dead pool has two realistic causes and the message names both, because the traceback a
+    caller reads cannot show which one it was.
     """
 
 

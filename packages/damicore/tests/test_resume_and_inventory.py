@@ -296,12 +296,12 @@ def test_a_stale_tree_is_deleted_when_distancing_reruns(
     output = tmp_path / "run"
     source = _incomplete_run(tmp_path, monkeypatch, output)
 
-    checkpoint_path = output / "checkpoints" / "pipeline.json"
-    checkpoint = _read_json(checkpoint_path)
+    manifest_path = output / "manifest.json"
+    manifest = _read_json(manifest_path)
     for stage in ("distancing", "tree_building"):
-        checkpoint["receipts"][stage]["status"] = "running"
-        checkpoint["receipts"][stage]["finished_at"] = None
-    _write_json(checkpoint_path, checkpoint)
+        manifest["stages"][stage]["status"] = "running"
+        manifest["stages"][stage]["finished_at"] = None
+    _write_json(manifest_path, manifest)
     workspace = output / "tree-work.npy"
     workspace.write_bytes(b"left behind by the previous tree build")
 
@@ -334,8 +334,7 @@ def test_a_completed_clusterizing_receipt_is_reused_on_resume(
         run(source, output_dir=output, progress=False, execution=_single_worker())
     monkeypatch.undo()
 
-    checkpoint = _read_json(output / "checkpoints" / "pipeline.json")
-    metrics = checkpoint["receipts"]["clusterizing"]["metrics"]
+    metrics = _read_json(output / "manifest.json")["stages"]["clusterizing"]["metrics"]
 
     result = run(source, output_dir=output, progress=False, execution=_single_worker())
     try:
@@ -407,16 +406,16 @@ def test_a_normalization_receipt_of_an_unknown_schema_is_rejected_on_resume(
 
     normalization_manifest = output / "normalization" / "manifest.json"
     _write_json(normalization_manifest, {"schema_version": 99})
-    checkpoint_path = output / "checkpoints" / "pipeline.json"
-    checkpoint = _read_json(checkpoint_path)
-    receipt = checkpoint["receipts"]["normalizing"]
+    manifest_path = output / "manifest.json"
+    manifest = _read_json(manifest_path)
+    receipt = manifest["stages"]["normalizing"]
     receipt["outputs"] = [
         artifact_record(normalization_manifest, output)
         if record["path"] == "normalization/manifest.json"
         else record
         for record in receipt["outputs"]
     ]
-    _write_json(checkpoint_path, checkpoint)
+    _write_json(manifest_path, manifest)
 
     with pytest.raises(ArtifactValidationError, match="Normalization receipt is invalid"):
         run(source, output_dir=output, progress=False, execution=_single_worker())
