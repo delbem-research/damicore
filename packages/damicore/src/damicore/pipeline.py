@@ -9,11 +9,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 from damicore.errors import ArtifactValidationError, CheckpointMismatchError
 from damicore.manifest import (
-    PipelineCheckpoint,
     artifact_record,
     atomic_json,
     json_mapping,
@@ -71,44 +68,24 @@ def resume_fingerprint(fingerprint: dict[str, str]) -> dict[str, str]:
 
 
 class PipelineJournal:
+    """The stage receipts of one run, owned by ``manifest.json``.
+
+    Resume state used to be duplicated into ``checkpoints/pipeline.json`` as well, so every
+    stage boundary wrote the same receipts to two files and the runtime fingerprint was
+    checked twice against two copies of itself. The manifest already carried both, so the
+    second file added a way for the two to disagree without adding a fact.
+    """
+
     def __init__(self, run_dir: Path, manifest: dict[str, Any]) -> None:
         self.run_dir = run_dir
         self.manifest_path = run_dir / "manifest.json"
-        self.checkpoint_path = run_dir / "checkpoints" / "pipeline.json"
-        self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         self.manifest = manifest
         self.run_id = str(manifest.get("run_id", ""))
         self.runtime = runtime_fingerprint()
         self._resume_identity = resume_fingerprint(self.runtime)
-        if self.checkpoint_path.exists():
-            try:
-                checkpoint = PipelineCheckpoint.model_validate_json(
-                    self.checkpoint_path.read_text(encoding="utf-8")
-                )
-            except (OSError, ValidationError) as exc:
-                raise CheckpointMismatchError("Pipeline checkpoint is unreadable") from exc
-            if (
-                checkpoint.schema_version != 1
-                or resume_fingerprint(checkpoint.runtime) != self._resume_identity
-            ):
-                raise CheckpointMismatchError("Runtime fingerprint differs from checkpoint")
-            self.receipts: dict[str, Any] = {
-                stage: receipt.model_dump(mode="json")
-                for stage, receipt in checkpoint.receipts.items()
-            }
-        else:
-            self.receipts = {}
-            self._write_checkpoint()
-
-    def _write_checkpoint(self) -> None:
-        atomic_json(
-            self.checkpoint_path,
-            {
-                "schema_version": 1,
-                "runtime": self.runtime,
-                "receipts": self.receipts,
-            },
-        )
+        # Already validated as `dict[str, StageReceipt]` by RunManifest when the caller
+        # adopted an existing run directory, and empty for a fresh one.
+        self.receipts: dict[str, Any] = json_mapping(manifest.get("stages"))
 
     def transition(self, state: str) -> None:
         self.manifest["status"] = state
@@ -128,7 +105,6 @@ class PipelineJournal:
             "outputs": [],
             "metrics": {},
         }
-        self._write_checkpoint()
         self.transition(stage)
         return started
 
@@ -148,7 +124,6 @@ class PipelineJournal:
                 "metrics": {**metrics, "seconds": time.monotonic() - started},
             }
         )
-        self._write_checkpoint()
         self.manifest["stages"] = self.receipts
         atomic_json(self.manifest_path, self.manifest)
         logger.info("stage_completed", extra={"run_id": self.run_id, "stage": stage, **metrics})

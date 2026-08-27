@@ -52,11 +52,10 @@ damicore run dataset.xlsx --source xlsx --sheet Sheet1
 ```
 
 The default exact algorithm accepts at most 1,000 objects, 500,000 pairs, and
-512 MiB per matrix. A multi-gigabyte dataset with tens of columns can be
-feasible; the same file split into millions of rows, or a directory of a million
-files, is intentionally rejected during preflight. Streaming and memory maps bound RAM, but NCD remains quadratic and
-Neighbor Joining cubic in the object count. Raise individual `ResourceLimits`
-only after reviewing `estimate`.
+512 MiB per matrix. What decides feasibility is how many objects the source
+produces, not how many bytes it holds, so a multi-gigabyte dataset with tens of
+columns is feasible while the same file split into millions of rows is rejected
+during preflight. See [scalability](docs/scalability.md) before raising a limit.
 
 Runs are content-addressed, checkpointed, resumable, and verified before they
 become `completed`. Internal paths are contained in the run directory, JSON

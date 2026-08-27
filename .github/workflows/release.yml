@@ -261,11 +261,12 @@ jobs:
   # between the two indexes. Same per-distribution matrix and environments as the TestPyPI
   # job, for the same pending-publisher uniqueness reason.
   # The stage distributions go first, and the aggregate only after all four have landed.
-  # Order matters because damicore pins the four within this release: publishing all five as
-  # one matrix put damicore on PyPI 11 minutes before damicore-tree-builder during the 0.1.0
-  # release, and for those 11 minutes `pip install damicore` could not resolve. fail-fast
-  # stays false so one missing publisher cannot strand the other three, but a stage that
-  # fails now blocks the aggregate instead of orphaning it.
+  # Order matters because damicore pins the four within this release: published as one
+  # unordered matrix the aggregate can reach the index while a stage it requires has not,
+  # and `pip install damicore` cannot resolve until it does. docs/releasing.md records the
+  # release where that happened. fail-fast stays false so one missing publisher cannot
+  # strand the other three, but a stage that fails now blocks the aggregate instead of
+  # orphaning it.
   publish-pypi-stages:
     needs: [tag-guard, smoke]
     runs-on: ubuntu-24.04

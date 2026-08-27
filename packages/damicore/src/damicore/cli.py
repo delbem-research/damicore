@@ -102,14 +102,13 @@ def _parser() -> argparse.ArgumentParser:
             const=True,
             help="include dot-prefixed files and directories in a files source",
         )
+        # No `__main__` guard note here: the console script this help belongs to already
+        # carries one, so the guard is a constraint on calling damicore.run() from a script,
+        # never on the command line. Stating it here taught a caveat that cannot apply.
         command.add_argument(
             "--workers",
             type=int,
-            help=(
-                "worker processes for the distance stage; omit to choose automatically. "
-                'A module-level call in a .py script needs an `if __name__ == "__main__":` '
-                "guard unless this is 1"
-            ),
+            help="worker processes for the distance stage; omit to choose automatically",
         )
         command.add_argument(
             "--max-objects",

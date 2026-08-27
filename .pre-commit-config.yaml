@@ -9,7 +9,7 @@ repos:
     # Must stay inside the workspace's ruff range, in pyproject.toml. A different major here
     # runs a different default rule set than `make check`, so the hook and the gate disagree
     # about the same file and the pre-commit run stops being evidence.
-    rev: v0.16.3
+    rev: v0.16.4
     hooks:
       # Auto-fix import sorting, unused imports, and other fixable lint rules.
       # --exit-non-zero-on-fix: if files were modified, fail so developer sees

@@ -105,9 +105,11 @@ matrix by default. What decides feasibility is how many objects the source
 produces, not how many bytes it holds: a multi-gigabyte dataset with tens of
 columns is feasible, the same file split into millions of rows is not, and a file
 corpus is bounded by its file count. Either way the run is rejected during
-preflight rather than after hours of work. Streaming and memory maps bound RAM,
-but NCD stays quadratic and Neighbor Joining cubic in the object count. Raise an
-individual `ResourceLimits` field only after reading `estimate`.
+preflight rather than after hours of work.
+
+Call `estimate` before raising a limit — it reports the exact cost without
+creating anything. The complexity behind the gates is documented in
+[scalability](https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/scalability.md).
 
 ## Links
 

@@ -67,6 +67,8 @@ class RunReport(BaseModel):
     modularity: float | None = None
     timings_seconds: dict[str, float] = Field(default_factory=dict)
     verification: dict[str, bool] = Field(default_factory=dict)
+    # Always empty, and kept anyway: this model is `extra="forbid"`, so dropping the field
+    # makes every published-0.2 report unloadable. See ADR 0011.
     warnings: list[str] = Field(default_factory=list)
     error: dict[str, object] | None = None
 
