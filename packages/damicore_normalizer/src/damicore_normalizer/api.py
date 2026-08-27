@@ -120,7 +120,6 @@ def scan_source(
             objects=corpus.objects,
             total_bytes=corpus.total_bytes,
             max_serialized_chunk_bytes=corpus.largest_file_bytes,
-            record_count=len(corpus.objects),
             manifest_input=FileCorpusInput(
                 kind="files",
                 root=str(corpus.root),
@@ -176,7 +175,6 @@ def scan_source(
         objects=table.objects,
         total_bytes=table.total_bytes,
         max_serialized_chunk_bytes=table.max_serialized_chunk_bytes,
-        record_count=table.row_count,
         manifest_input=dataset_input,
         object_encoding="json-lines/1",
         source_paths=(path,),
