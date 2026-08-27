@@ -508,22 +508,17 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
                 assert relative in entries, relative
 
 
-def test_ruff_and_pytest_are_configured_once_for_the_whole_workspace() -> None:
-    """One copy of each tool's settings, at the root, governing every file.
+def test_pytest_is_configured_once_for_the_whole_workspace() -> None:
+    """The marker registry and the pytest flags exist at the root and nowhere else.
 
-    Both tools resolve configuration by walking up from a starting point, so a section in a
-    member's `pyproject.toml` would shadow the root for that member and nothing else. Six
-    such copies existed and had to be held equal by a test; `packages/package.mk` removes the
-    need for them by running both tools from the workspace root with an explicit package
-    path, which is also how Pyright has always been invoked there.
-
-    Both halves are asserted. The root section must exist, or `tests/`, `benchmarks/` and
-    `.github/scripts` fall back to Ruff's built-in defaults and `make check` lints them under
-    a rule set the repository never chose. And no member may reintroduce a section, or that
-    member silently stops being governed by the copy every other file obeys.
+    Pytest resolves one configuration per invocation, from the rootdir, and inherits no ini
+    options from a parent. A section in a member therefore used to be the whole registry for
+    `make -C packages/<name> test`, which is why six copies existed and why a test had to
+    hold them equal. `packages/package.mk` now runs pytest from the workspace root against an
+    explicit package path, so the root section is the only one, and a member reintroducing
+    one would silently take that member's suite off the shared registry again.
     """
     root = _tool(ROOT / "pyproject.toml")
-    assert "ruff" in root, "the repository root declares no [tool.ruff]"
     assert "pytest" in root, "the repository root declares no [tool.pytest.ini_options]"
 
     members = sorted(
@@ -532,19 +527,24 @@ def test_ruff_and_pytest_are_configured_once_for_the_whole_workspace() -> None:
     # Guards the discovery: an empty scan would make the loop below vacuous.
     assert len(members) > len(PUBLIC), members
     for member in members:
-        tool = _tool(member / "pyproject.toml")
-        assert "ruff" not in tool, f"{member.name} redeclares [tool.ruff]"
-        assert "pytest" not in tool, f"{member.name} redeclares [tool.pytest.ini_options]"
+        assert "pytest" not in _tool(member / "pyproject.toml"), (
+            f"{member.name} redeclares [tool.pytest.ini_options]"
+        )
 
 
-def test_package_sdist_exclusions_do_not_drift() -> None:
-    """The sdist exclude list is a six-copy convention that nothing else compares.
+def test_package_ruff_and_sdist_configuration_does_not_drift() -> None:
+    """Two conventions still live in six copies, for different reasons, and neither is
+    compared anywhere else.
 
-    A member that quietly ships its `tests/` or `Makefile` again would surface only to a user
-    unpacking the published sdist, which is the one artifact no other check in this suite
-    unpacks. The files it excludes -- a Makefile that only includes `../package.mk`, a
-    pyrightconfig that extends the workspace one, tests that need the workspace conftest --
-    are exactly the ones that cannot work outside the monorepo.
+    Ruff resolves configuration per file and infers first-party packages from the `src` of
+    the nearest one, so a member's section is what sorts a sibling distribution into the
+    third-party block rather than beside that member's own modules. Consolidating it to the
+    root would silently reorder the imports of every package. The sections must still agree
+    on the rules themselves.
+
+    The sdist exclude list is the second: a member that quietly ships its `tests/` or
+    `Makefile` again would surface only to a user unpacking the published sdist, which is the
+    one artifact no other check here unpacks.
     """
     members = sorted(
         directory.name
@@ -553,9 +553,19 @@ def test_package_sdist_exclusions_do_not_drift() -> None:
     )
     assert set(members) >= PUBLIC, members
 
-    hatch = {
-        member: _tool(ROOT / "packages" / member / "pyproject.toml")["hatch"] for member in members
-    }
+    tools = {member: _tool(ROOT / "packages" / member / "pyproject.toml") for member in members}
+    # The root's rules must reach the code outside `packages/` too: with no section there,
+    # `tests/`, `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults.
+    root_ruff = _tool(ROOT / "pyproject.toml").get("ruff")
+    assert root_ruff is not None, "the repository root declares no [tool.ruff]"
+
     reference = members[0]
-    for member in members[1:]:
-        assert hatch[member] == hatch[reference], (member, hatch[member], hatch[reference])
+    for member in members:
+        assert tools[member]["ruff"] == tools[reference]["ruff"], member
+        assert tools[member]["hatch"] == tools[reference]["hatch"], member
+    # `src` is the one key that must differ, since it is what makes the inference per package.
+    assert {key: value for key, value in tools[reference]["ruff"].items() if key != "src"} == {  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
+        key: value
+        for key, value in root_ruff.items()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
+        if key != "src"
+    }

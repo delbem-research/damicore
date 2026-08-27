@@ -54,3 +54,15 @@ build-backend = "hatchling.build"
 # `exclude` deliberately cannot override that.
 [tool.hatch.build.targets.sdist]
 exclude = ["Makefile", "pyrightconfig.json", "tests"]
+
+# Ruff resolves configuration per file, and its isort infers first-party packages from `src`
+# relative to the file holding that configuration. This section is therefore not a copy of
+# the root's for its own sake: it is what makes `damicore_normalizer` and its siblings sort
+# as the separate distributions they are, in the third-party block, while this package's own
+# modules stay first party. Held equal to the other members by tests/architecture.
+[tool.ruff]
+line-length = 100
+exclude = [".venv", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "RUF100", "UP"]
