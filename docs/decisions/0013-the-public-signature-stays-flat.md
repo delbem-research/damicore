@@ -63,10 +63,10 @@ the union becomes the clearer public contract and the break is worth a major rel
 larger line count in the adapter is not by itself a reason: it is the cost of the flat
 signature, which is a product decision recorded above.
 
-## Note on a missing source
+## Note on the source
 
 The evidence for this decision came from `DAMICORE_IMPLEMENTATION_SPECIFICATION.md`, deleted
 in PR #16 and recoverable only from git history. Its section 5 prioritised eight quality
-drivers, and that ordering is what settles both this decision and ADR 0012. The ordering is
-currently written down nowhere in the working tree, which is why both decisions had to
-rediscover it.
+drivers, and that ordering is what settles both this decision and ADR 0012; it had survived
+in no other file, so both decisions had to rediscover it. It is now
+[docs/quality-drivers.md](../quality-drivers.md).
