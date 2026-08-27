@@ -101,14 +101,6 @@ class StageReceipt(BaseModel):
     metrics: dict[str, int | float | str | bool]
 
 
-class PipelineCheckpoint(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-
-    schema_version: Literal[1]
-    runtime: dict[str, str]
-    receipts: dict[str, StageReceipt]
-
-
 class RunManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
@@ -156,7 +148,6 @@ class RunManifest(BaseModel):
                 "tree.nwk",
                 "membership.csv",
                 "clusters.json",
-                "checkpoints/pipeline.json",
                 "checkpoints/compressed-sizes.json",
                 "checkpoints/distance-shards.json",
             }
