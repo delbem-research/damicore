@@ -641,29 +641,26 @@ def run(
     DatasetFormatError
         The dataset violates the input contract.
     ResourceLimitError
-        Preflight projected the run outside ``execution.limits``. ``context["estimate"]``
-        holds the ``ResourceEstimate`` behind the decision.
+        Preflight projected the run outside ``execution.limits``.
     OutputDirectoryConflictError
         ``output_dir`` is not a directory, holds no readable DAMICORE manifest, belongs to a
         different input or configuration, or holds a compatible run that ``reuse_completed``
         or ``resume`` forbids continuing.
     CheckpointMismatchError
-        An incomplete run in ``output_dir`` was produced under a different runtime
-        fingerprint, or a checkpoint disagrees with the artifacts beside it.
+        An incomplete run in ``output_dir`` exists but cannot be trusted to resume.
     CompressionError
         The compressor rejected an object.
     DistanceComputationError
         The NCD stage failed, including a worker pool that died.
     DistanceMatrixValidationError
-        The NCD stage's own check found the computed matrix not finite, zero-diagonal, and
-        symmetric.
+        The NCD stage's own check rejected the matrix it computed.
     NormalizationError, TreeBuildError, TreeFormatError, ClusterizationError
         The corresponding stage failed with no more specific cause. ``TreeBuildError`` also
         covers the tree stage rejecting the matrix it was given, which does not surface as
         ``DistanceMatrixValidationError``.
     ArtifactValidationError
-        An artifact failed its schema, its recorded hash or size, path containment, or the
-        cross-artifact verification.
+        An artifact failed one of its checks, including the cross-artifact verification a run
+        must pass before it is marked ``completed``.
     DamicoreError
         Any other failure inside the pipeline, named by the underlying exception type.
     KeyboardInterrupt

@@ -448,10 +448,10 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
     """`damicore` requires the four stage distributions within its own release, so it must
     reach an index only once they are on it.
 
-    Publishing all five as one matrix left them unordered, and the 0.1.0 release put
-    `damicore` on PyPI eleven minutes before `damicore-tree-builder`; for those eleven
-    minutes `pip install damicore` could not resolve. Merging the two publish jobs back
-    together would restore that window silently, because no other check reads the workflow.
+    Publishing all five as one matrix leaves them unordered and opens a window in which the
+    aggregate is on the index and a stage it pins is not; `docs/releasing.md` records the
+    0.1.0 release where that happened. Merging the two publish jobs back together would
+    restore the window silently, because no other check reads the workflow.
 
     Parsed by hand rather than with a YAML library: PyYAML reaches this environment only as
     a transitive dependency of pre-commit, and depending on one of those undeclared is the
