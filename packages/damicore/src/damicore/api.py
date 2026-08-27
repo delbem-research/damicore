@@ -137,14 +137,18 @@ def _validated_compressor(compressor: str) -> Literal["zlib", "gzip"]:
     raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
 
 
-# Every argument that belongs to a given source, named once. An argument that does not apply
-# is rejected rather than ignored: silently dropping `delimiter` for a workbook would let a
-# caller believe a setting took effect, and the artifacts would look valid while answering a
-# question nobody asked.
+# Which arguments belong to which source, derived from the models that define them rather
+# than restated. The public signature is flat because a notebook is the primary caller, so
+# something has to map those arguments back onto the discriminated union; reading the union
+# for the answer keeps one declaration instead of two that can disagree.
+#
+# An argument that does not apply is rejected rather than ignored: silently dropping
+# `delimiter` for a workbook would let a caller believe a setting took effect, and the
+# artifacts would look valid while answering a question nobody asked.
 _SOURCE_ARGUMENTS: dict[str, frozenset[str]] = {
-    "delimited": frozenset({"split", "delimiter", "encoding"}),
-    "xlsx": frozenset({"split", "sheet"}),
-    "files": frozenset({"recursive", "include_hidden"}),
+    "delimited": frozenset(DelimitedSource.model_fields) - {"kind"},
+    "xlsx": frozenset(SpreadsheetSource.model_fields) - {"kind"},
+    "files": frozenset(FileCorpusSource.model_fields) - {"kind"},
 }
 
 
