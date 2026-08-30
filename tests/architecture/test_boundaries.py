@@ -86,15 +86,15 @@ def _exported_names(package: str) -> set[str]:
     raise AssertionError(f"{package} declares no `__all__` list")
 
 
-def _assigned_names(targets: list[ast.expr]) -> Iterator[ast.expr]:
-    """Every name an assignment binds, with tuple and list unpacking flattened.
+def _assignment_targets(targets: list[ast.expr]) -> Iterator[ast.expr]:
+    """Every target an assignment binds, with tuple and list unpacking flattened.
 
     `self.a = self.b = x` and `self.a, self.b = pair` bind public attributes exactly as a
     single target does, so a walker that only reads `targets[0]` checks less than it appears to.
     """
     for target in targets:
         if isinstance(target, ast.Tuple | ast.List):
-            yield from _assigned_names(list(target.elts))
+            yield from _assignment_targets(list(target.elts))
         else:
             yield target
 
@@ -121,7 +121,7 @@ def _unannotated_public_attributes(path: Path, exported: set[str]) -> list[str]:
             for node in ast.walk(initializer):
                 if not isinstance(node, ast.Assign):
                     continue
-                for target in _assigned_names(node.targets):
+                for target in _assignment_targets(node.targets):
                     if (
                         isinstance(target, ast.Attribute)
                         and isinstance(target.value, ast.Name)
