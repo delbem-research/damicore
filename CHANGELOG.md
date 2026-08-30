@@ -19,6 +19,16 @@ carries anything else, a date included, matches neither and fails the release.
   orchestrator no longer walks the matrix a second time to fill `report.json`. The
   reported values are unchanged.
 
+### Fixed
+
+- The public attributes of the published classes declare their types. `DamicoreError.code`
+  and `.context`, the same two on each stage's error base, and `DistanceMatrixView.path`
+  and `.labels` were left to inference. That resolves correctly in this workspace, but a
+  consumer type-checks the wheel with their own checker, which may resolve an inferred
+  attribute another way; `DamicoreError` is the base of every public error class, so the
+  whole hierarchy was reported as partially unknown. Runtime behaviour is unchanged --
+  the types were always these, and are now declared.
+
 ## 0.2.0
 
 ### Breaking
