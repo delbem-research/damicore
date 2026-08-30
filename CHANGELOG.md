@@ -73,15 +73,7 @@ carries anything else, a date included, matches neither and fails the release.
 - ADRs 0006-0010 recording the source axis, run self-containment, the named object
   encoding, the spreadsheet engine, and the cell-text rule.
 
-### Unchanged
-
-- Delimited object bytes are identical to 0.1, verified differentially across quoted cells,
-  embedded newlines and tabs, Unicode, blank lines, and both splits. Delimited text already
-  accepted any single-character delimiter, so `.tsv` and `.txt` are documented rather than
-  added.
-- Legacy `.xls` stays out of scope and raises a typed error naming the conversion.
-
-## Unreleased
+### Fixed
 
 - Declare `numpy` in `damicore`, which imports it directly, and drop it from
   `damicore-clusterizer`, which never did. Installing `damicore-clusterizer` alone no
@@ -93,6 +85,14 @@ carries anything else, a date included, matches neither and fails the release.
   only artifact validation.
 - Document the public API. Every exported symbol now carries a docstring, and `run`,
   `estimate` and `load_result` document their parameters, returns and failure modes.
+
+### Unchanged
+
+- Delimited object bytes are identical to 0.1, verified differentially across quoted cells,
+  embedded newlines and tabs, Unicode, blank lines, and both splits. Delimited text already
+  accepted any single-character delimiter, so `.tsv` and `.txt` are documented rather than
+  added.
+- Legacy `.xls` stays out of scope and raises a typed error naming the conversion.
 
 ## 0.1.0
 

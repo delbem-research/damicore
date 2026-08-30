@@ -567,6 +567,23 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
     assert "matrix:" not in blocks["publish-pypi"]
 
 
+def test_the_changelog_carries_one_unreleased_section_at_the_top() -> None:
+    """`release.yml` reads a version's section up to the next `## `, so a second
+    `## Unreleased` below a released heading truncates that release's notes.
+
+    v0.2.0 shipped that way: a `## Unreleased` left in place when the release section was
+    added above it stranded four entries, and the extraction stopped before them, so they
+    reached no reader. One heading, and first, is what keeps that extraction total.
+    """
+    headings = [
+        line
+        for line in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+        if line.startswith("## ")
+    ]
+    assert headings.count("## Unreleased") <= 1, headings
+    assert "## Unreleased" not in headings[1:], headings
+
+
 def test_type_check_configuration_covers_every_workspace_package() -> None:
     """Guard the type gate against silently checking nothing.
 
