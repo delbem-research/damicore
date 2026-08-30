@@ -20,8 +20,10 @@ class DamicoreError(Exception):
 
     def __init__(self, message: str, *, code: str | None = None, **context: object) -> None:
         super().__init__(message)
-        self.code = code or _default_code(type(self).__name__)
-        self.context = context
+        # Annotated, not inferred: tests/architecture/test_boundaries.py
+        # ::test_public_classes_annotate_the_attributes_they_expose owns the rule and the why.
+        self.code: str = code or _default_code(type(self).__name__)
+        self.context: dict[str, object] = context
 
 
 class ConfigurationError(DamicoreError):

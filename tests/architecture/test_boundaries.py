@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -59,6 +60,77 @@ def _classifiers(package: str) -> list[str]:
 def _release(version: str) -> tuple[int, int, int]:
     major, minor, patch = version.split(".")
     return int(major), int(minor), int(patch)
+
+
+def _exported_names(package: str) -> set[str]:
+    """The names a package's ``__init__`` lists in ``__all__``, read statically.
+
+    `test_package_inits_only_re_export` already holds `__all__` to a literal list, so parsing
+    it is exact rather than a best effort.
+    """
+    path = ROOT / "packages" / package / "src" / package / "__init__.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        named = (target for target in node.targets if isinstance(target, ast.Name))
+        if not any(target.id == "__all__" for target in named):
+            continue
+        value = node.value
+        if isinstance(value, ast.List):
+            return {
+                element.value
+                for element in value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+    raise AssertionError(f"{package} declares no `__all__` list")
+
+
+def _assignment_targets(targets: list[ast.expr]) -> Iterator[ast.expr]:
+    """Every target an assignment binds, with tuple and list unpacking flattened.
+
+    `self.a = self.b = x` and `self.a, self.b = pair` bind public attributes exactly as a
+    single target does, so a walker that only reads `targets[0]` checks less than it appears to.
+    """
+    for target in targets:
+        if isinstance(target, ast.Tuple | ast.List):
+            yield from _assignment_targets(list(target.elts))
+        else:
+            yield target
+
+
+def _unannotated_public_attributes(path: Path, exported: set[str]) -> list[str]:
+    """Public ``self.<name> = ...`` bindings in an exported class that declare no type.
+
+    Reported as ``Class.name``. A name annotated at class level, or at the assignment itself,
+    is already declared and is not reported; a `_`-prefixed name is not public.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    bare: list[str] = []
+    for klass in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        if klass.name not in exported:
+            continue
+        declared = {
+            statement.target.id
+            for statement in klass.body
+            if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+        }
+        for initializer in klass.body:
+            if not isinstance(initializer, ast.FunctionDef) or initializer.name != "__init__":
+                continue
+            for node in ast.walk(initializer):
+                if not isinstance(node, ast.Assign):
+                    continue
+                for target in _assignment_targets(node.targets):
+                    if (
+                        isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "self"
+                        and not target.attr.startswith("_")
+                        and target.attr not in declared
+                    ):
+                        bare.append(f"{klass.name}.{target.attr}")
+    return bare
 
 
 def _imports(path: Path) -> set[str]:
@@ -302,6 +374,62 @@ def test_every_public_package_ships_the_typing_marker_it_advertises() -> None:
         assert marker.is_file(), package
 
 
+def test_public_classes_annotate_the_attributes_they_expose() -> None:
+    """py.typed makes the types a consumer's checker reads; inference does not carry that far.
+
+    Pyright resolves a bare `self.x = ...` from this workspace, so `make check` passes with or
+    without the annotation, and the gap is invisible here. A consumer reads the wheel through
+    their own checker, which may resolve it another way -- `pyright --verifytypes` reports the
+    attribute, and every class inheriting it, as partially unknown. `DamicoreError` is the base
+    of every public error class, so one bare assignment there reached the whole hierarchy.
+    """
+    for package in sorted(PUBLIC):
+        exported = _exported_names(package)
+        source = ROOT / "packages" / package / "src" / package
+        modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
+        assert modules, package
+        for module in modules:
+            bare = _unannotated_public_attributes(module, exported)
+            assert not bare, f"{module}: {bare}"
+
+
+def test_the_attribute_check_reads_every_binding_form_and_only_public_ones(
+    tmp_path: Path,
+) -> None:
+    """The check above passes over the packages; that says nothing about what it can see.
+
+    No `__init__` in the five packages chains or unpacks its bindings today, so the branch
+    handling those forms runs against no input at all -- and coverage would not say so, since
+    it measures the packages rather than this suite. A fixture is the only thing that keeps
+    the branch honest: strip it, and every real module still passes while an attribute goes
+    unreported. The exclusions are here for the same reason, in the same direction: a check
+    that reported a `_`-prefixed or already-annotated name would be noise nothing measures.
+    """
+    module = tmp_path / "sample.py"
+    module.write_text(
+        "class Exported:\n"
+        "    annotated: int\n"
+        "    def __init__(self) -> None:\n"
+        "        self.chained_a = self.chained_b = 1\n"
+        "        self.unpacked_a, self.unpacked_b = (1, 2)\n"
+        "        self.at_assignment: int = 3\n"
+        "        self.annotated = 4\n"
+        "        self._private = 5\n"
+        "class NotExported:\n"
+        "    def __init__(self) -> None:\n"
+        "        self.unreported = 6\n",
+        encoding="utf-8",
+    )
+    # Sorted, not in walk order: the payload is which attributes are reported, and pinning
+    # the traversal order would specify the implementation instead of the contract.
+    assert sorted(_unannotated_public_attributes(module, {"Exported"})) == [
+        "Exported.chained_a",
+        "Exported.chained_b",
+        "Exported.unpacked_a",
+        "Exported.unpacked_b",
+    ]
+
+
 def test_third_party_runtime_dependencies_are_exact() -> None:
     """The runtime dependency set and its ranges are closed; this test is what closes them.
 
@@ -474,6 +602,23 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
     # The stages must still be the matrix leg, or "after the stages" would mean one of them.
     assert "matrix:" in blocks["publish-pypi-stages"]
     assert "matrix:" not in blocks["publish-pypi"]
+
+
+def test_the_changelog_carries_one_unreleased_section_at_the_top() -> None:
+    """`release.yml` reads a version's section up to the next `## `, so a second
+    `## Unreleased` below a released heading truncates that release's notes.
+
+    v0.2.0 shipped that way: a `## Unreleased` left in place when the release section was
+    added above it stranded four entries, and the extraction stopped before them, so they
+    reached no reader. One heading, and first, is what keeps that extraction total.
+    """
+    headings = [
+        line
+        for line in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+        if line.startswith("## ")
+    ]
+    assert headings.count("## Unreleased") <= 1, headings
+    assert "## Unreleased" not in headings[1:], headings
 
 
 def test_type_check_configuration_covers_every_workspace_package() -> None:
