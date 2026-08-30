@@ -6,5 +6,5 @@ class TreeBuilderError(Exception):
         self, message: str, *, code: str = "tree_builder_error", **context: object
     ) -> None:
         super().__init__(message)
-        self.code = code
-        self.context = context
+        self.code: str = code
+        self.context: dict[str, object] = context

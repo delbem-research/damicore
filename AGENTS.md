@@ -137,9 +137,12 @@ that cannot change their outcome.
 - Prefer small, cohesive functions. Use classes when they encode a data contract, stateful
   resource lifecycle, or structural protocol; use Pydantic models for validated schemas
   and configuration.
-- Type every function and method. Prefer built-in generics and `X | None`; avoid `Any`,
-  unchecked casts, and broad suppressions. Any unavoidable `type: ignore` or `noqa` must
-  name the rule and explain the boundary it isolates.
+- Type every function and method, and every public attribute a published class exposes;
+  Pyright infers the attribute from this checkout either way, so only the annotation reaches
+  a consumer's checker. `tests/architecture/test_boundaries.py` enforces the attribute half.
+  Prefer built-in generics and `X | None`; avoid `Any`, unchecked casts, and broad
+  suppressions. Any unavoidable `type: ignore` or `noqa` must name the rule and explain the
+  boundary it isolates.
 - Validate untrusted values at public, file, deserialization, and process boundaries.
   Raise the public error class fixed by `packages/damicore/tests/test_error_contract.py`,
   with a stable code, actionable message, bounded context, and explicit exception chaining.

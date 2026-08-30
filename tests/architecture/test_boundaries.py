@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -59,6 +60,77 @@ def _classifiers(package: str) -> list[str]:
 def _release(version: str) -> tuple[int, int, int]:
     major, minor, patch = version.split(".")
     return int(major), int(minor), int(patch)
+
+
+def _exported_names(package: str) -> set[str]:
+    """The names a package's ``__init__`` lists in ``__all__``, read statically.
+
+    `test_package_inits_only_re_export` already holds `__all__` to a literal list, so parsing
+    it is exact rather than a best effort.
+    """
+    path = ROOT / "packages" / package / "src" / package / "__init__.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        named = (target for target in node.targets if isinstance(target, ast.Name))
+        if not any(target.id == "__all__" for target in named):
+            continue
+        value = node.value
+        if isinstance(value, ast.List):
+            return {
+                element.value
+                for element in value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+    raise AssertionError(f"{package} declares no `__all__` list")
+
+
+def _assigned_names(targets: list[ast.expr]) -> Iterator[ast.expr]:
+    """Every name an assignment binds, with tuple and list unpacking flattened.
+
+    `self.a = self.b = x` and `self.a, self.b = pair` bind public attributes exactly as a
+    single target does, so a walker that only reads `targets[0]` checks less than it appears to.
+    """
+    for target in targets:
+        if isinstance(target, ast.Tuple | ast.List):
+            yield from _assigned_names(list(target.elts))
+        else:
+            yield target
+
+
+def _unannotated_public_attributes(path: Path, exported: set[str]) -> list[str]:
+    """Public ``self.<name> = ...`` bindings in an exported class that declare no type.
+
+    Reported as ``Class.name``. A name annotated at class level, or at the assignment itself,
+    is already declared and is not reported; a `_`-prefixed name is not public.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    bare: list[str] = []
+    for klass in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        if klass.name not in exported:
+            continue
+        declared = {
+            statement.target.id
+            for statement in klass.body
+            if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+        }
+        for initializer in klass.body:
+            if not isinstance(initializer, ast.FunctionDef) or initializer.name != "__init__":
+                continue
+            for node in ast.walk(initializer):
+                if not isinstance(node, ast.Assign):
+                    continue
+                for target in _assigned_names(node.targets):
+                    if (
+                        isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "self"
+                        and not target.attr.startswith("_")
+                        and target.attr not in declared
+                    ):
+                        bare.append(f"{klass.name}.{target.attr}")
+    return bare
 
 
 def _imports(path: Path) -> set[str]:
@@ -300,6 +372,25 @@ def test_every_public_package_ships_the_typing_marker_it_advertises() -> None:
     for package in sorted(PUBLIC):
         marker = ROOT / "packages" / package / "src" / package / "py.typed"
         assert marker.is_file(), package
+
+
+def test_public_classes_annotate_the_attributes_they_expose() -> None:
+    """py.typed makes the types a consumer's checker reads; inference does not carry that far.
+
+    Pyright resolves a bare `self.x = ...` from this workspace, so `make check` passes with or
+    without the annotation, and the gap is invisible here. A consumer reads the wheel through
+    their own checker, which may resolve it another way -- `pyright --verifytypes` reports the
+    attribute, and every class inheriting it, as partially unknown. `DamicoreError` is the base
+    of every public error class, so one bare assignment there reached the whole hierarchy.
+    """
+    for package in sorted(PUBLIC):
+        exported = _exported_names(package)
+        source = ROOT / "packages" / package / "src" / package
+        modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
+        assert modules, package
+        for module in modules:
+            bare = _unannotated_public_attributes(module, exported)
+            assert not bare, f"{module}: {bare}"
 
 
 def test_third_party_runtime_dependencies_are_exact() -> None:

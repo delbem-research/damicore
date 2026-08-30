@@ -69,9 +69,8 @@ class DistanceMatrixView:
         materialization_limit_bytes: int = 268_435_456,
         materialization_error: Callable[[str], Exception] = ValueError,
     ) -> None:
-        # Annotated rather than inferred: these two are the public attributes of this view,
-        # and an inferred attribute on a py.typed package is one a consumer's checker may
-        # resolve differently from the one this repository runs.
+        # Annotated, not inferred: tests/architecture/test_boundaries.py
+        # ::test_public_classes_annotate_the_attributes_they_expose owns the rule and the why.
         self.path: Path = Path(path)
         self.labels: tuple[str, ...] = tuple(labels)
         self._limit = materialization_limit_bytes
