@@ -393,6 +393,43 @@ def test_public_classes_annotate_the_attributes_they_expose() -> None:
             assert not bare, f"{module}: {bare}"
 
 
+def test_the_attribute_check_reads_every_binding_form_and_only_public_ones(
+    tmp_path: Path,
+) -> None:
+    """The check above passes over the packages; that says nothing about what it can see.
+
+    No `__init__` in the five packages chains or unpacks its bindings today, so the branch
+    handling those forms runs against no input at all -- and coverage would not say so, since
+    it measures the packages rather than this suite. A fixture is the only thing that keeps
+    the branch honest: strip it, and every real module still passes while an attribute goes
+    unreported. The exclusions are here for the same reason, in the same direction: a check
+    that reported a `_`-prefixed or already-annotated name would be noise nothing measures.
+    """
+    module = tmp_path / "sample.py"
+    module.write_text(
+        "class Exported:\n"
+        "    annotated: int\n"
+        "    def __init__(self) -> None:\n"
+        "        self.chained_a = self.chained_b = 1\n"
+        "        self.unpacked_a, self.unpacked_b = (1, 2)\n"
+        "        self.at_assignment: int = 3\n"
+        "        self.annotated = 4\n"
+        "        self._private = 5\n"
+        "class NotExported:\n"
+        "    def __init__(self) -> None:\n"
+        "        self.unreported = 6\n",
+        encoding="utf-8",
+    )
+    # Sorted, not in walk order: the payload is which attributes are reported, and pinning
+    # the traversal order would specify the implementation instead of the contract.
+    assert sorted(_unannotated_public_attributes(module, {"Exported"})) == [
+        "Exported.chained_a",
+        "Exported.chained_b",
+        "Exported.unpacked_a",
+        "Exported.unpacked_b",
+    ]
+
+
 def test_third_party_runtime_dependencies_are_exact() -> None:
     """The runtime dependency set and its ranges are closed; this test is what closes them.
 
