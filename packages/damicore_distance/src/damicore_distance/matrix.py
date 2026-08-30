@@ -69,8 +69,11 @@ class DistanceMatrixView:
         materialization_limit_bytes: int = 268_435_456,
         materialization_error: Callable[[str], Exception] = ValueError,
     ) -> None:
-        self.path = Path(path)
-        self.labels = tuple(labels)
+        # Annotated rather than inferred: these two are the public attributes of this view,
+        # and an inferred attribute on a py.typed package is one a consumer's checker may
+        # resolve differently from the one this repository runs.
+        self.path: Path = Path(path)
+        self.labels: tuple[str, ...] = tuple(labels)
         self._limit = materialization_limit_bytes
         self._materialization_error = materialization_error
         self._matrix: np.memmap[Any, Any] | None = np.load(
