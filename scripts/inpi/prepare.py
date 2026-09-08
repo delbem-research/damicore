@@ -10,10 +10,11 @@ import re
 import subprocess
 import sys
 import tempfile
-import tomllib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+import tomllib
 
 STAGE_PACKAGES = (
     "damicore_normalizer",
@@ -57,8 +58,7 @@ def run_git(repo: Path, *args: str, binary: bool = False) -> str | bytes:
         completed = subprocess.run(
             ["git", "-C", str(repo), *args],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
     except FileNotFoundError as exc:
         raise PreparationError("Git is required but was not found on PATH") from exc
