@@ -1,0 +1,27 @@
+name: Refresh tornado lock
+
+on:
+  push:
+    branches: [fix/tornado-6.5.8]
+
+permissions:
+  contents: read
+
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+        with:
+          sync: none
+      - run: uv lock --upgrade-package tornado
+      - run: git diff --check && git diff -- uv.lock
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: tornado-lock
+          path: uv.lock
+          if-no-files-found: error
