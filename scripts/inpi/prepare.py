@@ -65,9 +65,7 @@ class PreparedSoftware:
 
 def run_git(repo: Path, *args: str, binary: bool = False) -> str | bytes:
     try:
-        completed = subprocess.run(
-            ["git", "-C", str(repo), *args], check=True, capture_output=True
-        )
+        completed = subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
     except FileNotFoundError as exc:
         raise PreparationError("Git is required but was not found on PATH") from exc
     except subprocess.CalledProcessError as exc:
@@ -256,8 +254,7 @@ def write_archive(repo: Path, destination: Path, plan: PackagePlan) -> None:
         if names != expected or len(names) != len(set(names)):
             raise PreparationError(f"archive entry list mismatch in {destination.name}")
         if any(
-            PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts
-            for name in names
+            PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts for name in names
         ):
             raise PreparationError(f"unsafe archive path in {destination.name}")
         corrupt = archive.testzip()
@@ -447,10 +444,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{item.spec.title}")
         print(f"  archive: {item.archive_name}")
         print(f"  SHA-512: {item.sha512}")
-    print(
-        f"\nRegistration record {'created' if created else 'verified'}; "
-        "SHA512SUMS.txt written."
-    )
+    print(f"\nRegistration record {'created' if created else 'verified'}; SHA512SUMS.txt written.")
     return 0
 
 
