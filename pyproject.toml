@@ -1,6 +1,9 @@
 [tool.uv.workspace]
 members = ["packages/*"]
 
+[tool.uv]
+constraint-dependencies = ["tornado==6.5.8"]
+
 [dependency-groups]
 dev = [
     "build>=1.2,<2",
