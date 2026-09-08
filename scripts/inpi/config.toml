@@ -1,0 +1,29 @@
+schema_version = 1
+
+[[software]]
+source = "packages/damicore_normalizer"
+title = "DAMICORE Normalizer"
+languages = ["Python"]
+application_fields = ["IF10", "MT06"]
+program_types = ["TC01", "UT01"]
+
+[[software]]
+source = "packages/damicore_distance"
+title = "DAMICORE Distance"
+languages = ["Python"]
+application_fields = ["IF10", "MT06"]
+program_types = ["TC01", "TC03"]
+
+[[software]]
+source = "packages/damicore_tree_builder"
+title = "DAMICORE Tree Builder"
+languages = ["Python"]
+application_fields = ["IF10", "MT06"]
+program_types = ["TC01"]
+
+[[software]]
+source = "packages/damicore_clusterizer"
+title = "DAMICORE Clusterizer"
+languages = ["Python"]
+application_fields = ["IF10", "MT06"]
+program_types = ["TC01", "TC03"]
