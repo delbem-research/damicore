@@ -432,7 +432,7 @@ wheels = [
 
 [[package]]
 name = "damicore"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/damicore" }
 dependencies = [
     { name = "damicore-clusterizer" },
@@ -460,7 +460,7 @@ requires-dist = [
 
 [[package]]
 name = "damicore-clusterizer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/damicore_clusterizer" }
 dependencies = [
     { name = "igraph" },
@@ -475,7 +475,7 @@ requires-dist = [
 
 [[package]]
 name = "damicore-distance"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/damicore_distance" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -498,7 +498,7 @@ provides-extras = ["pandas"]
 
 [[package]]
 name = "damicore-normalizer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/damicore_normalizer" }
 dependencies = [
     { name = "openpyxl" },
@@ -515,7 +515,7 @@ requires-dist = [
 
 [[package]]
 name = "damicore-tree-builder"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/damicore_tree_builder" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },

@@ -39,8 +39,8 @@ contact:
 
 repository-code: "https://github.com/delbem-research/damicore"
 url: "https://pypi.org/project/damicore/"
-version: 0.2.0
-date-released: "2026-08-12"
+version: 0.3.0
+date-released: "2026-09-09"
 
 keywords:
   - clustering

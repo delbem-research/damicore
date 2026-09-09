@@ -5,7 +5,7 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
-## Unreleased
+## 0.3.0
 
 ### Added
 
