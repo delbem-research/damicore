@@ -222,3 +222,8 @@ models/**/paper/*.run.xml
 models/**/paper/*.synctex.gz
 models/**/paper/*.toc
 models/**/paper/*.pdf
+
+.claude/skills
+.claude/agents
+.agents/skills
+.agents/agents
