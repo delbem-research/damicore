@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import codecs
 import csv
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -62,7 +62,7 @@ def read_header(path: Path, source: DelimitedSource) -> list[str]:
     return header
 
 
-def _validate_record_widths(path: Path, source: DelimitedSource, width: int) -> None:
+def validate_record_widths(path: Path, source: DelimitedSource, width: int) -> None:
     """Reject any record whose field count disagrees with the mandatory header.
 
     ``on_bad_lines="error"`` cannot express this rule on its own. When every data row carries
@@ -95,12 +95,22 @@ def _validate_record_widths(path: Path, source: DelimitedSource, width: int) -> 
         raise NormalizerError("Delimited parsing failed", code="dataset_format_error") from exc
 
 
-def _iter_records(
+def iter_records(
     path: Path,
     source: DelimitedSource,
     header: list[str],
     chunk_rows: int,
+    *,
+    columns: Sequence[int] | None = None,
 ) -> Iterator[tuple[str, ...]]:
+    """Stream the data rows as text, whole or restricted to ``columns`` by position.
+
+    The seam every consumer of a delimited file meets: :func:`scan_delimited` splits what
+    comes out of it and the partition ranks and routes it. It validates nothing structural
+    itself; the caller runs :func:`validate_record_widths` first, once, so the width rule
+    has one pass rather than one per consumer.
+    """
+    expected = header if columns is None else [header[index] for index in columns]
     chunks = pd.read_csv(
         path,
         sep=source.delimiter,
@@ -117,12 +127,29 @@ def _iter_records(
         # No inference of any kind, including an index inferred from row width. Records
         # are already known to match the header, so this only pins the parser's contract.
         index_col=False,
+        usecols=None if columns is None else list(columns),
     )
     for chunk in chunks:
-        if list(chunk.columns) != header:
+        if list(chunk.columns) != expected:
             raise NormalizerError("Header changed while parsing", code="dataset_format_error")
         for values in chunk.itertuples(index=False, name=None):
             yield tuple(str(value) for value in values)
+
+
+@contextmanager
+def translating_parse_failures() -> Generator[None]:
+    """Turn what pandas raises while streaming records into this package's one refusal.
+
+    Owned here so every consumer of :func:`iter_records` refuses a malformed file with the
+    same code and message rather than each translating the parser's exceptions itself.
+    ``pd.errors.ParserError`` is a ``ValueError`` subclass, so the tuple covers it.
+    """
+    try:
+        yield
+    except NormalizerError:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise NormalizerError("Delimited parsing failed", code="dataset_format_error") from exc
 
 
 def scan_delimited(
@@ -139,21 +166,16 @@ def scan_delimited(
 
     # Structure is settled before anything is created, so a malformed file never leaves a
     # partially written objects directory behind.
-    _validate_record_widths(path, source, len(header))
+    validate_record_widths(path, source, len(header))
 
     if objects_dir is not None:
         objects_dir.mkdir(parents=True, exist_ok=False)
-    try:
+    with translating_parse_failures():
         return split_table(
             header,
-            _iter_records(path, source, header, chunk_rows),
+            iter_records(path, source, header, chunk_rows),
             split=source.split,
             chunk_rows=chunk_rows,
             max_open_files=max_open_files,
             objects_dir=objects_dir,
         )
-    except NormalizerError:
-        raise
-    except (OSError, UnicodeError, ValueError) as exc:
-        # pd.errors.ParserError is a ValueError subclass, already caught above.
-        raise NormalizerError("Delimited parsing failed", code="dataset_format_error") from exc

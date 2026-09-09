@@ -57,6 +57,38 @@ The manifest records `object_encoding` -- `json-lines/1` for a split dataset,
 `raw-bytes/1` for adopted files -- because an NCD value is only meaningful
 relative to the bytes it measured.
 
+## Partitioning a dataset by a numeric column
+
+To cluster the best and the worst segments of a population separately, split
+the dataset first. `partition_dataset` ranks the rows by one numeric column
+and writes, for each requested partition, the rows with the highest values
+and the rows with the lowest values as complete datasets, plus a
+`partition.json` recording what chose them.
+
+```python
+from damicore_normalizer import partition_dataset
+
+result = partition_dataset("population.csv", "segments", column="fitness")
+for item in result.manifest.files:
+    print(item.relative_path, item.row_count)
+```
+
+By default the halves, quarters, eighths, sixteenths and thirty-seconds
+(`quantiles=(2, 4, 8, 16, 32)`), the top and bottom 5, 10 and 20 percent of
+rows (`percentiles=(5, 10, 20)`), and Fisher-Jenks natural breaks into 2 to 5
+classes (`jenks_classes=(2, 3, 4, 5)`) are emitted; pass an empty sequence to
+disable a method. Files are named `{method}_{parameter:02d}_{high|low}.csv`,
+hold the input's rows in input order with every cell unchanged, and are
+always `,`-delimited UTF-8, so each one feeds `materialize_objects` or
+`damicore.run` with no further argument. A spreadsheet is partitioned the
+same way with `source_kind="xlsx"`.
+
+The decimal separator of the column is detected by testing `.` and `,`
+against every cell, or declared with `decimal=`; a column that fits neither
+is refused naming the offending rows, never guessed. Every rule the files
+depend on is versioned as `partition_rule` v1 and specified in the
+[partitioning specification](https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/dataset-partitioning.md).
+
 ## Links
 
 - Repository: <https://github.com/Delbem-Research-and-Innovation/damicore>

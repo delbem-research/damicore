@@ -73,6 +73,14 @@ def _fixtures(directory: Path) -> None:
     """
     generate_csv(directory / "dataset.csv", rows=12, columns=4, clusters=2, seed=7)
 
+    # The partitioning example ranks a numeric column with the default methods, which need
+    # at least 32 rows and 5 distinct values; the synthetic dataset above has neither.
+    population = ["id,fitness,trait"]
+    population.extend(
+        f"p{index:02d},{(index * 37) % 100 / 10:.1f},t{index % 3}" for index in range(40)
+    )
+    (directory / "population.csv").write_text("\n".join(population) + "\n", encoding="utf-8")
+
     workbook = Workbook()
     sheet = workbook.active
     assert sheet is not None

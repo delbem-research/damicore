@@ -65,3 +65,29 @@ A files source produces `raw-bytes/1`.
 The manifest records which of the two it used, because an NCD value is only
 meaningful relative to the bytes it measured. See
 [ADR 0008](decisions/0008-named-object-encoding.md).
+
+## Partitioning by a numeric column
+
+`partition_dataset` reads a dataset source under the rules above, with no
+`split`, and writes subsets of its rows chosen by one numeric column. The
+column's cells must satisfy a closed numeric grammar: ASCII digits, an
+optional sign, one decimal separator, an optional exponent of at most six
+digits, and spaces or tabs around it; nothing else, so `NaN`, an empty cell,
+a thousands separator, or a line break inside a cell is refused naming the
+data row. The separator is `.` or `,`, declared with `decimal=` or resolved by
+testing both against every cell: the one every cell satisfies wins, a column
+with no separator at all resolves to `.`, and a column that fits neither is
+refused naming the first failing row of each hypothesis. There is no locale
+and no sampling.
+
+Rows are ordered by value descending, then file position, so equal values
+keep their input order. Three methods cut that order: `quantile` q and
+`percentile` p by rank, in exact integer arithmetic; `jenks` k by
+Fisher-Jenks natural breaks over the distinct values, in exact rational
+arithmetic, so equal values never separate and the result is identical on
+every platform. Each partition emits a `high` and a `low` file, and every
+emitted file is a pure subset of the input in input order, cells unchanged,
+always `,`-delimited UTF-8 with LF, whatever the input was. Everything the
+files depend on is versioned as `partition_rule` v1 and specified in
+[docs/dataset-partitioning.md](dataset-partitioning.md);
+the decision is [ADR 0014](decisions/0014-dataset-partitioning.md).

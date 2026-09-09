@@ -7,6 +7,18 @@ carries anything else, a date included, matches neither and fails the release.
 
 ## Unreleased
 
+### Added
+
+- `damicore_normalizer.partition_dataset`: split a dataset into high and low subset files by
+  a numeric column, by equal-count quantiles, equal-count percentiles, or exact Fisher-Jenks
+  natural breaks. Each emitted file is a pure subset of the input in input order, always
+  `,`-delimited UTF-8, so it re-enters the pipeline with no further argument, and
+  `partition.json` records the input digest, the column, the resolved decimal separator and
+  each file's rank interval, size and SHA-256. The decimal separator is detected by
+  falsification against every cell or declared with `decimal=`. `PartitionResult`,
+  `PartitionManifest` and `PartitionFile` join the public surface. Rules are versioned as
+  `partition_rule` v1; see ADR 0014 and `docs/dataset-partitioning.md`.
+
 ### Changed
 
 - A run no longer writes `checkpoints/pipeline.json`. Stage receipts live in
