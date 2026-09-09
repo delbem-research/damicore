@@ -1,4 +1,4 @@
-from damicore_normalizer.api import materialize_objects, normalize_csv
+from damicore_normalizer.api import materialize_objects, normalize_csv, partition_dataset
 from damicore_normalizer.config import (
     DelimitedSource,
     FileCorpusSource,
@@ -10,6 +10,9 @@ from damicore_normalizer.manifest import (
     NormalizationManifest,
     NormalizationResult,
     ObjectDescriptor,
+    PartitionFile,
+    PartitionManifest,
+    PartitionResult,
 )
 
 __all__ = [
@@ -26,4 +29,12 @@ __all__ = [
     "NormalizationManifest",
     "ObjectDescriptor",
     "NormalizerError",
+    # Dataset partitioning, upstream of the source axis (ADR 0014). The manifest and file
+    # models are exported for the same reason the normalization ones are: they are the
+    # documented contract of partition.json, and a typed consumer of `manifest.files` should
+    # see a public type.
+    "partition_dataset",
+    "PartitionResult",
+    "PartitionManifest",
+    "PartitionFile",
 ]

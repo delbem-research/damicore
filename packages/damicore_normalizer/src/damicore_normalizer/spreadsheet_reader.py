@@ -3,7 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import math
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,7 +45,7 @@ _WORKBOOK_FAILURES = (
 
 
 @dataclass(frozen=True)
-class _UsedRange:
+class UsedRange:
     """The smallest rectangle containing every non-blank cell, as 1-based inclusive bounds."""
 
     min_row: int
@@ -148,7 +149,7 @@ def _resolve_sheet_name(names: list[str], source: SpreadsheetSource) -> str:
     return source.sheet
 
 
-def _resolve_and_bound(path: Path, source: SpreadsheetSource) -> tuple[str, _UsedRange]:
+def resolve_and_bound(path: Path, source: SpreadsheetSource) -> tuple[str, UsedRange]:
     """Choose the worksheet and find its real data rectangle, on one open workbook.
 
     Reading the sheet names and scanning for the bounds are two questions about the same
@@ -186,10 +187,22 @@ def _resolve_and_bound(path: Path, source: SpreadsheetSource) -> tuple[str, _Use
         workbook.close()
     if minimum_row == 0:
         raise NormalizerError("Worksheet contains no data", code="dataset_format_error")
-    return sheet, _UsedRange(minimum_row, maximum_row, minimum_column, maximum_column)
+    return sheet, UsedRange(minimum_row, maximum_row, minimum_column, maximum_column)
 
 
-def _iter_used_rows(path: Path, sheet: str, bounds: _UsedRange) -> Iterator[tuple[str, ...]]:
+def iter_used_rows(
+    path: Path,
+    sheet: str,
+    bounds: UsedRange,
+    *,
+    columns: Sequence[int] | None = None,
+) -> Iterator[tuple[str, ...]]:
+    """Stream the used range as text rows, header row first, whole or restricted by position.
+
+    The spreadsheet side of the seam :func:`damicore_normalizer.delimited_reader.iter_records`
+    is the delimited side of. Every row is already the used-range width, so a consumer that
+    selects ``columns`` gets exactly those cells of every row, including the header row.
+    """
     workbook = _open(path)
     try:
         worksheet = workbook[sheet]
@@ -200,7 +213,10 @@ def _iter_used_rows(path: Path, sheet: str, bounds: _UsedRange) -> Iterator[tupl
             max_col=bounds.max_column,
             values_only=True,
         ):
-            yield tuple(cell_text(value) for value in row)
+            if columns is None:
+                yield tuple(cell_text(value) for value in row)
+            else:
+                yield tuple(cell_text(row[index]) for index in columns)
     finally:
         workbook.close()
 
@@ -218,8 +234,8 @@ def scan_spreadsheet(
     Returns the scan together with the resolved worksheet name, which the manifest records
     so a completed run never leaves which sheet was analyzed to be inferred.
     """
-    sheet, bounds = _resolve_and_bound(path, source)
-    rows = _iter_used_rows(path, sheet, bounds)
+    sheet, bounds = resolve_and_bound(path, source)
+    rows = iter_used_rows(path, sheet, bounds)
     try:
         header = next(rows)
     except StopIteration as exc:  # pragma: no cover - _used_range already rejects this
@@ -228,7 +244,7 @@ def scan_spreadsheet(
 
     if objects_dir is not None:
         objects_dir.mkdir(parents=True, exist_ok=False)
-    try:
+    with translating_workbook_failures():
         scan = split_table(
             header,
             rows,
@@ -237,8 +253,19 @@ def scan_spreadsheet(
             max_open_files=max_open_files,
             objects_dir=objects_dir,
         )
+    return scan, sheet
+
+
+@contextmanager
+def translating_workbook_failures() -> Generator[None]:
+    """Turn what openpyxl raises while streaming rows into this package's one refusal.
+
+    Owned here for the same reason the delimited reader owns its counterpart: every consumer
+    of :func:`iter_used_rows` refuses a malformed workbook identically.
+    """
+    try:
+        yield
     except NormalizerError:
         raise
     except _WORKBOOK_FAILURES as exc:
         raise NormalizerError("Workbook parsing failed", code="dataset_format_error") from exc
-    return scan, sheet

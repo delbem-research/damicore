@@ -1,6 +1,6 @@
 [project]
 name = "damicore-tree-builder"
-version = "0.2.0"
+version = "0.3.0"
 description = "Neighbor-Joining tree builder for the DAMICORE pipeline."
 readme = "README.md"
 license = "Apache-2.0"

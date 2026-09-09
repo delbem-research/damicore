@@ -42,16 +42,26 @@ class _FilePool:
         self._streams.clear()
 
 
+def validate_header_names(header: Sequence[str]) -> None:
+    """Reject a header whose names cannot label anything: empty, or repeated.
+
+    The part of the table contract that holds for every consumer of a header, split or not.
+    :func:`validate_table_shape` adds the split-specific minimum on top of it; the partition,
+    which has no split, calls this alone.
+    """
+    if not header or any(name == "" for name in header):
+        raise NormalizerError("Header names must be non-empty", code="dataset_format_error")
+    if len(set(header)) != len(header):
+        raise NormalizerError("Header names must be unique", code="dataset_format_error")
+
+
 def validate_table_shape(header: Sequence[str], split: Literal["columns", "rows"]) -> None:
     """Reject a header that cannot produce objects, before anything is created.
 
     Applied by every dataset format, so a spreadsheet and a delimited file are refused for
     the same reasons with the same codes rather than each format inventing its own.
     """
-    if not header or any(name == "" for name in header):
-        raise NormalizerError("Header names must be non-empty", code="dataset_format_error")
-    if len(set(header)) != len(header):
-        raise NormalizerError("Header names must be unique", code="dataset_format_error")
+    validate_header_names(header)
     if split == "columns" and len(header) < 2:
         raise NormalizerError(
             "columns split requires at least two columns",

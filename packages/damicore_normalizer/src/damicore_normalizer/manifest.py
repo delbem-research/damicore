@@ -114,3 +114,135 @@ class NormalizationResult(BaseModel):
     object_count: int = Field(ge=0)
     total_bytes: int = Field(ge=0)
     objects: tuple[ObjectDescriptor, ...]
+
+
+PartitionMethod = Literal["quantile", "percentile", "jenks"]
+PartitionEnd = Literal["high", "low"]
+
+# The order files take in a manifest, and the parameter range each method admits. Both live
+# beside the schema they validate so a hand-edited manifest is refused by the same rule the
+# writer followed.
+PARTITION_METHOD_ORDER: tuple[PartitionMethod, ...] = ("quantile", "percentile", "jenks")
+PARTITION_PARAMETER_RANGES: dict[PartitionMethod, tuple[int, int | None]] = {
+    "quantile": (2, None),
+    "percentile": (1, 50),
+    "jenks": (2, None),
+}
+
+
+class DelimitedPartitionInput(BaseModel):
+    """The delimited file a partition read. Not the normalization manifest's variant: that
+    one carries `split`, which does not apply to a partition and could not be carried
+    without being ignored."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    kind: Literal["delimited"]
+    path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=0)
+    delimiter: str = Field(min_length=1, max_length=1)
+    encoding: str
+
+
+class SpreadsheetPartitionInput(BaseModel):
+    """The worksheet a partition read, with the resolved sheet name and the cell-text rule
+    that turned its typed cells into the text the numeric grammar saw."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    kind: Literal["xlsx"]
+    path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=0)
+    sheet: str
+    cell_text_rule: Literal["v1"]
+
+
+PartitionInput = Annotated[
+    DelimitedPartitionInput | SpreadsheetPartitionInput,
+    Field(discriminator="kind"),
+]
+
+
+class PartitionFile(BaseModel):
+    """One emitted subset: which partition end it is, which ranks it holds, and its bytes.
+
+    The file name and the row count are derived, not persisted: the name is fixed by the
+    naming rule and the count is a difference of two fields, so storing either would be a
+    second copy of a truth already in the record.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    method: PartitionMethod
+    parameter: int
+    end: PartitionEnd
+    rank_start: int = Field(ge=0)
+    rank_end: int
+    size_bytes: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _parameter_in_range_and_interval_non_empty(self) -> Self:
+        low, high = PARTITION_PARAMETER_RANGES[self.method]
+        if self.parameter < low or (high is not None and self.parameter > high):
+            raise ValueError(f"{self.method} parameter {self.parameter} is out of range")
+        if self.rank_start >= self.rank_end:
+            raise ValueError("a partition file holds at least one rank")
+        return self
+
+    @property
+    def relative_path(self) -> str:
+        return f"{self.method}_{self.parameter:02d}_{self.end}.csv"
+
+    @property
+    def row_count(self) -> int:
+        return self.rank_end - self.rank_start
+
+
+class PartitionManifest(BaseModel):
+    """The schema of partition.json: what reproduces the partition and what verifies it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    schema_version: Literal[1]
+    partition_rule: Literal["v1"]
+    input: PartitionInput
+    column: str
+    decimal: Literal[".", ","]
+    row_count: int = Field(ge=2)
+    files: tuple[PartitionFile, ...]
+
+    @model_validator(mode="after")
+    def _files_are_paired_ordered_and_within_the_rows(self) -> Self:
+        ends: dict[tuple[PartitionMethod, int], set[PartitionEnd]] = {}
+        for item in self.files:
+            if item.rank_end > self.row_count:
+                raise ValueError("a partition file ends past the last rank")
+            if item.end == "high" and item.rank_start != 0:
+                raise ValueError("a high file starts at rank 0")
+            if item.end == "low" and item.rank_end != self.row_count:
+                raise ValueError("a low file ends at the last rank")
+            ends.setdefault((item.method, item.parameter), set()).add(item.end)
+        if any(present != {"high", "low"} for present in ends.values()) or len(self.files) != (
+            2 * len(ends)
+        ):
+            raise ValueError("every partition has exactly one high and one low file")
+        keys = [
+            (PARTITION_METHOD_ORDER.index(item.method), item.parameter, item.end == "low")
+            for item in self.files
+        ]
+        if keys != sorted(keys):
+            raise ValueError("partition files are ordered by method, parameter, then end")
+        return self
+
+
+class PartitionResult(BaseModel):
+    """What partition_dataset returns: where the manifest is, and the manifest itself, so
+    the result cannot disagree with the artifact."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    manifest_path: Path
+    manifest: PartitionManifest

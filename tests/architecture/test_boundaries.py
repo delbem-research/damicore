@@ -176,6 +176,10 @@ def test_public_exports_are_exact() -> None:
         "NormalizationManifest",
         "ObjectDescriptor",
         "NormalizerError",
+        "partition_dataset",
+        "PartitionResult",
+        "PartitionManifest",
+        "PartitionFile",
     ]
     assert damicore_distance.__all__ == [
         "compute_distance_matrix",

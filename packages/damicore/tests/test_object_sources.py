@@ -13,7 +13,12 @@ import json
 from pathlib import Path
 
 import pytest
-from damicore_normalizer import DelimitedSource, FileCorpusSource, SpreadsheetSource
+from damicore_normalizer import (
+    DelimitedSource,
+    FileCorpusSource,
+    SpreadsheetSource,
+    partition_dataset,
+)
 from openpyxl import Workbook
 
 from damicore import ConfigurationError, ExecutionConfig, estimate, run
@@ -85,6 +90,42 @@ def test_a_file_corpus_runs_end_to_end_without_any_dataset_setting(tmp_path: Pat
     assert manifest["config"]["split"] is None
     assert manifest["config"]["delimiter"] is None
     assert manifest["config"]["encoding"] is None
+
+
+def test_a_partition_subset_runs_with_no_delimiter_or_encoding_argument(tmp_path: Path) -> None:
+    """A subset `partition_dataset` emits is a dataset in the library's default form, so it
+    must enter `run` exactly like any hand-written CSV would: no delimiter, no encoding. The
+    input was deliberately written in another form, so the claim is about the emitted bytes
+    and not about the input surviving unchanged."""
+    source = tmp_path / "population.csv"
+    with source.open("w", encoding="latin-1", newline="") as stream:
+        stream.write("id;score;alpha;beta\r\n")
+        for row in range(12):
+            stream.write(
+                f"r{row};{row * 7 % 12};{'shared preamble ' * (row + 1)};"
+                f"{f'beta value {row}' * (row + 2)}\r\n"
+            )
+    partition = partition_dataset(
+        source,
+        tmp_path / "segments",
+        column="score",
+        quantiles=(2,),
+        percentiles=(),
+        jenks_classes=(),
+        delimiter=";",
+        encoding="latin-1",
+    )
+    subset = partition.manifest_path.parent / partition.manifest.files[0].relative_path
+    result = run(subset, output_dir=tmp_path / "run", progress=False, execution=SERIAL)
+    try:
+        assert result.report.status == "completed"
+        assert list(result.membership["label"]) == ["id", "score", "alpha", "beta"]
+    finally:
+        result.close()
+    manifest = json.loads((tmp_path / "run/manifest.json").read_text(encoding="utf-8"))
+    assert manifest["input"]["sha256"] == partition.manifest.files[0].sha256
+    assert manifest["config"]["delimiter"] == ","
+    assert manifest["config"]["encoding"] == "utf-8"
 
 
 def test_a_list_of_files_is_accepted_as_a_corpus(tmp_path: Path) -> None:

@@ -261,7 +261,7 @@ def test_cell_text_is_preserved_and_escaped_only_by_json(tmp_path: Path) -> None
 # later chunk, which take different code paths.
 # The discriminator names the line and the counts, so a width row cannot silently start
 # passing through pandas' own on_bad_lines translation, which raises the same code from a
-# different site. Without it, deleting _validate_record_widths outright left these passing.
+# different site. Without it, deleting validate_record_widths outright left these passing.
 MALFORMED_INPUTS = [
     pytest.param(b"a,b\n1,2,3\n", "Line 2 has 3 fields", id="every-row-wider-than-header"),
     pytest.param(b"a,b\n1,2,3,4\n", "Line 2 has 4 fields", id="two-fields-wider-than-header"),

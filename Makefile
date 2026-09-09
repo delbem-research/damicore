@@ -14,7 +14,7 @@ STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
 
 # Modules held to the 95% critical-coverage floor.
-CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy
+CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks
 
 DIST_DIR ?= dist
 
