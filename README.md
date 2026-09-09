@@ -19,17 +19,21 @@ pip install damicore
 ```
 
 ```python
+from pathlib import Path
+
 from damicore import estimate, run
 
 # The default worker count opens a process pool, and each worker re-imports the calling
 # module. In a `.py` script the call must therefore sit under this guard. A notebook or REPL
 # also satisfies it, so the guard is safe everywhere; `ExecutionConfig(workers=1)` avoids the
 # pool entirely.
+SAMPLES = Path("data/samples")
+
 if __name__ == "__main__":
-    preview = estimate("dataset.csv", split="columns")
+    preview = estimate(SAMPLES / "dataset.csv", split="columns")
     print(preview.model_dump())
 
-    result = run("dataset.csv", split="columns")
+    result = run(SAMPLES / "dataset.csv", split="columns", output_dir="results/dataset")
     print(result.membership)
     print(result.clusters)
     print(result.tree_newick)
@@ -37,18 +41,25 @@ if __name__ == "__main__":
     result.close()
 
     # A worksheet. `sheet=` is required when the workbook holds more than one.
-    sheet_result = run("dataset.xlsx", source_kind="xlsx", split="columns")
+    sheet_result = run(
+        SAMPLES / "dataset.xlsx",
+        source_kind="xlsx",
+        split="columns",
+        output_dir="results/workbook",
+    )
+    print(sheet_result.membership)
     sheet_result.close()
 
     # A corpus: every file is an object, so there is no split, delimiter, or encoding.
-    corpus_result = run("corpus", source_kind="files")
+    corpus_result = run(SAMPLES / "corpus", source_kind="files", output_dir="results/corpus")
     print(corpus_result.membership)
     corpus_result.close()
 ```
 
 ```bash
-damicore run corpus --source files
-damicore run dataset.xlsx --source xlsx --sheet Sheet1
+damicore run data/samples/dataset.csv --split columns --output-dir results/dataset
+damicore run data/samples/dataset.xlsx --source xlsx --split columns --output-dir results/workbook
+damicore run data/samples/corpus --source files --output-dir results/corpus
 ```
 
 The default exact algorithm accepts at most 1,000 objects, 500,000 pairs, and
