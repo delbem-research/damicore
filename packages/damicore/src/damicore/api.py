@@ -648,8 +648,9 @@ def run(
         Preflight projected the run outside ``execution.limits``.
     OutputDirectoryConflictError
         ``output_dir`` is not a directory, holds no readable DAMICORE manifest, belongs to a
-        different input or configuration, or holds a compatible run that ``reuse_completed``
-        or ``resume`` forbids continuing.
+        different input or configuration, holds a compatible run that ``reuse_completed``
+        or ``resume`` forbids continuing, or holds a completed run that a different runtime
+        produced, which is never returned as this build's result.
     CheckpointMismatchError
         An incomplete run in ``output_dir`` exists but cannot be trusted to resume.
     CompressionError
@@ -761,18 +762,28 @@ def run(
         )
         if not compatible:
             raise OutputDirectoryConflictError("Output directory belongs to another run")
-        if existing_manifest.get("status") == "completed":
-            if settings.reuse_completed:
-                return load_result(run_dir)
-            raise OutputDirectoryConflictError("Completed output reuse is disabled")
-        if not settings.resume:
-            raise OutputDirectoryConflictError("Incomplete output resume is disabled")
         recorded_runtime = {
             key: str(item) for key, item in json_mapping(existing_manifest.get("runtime")).items()
         }
-        if not recorded_runtime or resume_fingerprint(recorded_runtime) != resume_fingerprint(
-            runtime_fingerprint()
-        ):
+        # The input and config hashes above say what was asked for, never which code answered.
+        # Reuse and resume both hand back bytes this build did not produce, so both are gated
+        # here: a release that redefines a stage would otherwise return the earlier release's
+        # science under its own name, and the cross-artifact verification would still pass,
+        # because the artifacts are internally consistent -- just not this build's.
+        same_runtime = bool(recorded_runtime) and resume_fingerprint(
+            recorded_runtime
+        ) == resume_fingerprint(runtime_fingerprint())
+        if existing_manifest.get("status") == "completed":
+            if not settings.reuse_completed:
+                raise OutputDirectoryConflictError("Completed output reuse is disabled")
+            if not same_runtime:
+                raise OutputDirectoryConflictError(
+                    "Completed run was created by a different runtime fingerprint"
+                )
+            return load_result(run_dir)
+        if not settings.resume:
+            raise OutputDirectoryConflictError("Incomplete output resume is disabled")
+        if not same_runtime:
             raise CheckpointMismatchError(
                 "Incomplete run was created by a different runtime fingerprint"
             )

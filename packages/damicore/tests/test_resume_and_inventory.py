@@ -201,6 +201,35 @@ def test_an_incomplete_run_from_another_runtime_is_refused(
         run(source, output_dir=output, progress=False, execution=_single_worker())
 
 
+def test_a_completed_run_from_another_runtime_is_refused(tmp_path: Path) -> None:
+    """Reuse returns a result this build did not compute, so it needs the same runtime gate
+    resume has. The input hash and the config hash say what was asked for, never which code
+    answered: a later release that redefines a stage would otherwise hand back the earlier
+    release's science under its own name, silently and with a passing verification."""
+    source = _csv(tmp_path)
+    output = tmp_path / "run"
+    run(source, output_dir=output, progress=False, execution=_single_worker()).close()
+    manifest_path = output / "manifest.json"
+    manifest = _read_json(manifest_path)
+    manifest["runtime"]["python"] = "0.0.0"
+    _write_json(manifest_path, manifest)
+    with pytest.raises(OutputDirectoryConflictError, match="different runtime fingerprint"):
+        run(source, output_dir=output, progress=False, execution=_single_worker())
+
+
+def test_a_completed_run_from_this_runtime_is_still_reused(tmp_path: Path) -> None:
+    """The gate must not cost the reuse it guards: an untouched completed run still loads."""
+    source = _csv(tmp_path)
+    output = tmp_path / "run"
+    first = run(source, output_dir=output, progress=False, execution=_single_worker())
+    first.close()
+    second = run(source, output_dir=output, progress=False, execution=_single_worker())
+    second.close()
+    # Equal reports, timings included, is what distinguishes a reused run from a recomputed
+    # one: a second computation cannot reproduce the first one's measured seconds.
+    assert second.report == first.report
+
+
 def test_a_partial_normalization_directory_is_rebuilt_on_resume(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

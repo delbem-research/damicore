@@ -93,6 +93,10 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
   semantic; workers, chunking, sharding, scheduling, temporary state, memory strategy, and
   checkpoint mechanics are operational. Operational choices may change cost or recovery,
   but must not silently redefine scientific identity or result meaning.
+- A semantic choice that changes the result is a named, versioned rule, never a bare
+  parameter value: a citation, a manifest field and a method page can name a rule and cannot
+  name one branch of a `Literal`. Where the choice is already a `Literal` on a semantic
+  config field, that enum is the rule's domain and extending it extends the rule.
 - Treat durable results and transient recovery state as different contracts. A checkpoint
   exists to continue computation; a final artifact exists to represent a result. Do not
   make operational state part of the durable public contract merely because both are
