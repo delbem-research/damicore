@@ -7,6 +7,17 @@ carries anything else, a date included, matches neither and fails the release.
 
 ## 0.4.0
 
+### Changed
+
+- `run()` refuses a completed run in `output_dir` that a different runtime produced, instead
+  of returning it. The input and configuration hashes say what was asked for, never which
+  code answered, so a release that redefines a stage used to hand back the earlier release's
+  result under its own name — and the cross-artifact verification still passed, because the
+  artifacts were internally consistent, just not that build's. Resume has always been gated
+  this way; reuse now shares the same gate. The error is `OutputDirectoryConflictError`,
+  which already exits 5, so no exit code changed. Point the run at a fresh directory to
+  recompute.
+
 ### Added
 
 - `docs/refs.json` records every published work this repository cites, and nothing in it is
