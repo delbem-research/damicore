@@ -1,4 +1,4 @@
-.PHONY: help install check test coverage-critical build wheels clean
+.PHONY: help install check test coverage-critical build wheels clean ref references
 .PHONY: print-public-packages print-stage-packages print-aggregate-package
 
 # The publish allowlist. Deliberately explicit rather than derived from the workspace, so a
@@ -23,6 +23,8 @@ help:
 	@echo "  install               Install all workspace dependencies and git hooks"
 	@echo "  check                 Lint and type-check the workspace"
 	@echo "  test                  Run all tests with coverage gates"
+	@echo "  ref DOI=<doi>         Fetch one work into docs/refs.json and regenerate the bibliography"
+	@echo "  references            Regenerate docs/references.bib from docs/refs.json"
 	@echo "  build                 Build sdist and wheel of the five public distributions"
 	@echo "  wheels                Build wheels only, for the smoke lanes"
 	@echo "  print-public-packages Print the publish allowlist"
@@ -49,6 +51,17 @@ coverage-critical:
 		uv run coverage report --include="*/$$module.py" --fail-under=95 >/dev/null || \
 			{ echo "critical coverage below 95% for $$module.py"; exit 1; }; \
 	done
+
+# The only thing anyone ever types is a DOI. Every field of an entry is copied from a
+# resolver response, so a fabricated citation costs a DOI that must resolve rather than a
+# plausible sentence. The date is passed in rather than read by the script, which keeps the
+# script free of a clock and its output reproducible.
+ref:
+	@test -n "$(DOI)" || { echo "usage: make ref DOI=<doi>"; exit 2; }
+	uv run python .github/scripts/references.py add "$(DOI)" --today "$$(date -u +%F)"
+
+references:
+	uv run python .github/scripts/references.py render
 
 build:
 	@set -e; mkdir -p $(DIST_DIR); \

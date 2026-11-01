@@ -1,0 +1,16 @@
+{
+  "sanches2011": {
+    "doi": "10.1109/ReConFig.2011.51",
+    "title": "Identifying Merge-Beneficial Software Kernels for Hardware Implementation",
+    "authors": [
+      "Sanches, A.",
+      "Cardoso, J. M.",
+      "Delbem, A. C."
+    ],
+    "year": 2011,
+    "venue": "2011 International Conference on Reconfigurable Computing and FPGAs",
+    "type": "inproceedings",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  }
+}

@@ -5,6 +5,20 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## 0.4.0
+
+### Added
+
+- `docs/refs.json` records every published work this repository cites, and nothing in it is
+  typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex response, derives
+  the citation key from the fetched metadata, and regenerates `docs/references.bib`, which
+  is generated and never edited. `tests/architecture/test_citations.py` asserts that every
+  key cited from a docstring or a Markdown file resolves, that an entry with no DOI names an
+  existing ADR, and that the committed bibliography matches its source. A pull request that
+  changes an entry re-fetches exactly that entry in CI, which is what catches an entry
+  written by hand. A unit whose basis is a decision rather than a published work cites
+  `[adr-NNNN]`. See ADR 0015.
+
 ## 0.3.0
 
 ### Added
