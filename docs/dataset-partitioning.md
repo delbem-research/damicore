@@ -816,5 +816,6 @@ the ADR, and repeated here so the issue shows them at a glance.
   one-dimensional sum-of-squares cost that makes the monotone-argmin
   divide-and-conquer exact.
 - Song, M., & Zhong, H. (2020). Efficient weighted univariate clustering maps
-  outliers and other patterns. *Bioinformatics*, 36(20), 5027–5036. The
-  weighted extension used to compute over distinct values with counts.
+  outstanding dysregulated genomic zones in human cancers. *Bioinformatics*,
+  36(20), 5027–5036. The weighted extension used to compute over distinct
+  values with counts.

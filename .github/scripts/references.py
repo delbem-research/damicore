@@ -72,8 +72,16 @@ def _get(url: str) -> dict[str, Any] | None:
         return None
 
 
+# NFKD decomposes an accented letter into a base letter and a combining mark, which the
+# ASCII encoding then drops -- so Araújo folds to Araujo. It does not touch a letter that is
+# its own grapheme rather than an accented one, and dropping those silently turns Grønlund
+# into "grnlund", a key that reads as a typo and invites the hand edit this design forbids.
+_TRANSLITERATED = str.maketrans({"ø": "o", "Ø": "O", "đ": "d", "Đ": "D", "ł": "l", "Ł": "L"})
+
+
 def _ascii(text: str) -> str:
-    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    folded = unicodedata.normalize("NFKD", text.translate(_TRANSLITERATED))
+    return folded.encode("ascii", "ignore").decode("ascii")
 
 
 def _name(given: str, family: str) -> str:

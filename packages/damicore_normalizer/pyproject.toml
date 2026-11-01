@@ -31,7 +31,7 @@ dependencies = [
 Homepage = "https://github.com/Delbem-Research-and-Innovation/damicore"
 Repository = "https://github.com/Delbem-Research-and-Innovation/damicore"
 Issues = "https://github.com/Delbem-Research-and-Innovation/damicore/issues"
-Documentation = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/quickstart.md"
+Documentation = "https://delbem-research.github.io/damicore/"
 Changelog = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/CHANGELOG.md"
 
 [build-system]

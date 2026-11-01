@@ -1,4 +1,105 @@
 {
+  "bennett1998": {
+    "doi": "10.1109/18.681318",
+    "title": "Information distance",
+    "authors": [
+      "Bennett, C.",
+      "Gacs, P.",
+      "Ming Li",
+      "Vitanyi, P.",
+      "Zurek, W."
+    ],
+    "year": 1998,
+    "venue": "IEEE Transactions on Information Theory",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "cilibrasi2005": {
+    "doi": "10.1109/TIT.2005.844059",
+    "title": "Clustering by Compression",
+    "authors": [
+      "Cilibrasi, R.",
+      "Vitanyi, P."
+    ],
+    "year": 2005,
+    "venue": "IEEE Transactions on Information Theory",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "clauset2004": {
+    "doi": "10.1103/PhysRevE.70.066111",
+    "title": "Finding community structure in very large networks",
+    "authors": [
+      "Clauset, A.",
+      "Newman, M. E. J.",
+      "Moore, C."
+    ],
+    "year": 2004,
+    "venue": "Physical Review E",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "fisher1958": {
+    "doi": "10.1080/01621459.1958.10501479",
+    "title": "On Grouping for Maximum Homogeneity",
+    "authors": [
+      "Fisher, W. D."
+    ],
+    "year": 1958,
+    "venue": "Journal of the American Statistical Association",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "gronlund2017": {
+    "doi": "10.48550/arXiv.1701.07204",
+    "title": "Fast Exact k-Means, k-Medians and Bregman Divergence Clustering in 1D",
+    "authors": [
+      "Grønlund, A.",
+      "Larsen, K. G.",
+      "Mathiasen, A.",
+      "Nielsen, J. S.",
+      "Stefan, S.",
+      "Mingzhou, S."
+    ],
+    "year": 2017,
+    "venue": "arXiv (Cornell University)",
+    "type": "misc",
+    "source": "openalex",
+    "fetched": "2026-11-01"
+  },
+  "li2004": {
+    "doi": "10.1109/TIT.2004.838101",
+    "title": "The Similarity Metric",
+    "authors": [
+      "Li, M.",
+      "Chen, X.",
+      "Li, X.",
+      "Ma, B.",
+      "Vitanyi, P."
+    ],
+    "year": 2004,
+    "venue": "IEEE Transactions on Information Theory",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "saitou1987": {
+    "doi": "10.1093/oxfordjournals.molbev.a040454",
+    "title": "The neighbor-joining method: a new method for reconstructing phylogenetic trees.",
+    "authors": [
+      "Saitou, N.",
+      "Nei, M."
+    ],
+    "year": 1987,
+    "venue": "Molecular Biology and Evolution",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
   "sanches2011": {
     "doi": "10.1109/ReConFig.2011.51",
     "title": "Identifying Merge-Beneficial Software Kernels for Hardware Implementation",
@@ -10,6 +111,45 @@
     "year": 2011,
     "venue": "2011 International Conference on Reconfigurable Computing and FPGAs",
     "type": "inproceedings",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "song2020": {
+    "doi": "10.1093/bioinformatics/btaa613",
+    "title": "Efficient weighted univariate clustering maps outstanding dysregulated genomic zones in human cancers",
+    "authors": [
+      "Song, M.",
+      "Zhong, H."
+    ],
+    "year": 2020,
+    "venue": "Bioinformatics",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "studier1988": {
+    "doi": "10.1093/oxfordjournals.molbev.a040527",
+    "title": "A note on the neighbor-joining algorithm of Saitou and Nei.",
+    "authors": [
+      "Studier, J. A.",
+      "Keppler, K. J."
+    ],
+    "year": 1988,
+    "venue": "Molecular Biology and Evolution",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-01"
+  },
+  "wang2011": {
+    "doi": "10.32614/rj-2011-015",
+    "title": "Ckmeans.1d.dp: Optimal k-means Clustering in One Dimension by Dynamic Programming",
+    "authors": [
+      "Wang, H.",
+      "Song, M."
+    ],
+    "year": 2011,
+    "venue": "The R Journal",
+    "type": "article",
     "source": "crossref",
     "fetched": "2026-11-01"
   }
