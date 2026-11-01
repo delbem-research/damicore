@@ -26,9 +26,9 @@ output cluster IDs and leaf ordering are deterministic.
 
 ## Links
 
-- Repository: <https://github.com/Delbem-Research-and-Innovation/damicore>
-- Issues: <https://github.com/Delbem-Research-and-Innovation/damicore/issues>
+- Repository: <https://github.com/delbem-research/damicore>
+- Issues: <https://github.com/delbem-research/damicore/issues>
 - Documentation:
-  <https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/quickstart.md>
+  <https://github.com/delbem-research/damicore/blob/main/docs/quickstart.md>
 
 Licensed under Apache-2.0.

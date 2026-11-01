@@ -109,10 +109,10 @@ preflight rather than after hours of work.
 
 Call `estimate` before raising a limit — it reports the exact cost without
 creating anything. The complexity behind the gates is documented in
-[scalability](https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/scalability.md).
+[scalability](https://github.com/delbem-research/damicore/blob/main/docs/scalability.md).
 
 ## Links
 
 - Source, issues and full documentation:
-  <https://github.com/Delbem-Research-and-Innovation/damicore>
+  <https://github.com/delbem-research/damicore>
 - Licensed under Apache-2.0.

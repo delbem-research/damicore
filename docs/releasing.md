@@ -59,7 +59,7 @@ versions (every CI job installs with `--locked` and fails on a stale lock), and 
 ## External preconditions (configure before the first tag)
 
 Trusted Publishing "pending publisher" entries on both indexes, one per project
-name, all with owner `Delbem-Research-and-Innovation`, repository `damicore`,
+name, all with owner `delbem-research`, repository `damicore`,
 workflow `release.yml` — 10 entries in total. PyPI keeps pending publishers
 unique on (owner, repository, workflow, environment) regardless of project
 name, so each project needs its own environment, `release-<project>`:

@@ -24,11 +24,11 @@ keywords = ["damicore", "neighbor-joining", "phylogenetics", "tree", "newick"]
 dependencies = ["numpy>=1.26,<3", "pydantic>=2.10,<3"]
 
 [project.urls]
-Homepage = "https://github.com/Delbem-Research-and-Innovation/damicore"
-Repository = "https://github.com/Delbem-Research-and-Innovation/damicore"
-Issues = "https://github.com/Delbem-Research-and-Innovation/damicore/issues"
+Homepage = "https://github.com/delbem-research/damicore"
+Repository = "https://github.com/delbem-research/damicore"
+Issues = "https://github.com/delbem-research/damicore/issues"
 Documentation = "https://delbem-research.github.io/damicore/"
-Changelog = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/delbem-research/damicore/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling>=1.31.0,<2"]
