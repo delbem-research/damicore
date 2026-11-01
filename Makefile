@@ -1,4 +1,4 @@
-.PHONY: help install check test coverage-critical build wheels clean ref references
+.PHONY: help install check test coverage-critical build wheels clean ref references docs docs-check
 .PHONY: print-public-packages print-stage-packages print-aggregate-package
 
 # The publish allowlist. Deliberately explicit rather than derived from the workspace, so a
@@ -25,6 +25,8 @@ help:
 	@echo "  test                  Run all tests with coverage gates"
 	@echo "  ref DOI=<doi>         Fetch one work into docs/refs.json and regenerate the bibliography"
 	@echo "  references            Regenerate docs/references.bib from docs/refs.json"
+	@echo "  docs                  Build the documentation site into docs/_build/html"
+	@echo "  docs-check            Build it strictly and verify the rendered public API"
 	@echo "  build                 Build sdist and wheel of the five public distributions"
 	@echo "  wheels                Build wheels only, for the smoke lanes"
 	@echo "  print-public-packages Print the publish allowlist"
@@ -62,6 +64,19 @@ ref:
 
 references:
 	uv run python .github/scripts/references.py render
+
+# Documentation dependencies stay out of the workspace: `--with-requirements` resolves them
+# for this command only, so `docs/` can be deleted without changing what anything installs.
+DOCS_RUN := uv run --with-requirements docs/requirements.txt
+
+docs:
+	$(DOCS_RUN) python -m sphinx -b html docs docs/_build/html
+
+# `-W` is the gate: an unresolved cross-reference is how a page comes to promise a symbol
+# that does not exist. check_reference.py then asserts the rendered API is exactly `__all__`.
+docs-check:
+	$(DOCS_RUN) python -m sphinx -W --keep-going -b html docs docs/_build/html
+	$(DOCS_RUN) python docs/check_reference.py docs/_build/html/objects.inv
 
 build:
 	@set -e; mkdir -p $(DIST_DIR); \
