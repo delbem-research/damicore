@@ -12,6 +12,10 @@ carries anything else, a date included, matches neither and fails the release.
 - Every distribution's `Documentation` URL now points at the published site,
   `https://delbem-research.github.io/damicore/`, rather than at one Markdown file in the
   repository. The README links it too.
+- Every GitHub URL names the current organisation, `delbem-research`. The published 0.3.0
+  metadata still carries the former name in `Homepage`, `Repository`, `Issues` and
+  `Changelog`, so those five PyPI pages link through whatever redirect GitHub keeps for a
+  renamed organisation rather than directly.
 
 - `run()` refuses a completed run in `output_dir` that a different runtime produced, instead
   of returning it. The input and configuration hashes say what was asked for, never which

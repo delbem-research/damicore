@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/damicore)](https://pypi.org/project/damicore/)
 [![License](https://img.shields.io/pypi/l/damicore)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-delbem--research.github.io-blue)](https://delbem-research.github.io/damicore/)
-[![CI](https://github.com/Delbem-Research-and-Innovation/damicore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Delbem-Research-and-Innovation/damicore/actions/workflows/ci.yml)
+[![CI](https://github.com/delbem-research/damicore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/delbem-research/damicore/actions/workflows/ci.yml)
 
 DAMICORE clusters local files, or the rows or columns of a local dataset,
 through canonical serialization, exact Normalized Compression Distance (NCD),
