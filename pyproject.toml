@@ -2,7 +2,12 @@
 members = ["packages/*"]
 
 [tool.uv]
-constraint-dependencies = ["tornado==6.5.8"]
+# tornado reaches the lock only through nbclient, whose own range is wide enough to resolve a
+# version with known advisories against it. The constraint raises that floor so `pip-audit`
+# passes. It is stated as a minimum rather than as `==`: an equality pin fixes today's
+# advisory and becomes tomorrow's ceiling, which is exactly how 6.5.8 came to block the
+# 6.6 that fixes CVE-2026-116577, CVE-2026-115927 and CVE-2026-116578.
+constraint-dependencies = ["tornado>=6.6"]
 
 [dependency-groups]
 dev = [

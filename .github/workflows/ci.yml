@@ -27,6 +27,39 @@ jobs:
       - uses: ./.github/actions/uv-workspace
       - run: make check
 
+  # The site is a pull-request check, not only a publication step: `-W` means an unresolved
+  # cross-reference fails here rather than shipping a page that promises a symbol that does
+  # not exist, and check_reference.py asserts the rendered API is exactly what `__all__` lists.
+  docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+      - run: make docs-check
+
+  # The offline half of the citation contract is in `make test`. This is the half that needs
+  # the network: it re-fetches only the entries this pull request changed, so a run that
+  # touches no work makes no request at all. It is what catches an entry written by hand
+  # instead of fetched, which no offline check can see.
+  references:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+      - name: Re-fetch the bibliography entries this pull request changed
+        run: |
+          git show "${{ github.event.pull_request.base.sha }}:docs/refs.json" > "$RUNNER_TEMP/base.json" \
+            || echo '{}' > "$RUNNER_TEMP/base.json"
+          uv run python .github/scripts/references.py verify --since "$RUNNER_TEMP/base.json"
+
   # `make test` runs the whole suite, so the
   # import-architecture tests are covered on every interpreter rather than once.
   test:

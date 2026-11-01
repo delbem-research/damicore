@@ -1,0 +1,27 @@
+version: 2
+
+# Read the Docs builds the same site as `make docs-check`, with the same strictness. It does
+# not run check_reference.py: that oracle belongs to CI, where a failure blocks a merge,
+# rather than to a hosting provider, where it would only fail a preview.
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.12"
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: true
+
+python:
+  install:
+    - method: pip
+      path: packages/damicore_normalizer
+    - method: pip
+      path: packages/damicore_distance
+    - method: pip
+      path: packages/damicore_tree_builder
+    - method: pip
+      path: packages/damicore_clusterizer
+    - method: pip
+      path: packages/damicore
+    - requirements: docs/requirements.txt
