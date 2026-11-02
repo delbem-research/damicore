@@ -9,6 +9,16 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- `tests/architecture/test_citations.py` asserts that every module in `CRITICAL_MODULES`
+  states the basis of what it computes, except those named in a declared exemption list.
+  The list starts with the modules that do not yet declare, so the gate is green from the
+  first commit; shrinking it is the work, and nothing mechanical stops a future change from
+  adding to it, which is a reviewer's job. The check measures presence at module
+  granularity and nothing more: whether a cited work supports the claim beside it is not
+  machine-decidable, and ADR 0015 says so.
+- `serializer` states its basis and is the first module the exemption list does not cover.
+  Its encoding is this project's own, so it cites ADR 0001 rather than a published work —
+  which is also why it is the one module that could declare without anyone reading a paper.
 - ADR 0016 records how branch lengths become the edge weights FastGreedy is given, and ADR
   0017 records the Neighbor Joining tie rule and its relative band. Both decide what a run
   reports and neither has a published source, so each is now a basis a unit can cite as

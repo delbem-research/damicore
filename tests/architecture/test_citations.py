@@ -22,6 +22,28 @@ DECISIONS = ROOT / "docs" / "decisions"
 CITATION = r"\[@?((?:[a-z][a-z-]*)[0-9]{4}[a-z]?)\]"
 
 SOURCES = ("crossref", "openalex")
+MAKEFILE = ROOT / "Makefile"
+
+# The modules of the census that do not yet state the basis of what they compute.
+#
+# This list may only shrink. A module leaves it when its `References` section lands; nothing
+# is ever added. That direction is a reviewer's judgement rather than a check, because the
+# committed list is the only record of what it used to be -- and a check that read its own
+# baseline from the working tree would be asserting against whatever the current commit says.
+#
+# It exists so the gate is green from the first commit. A gate that demanded declarations
+# from a repository that has none would be red by construction, and a gate that is red by
+# construction is one somebody switches off.
+UNDECLARED: frozenset[str] = frozenset(
+    {
+        "ncd",
+        "neighbor_joining",
+        "fastgreedy",
+        "natural_breaks",
+        "tree_graph",
+        "compressor",
+    }
+)
 
 
 def _refs() -> dict[str, dict[str, object]]:
@@ -104,6 +126,71 @@ def test_cited_keys_resolve() -> None:
         if not _resolves(key, refs)
     ]
     assert not unresolved, "\n".join(unresolved)
+
+
+def _critical_modules() -> dict[str, Path]:
+    """The census, read from the `Makefile` that owns it rather than copied beside it.
+
+    `CRITICAL_MODULES` is already the list of modules held to the 95% coverage floor. The
+    test below makes it the census that owes a basis as well: one declaration, two gates,
+    and no second copy to drift.
+
+    Which modules owe a basis is decided here and nowhere else. `AGENTS.md` says what a
+    basis is and how it is cited; it does not scope the rule to a set of modules, so citing
+    it for that scope would be citing a document for something it does not contain.
+    """
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+    # One assignment, read whole. A second line -- `CRITICAL_MODULES += newick` is the edit
+    # the comment beside the list invites next -- would be dropped by the search below and
+    # the appended modules would be exempt without appearing in `UNDECLARED`. Refusing what
+    # this parse does not read in full is the difference between a loud failure and a gate
+    # that quietly covers less than it says.
+    assignments = re.findall(r"^CRITICAL_MODULES\s*[+:]?=", makefile, re.MULTILINE)
+    assert len(assignments) == 1, f"the Makefile assigns CRITICAL_MODULES {len(assignments)} times"
+    declaration = re.search(r"^CRITICAL_MODULES\s*:=\s*(.+)$", makefile, re.MULTILINE)
+    assert declaration is not None, "the Makefile no longer declares CRITICAL_MODULES"
+    modules: dict[str, Path] = {}
+    # A trailing `# comment` would otherwise become module names, and the failure would name
+    # `#` rather than the comment that caused it.
+    for name in declaration.group(1).split("#")[0].split():
+        found = sorted(ROOT.glob(f"packages/*/src/*/{name}.py"))
+        assert len(found) == 1, f"{name} resolves to {len(found)} files, not one"
+        modules[name] = found[0]
+    # An exemption for a module the census does not hold is debt that cannot be repaid: it
+    # inflates the count nobody can shrink, and a later module reusing the name arrives
+    # already exempt. The sibling at `test_boundaries.py` cross-checks its Makefile list the
+    # same way, against the packages that actually exist.
+    stale = sorted(UNDECLARED - modules.keys())
+    assert not stale, f"UNDECLARED names modules outside the census: {', '.join(stale)}"
+    return modules
+
+
+def test_critical_modules_declare_references() -> None:
+    """Every module in the census states the basis of what it computes, or is named as not
+    yet doing so.
+
+    It checks presence, at module granularity, and nothing beyond that. One docstring in the
+    file carrying both a `References` heading and a citation satisfies it, so a module with
+    several scientific functions can declare once and leave the rest silent; closing that
+    needs a rule about which function owes which basis, which does not exist yet. It cannot
+    check that a section is true, nor that the work it names supports the claim beside it --
+    neither is machine-decidable, and ADR 0015 says so.
+
+    What it does buy is that a module saying nothing at all cannot pass, which is the
+    failure that actually happens: every other check in this file is conditional on a
+    citation already being there.
+    """
+    silent: list[str] = []
+    for name, path in _critical_modules().items():
+        if name in UNDECLARED:
+            continue
+        declared = any(
+            "References" in docstring and re.search(CITATION, docstring) is not None
+            for docstring in _docstrings(path)
+        )
+        if not declared:
+            silent.append(f"  {path.relative_to(ROOT)}")
+    assert not silent, "\n".join(["these modules state no basis for what they compute:", *silent])
 
 
 def test_entries_without_doi_name_an_existing_adr() -> None:
