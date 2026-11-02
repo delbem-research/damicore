@@ -19,17 +19,27 @@ DECISIONS = ROOT / "docs" / "decisions"
 # made rather than a published work, which is why the hyphen is in the name class. The
 # brackets are what keep this from matching ordinary prose; a bare `@key` is never matched,
 # because it collides with a Python decorator.
-CITATION = r"\[@?((?:[a-z][a-z-]*)[0-9]{4}[a-z]?)\]"
+#
+# The lookbehind is what keeps `values[row2024]` out. A docstring may carry an example, and
+# an index expression has exactly the shape of a citation; the difference is that a citation
+# follows prose and a subscript follows the thing it indexes.
+CITATION = r"(?<![\w\]])\[@?((?:[a-z][a-z-]*)[0-9]{4}[a-z]?)\]"
 
 SOURCES = ("crossref", "openalex")
 MAKEFILE = ROOT / "Makefile"
 
+# Every assignment operator Make accepts: `=`, `:=`, `::=`, `+=`, `?=`, `!=`. The refusal in
+# `_critical_modules` counts assignments, so an operator missing here is an appended line
+# that is not counted and therefore not refused.
+ASSIGNMENT = r"^CRITICAL_MODULES\s*(?:::?|[+!?])?="
+
 # The modules of the census that do not yet state the basis of what they compute.
 #
-# This list may only shrink. A module leaves it when its `References` section lands; nothing
-# is ever added. That direction is a reviewer's judgement rather than a check, because the
-# committed list is the only record of what it used to be -- and a check that read its own
-# baseline from the working tree would be asserting against whatever the current commit says.
+# This list may only shrink. A module leaves it when its `References` section lands, and
+# nothing mechanical stops a commit from adding one back: that direction is a reviewer's
+# judgement rather than a check, because the committed list is the only record of what it
+# used to be -- and a check that read its own baseline from the working tree would be
+# asserting against whatever the current commit says.
 #
 # It exists so the gate is green from the first commit. A gate that demanded declarations
 # from a repository that has none would be red by construction, and a gate that is red by
@@ -117,6 +127,31 @@ def test_an_unresolved_key_is_told_the_repair_for_its_kind_of_basis() -> None:
     assert "make ref DOI=" in _hint("cilibrasi2005")
 
 
+def test_an_index_expression_is_not_read_as_a_citation() -> None:
+    """A docstring may carry an example, and `values[row2024]` has the shape of a citation.
+
+    Nothing in the repository cites from a code example yet, so today this only decides
+    whether a hypothetical key must resolve. It decides it before the docstrings arrive.
+    """
+    assert re.findall(CITATION, "values[row2024] = x") == []
+    assert re.findall(CITATION, "see [cilibrasi2005] and [adr-0001].") == [
+        "cilibrasi2005",
+        "adr-0001",
+    ]
+
+
+def test_every_make_assignment_operator_is_counted() -> None:
+    """The refusal in `_critical_modules` counts assignments of `CRITICAL_MODULES`.
+
+    An operator it does not recognise is an appended line that the count does not see, so
+    the modules it names would be held to neither gate while the census still read as one
+    declaration.
+    """
+    for operator in ("=", ":=", "::=", "+=", "?=", "!="):
+        line = f"CRITICAL_MODULES {operator} ncd"
+        assert re.findall(ASSIGNMENT, line, re.MULTILINE), f"{operator} escapes the refusal"
+
+
 def test_cited_keys_resolve() -> None:
     refs = _refs()
     unresolved = [
@@ -135,17 +170,20 @@ def _critical_modules() -> dict[str, Path]:
     test below makes it the census that owes a basis as well: one declaration, two gates,
     and no second copy to drift.
 
-    Which modules owe a basis is decided here and nowhere else. `AGENTS.md` says what a
-    basis is and how it is cited; it does not scope the rule to a set of modules, so citing
-    it for that scope would be citing a document for something it does not contain.
+    Which modules owe a basis is decided here and nowhere else. `AGENTS.md` says how a basis
+    is cited and what kinds there are; it does not scope the rule to a set of modules, so
+    citing it for that scope would be citing a document for something it does not contain.
     """
     makefile = MAKEFILE.read_text(encoding="utf-8")
-    # One assignment, read whole. A second line -- `CRITICAL_MODULES += newick` is the edit
-    # the comment beside the list invites next -- would be dropped by the search below and
-    # the appended modules would be exempt without appearing in `UNDECLARED`. Refusing what
-    # this parse does not read in full is the difference between a loud failure and a gate
-    # that quietly covers less than it says.
-    assignments = re.findall(r"^CRITICAL_MODULES\s*[+:]?=", makefile, re.MULTILINE)
+    # One assignment, one line. A second line -- `CRITICAL_MODULES += newick` is the edit the
+    # comment beside the list invites next -- would be dropped by the search below and the
+    # appended modules would be exempt without appearing in `UNDECLARED`. A `\` continuation
+    # is the same hole and this refusal does not catch it, because what it counts is
+    # assignments and a continued line is still one; the list is short enough to stay on one
+    # line, and a reviewer is what keeps it there. Refusing what this parse does not read in
+    # full is the difference between a loud failure and a gate that quietly covers less than
+    # it says.
+    assignments = re.findall(ASSIGNMENT, makefile, re.MULTILINE)
     assert len(assignments) == 1, f"the Makefile assigns CRITICAL_MODULES {len(assignments)} times"
     declaration = re.search(r"^CRITICAL_MODULES\s*:=\s*(.+)$", makefile, re.MULTILINE)
     assert declaration is not None, "the Makefile no longer declares CRITICAL_MODULES"
@@ -153,7 +191,10 @@ def _critical_modules() -> dict[str, Path]:
     # A trailing `# comment` would otherwise become module names, and the failure would name
     # `#` rather than the comment that caused it.
     for name in declaration.group(1).split("#")[0].split():
-        found = sorted(ROOT.glob(f"packages/*/src/*/{name}.py"))
+        # `*/{name}.py` is the Makefile's own coverage pattern: any path ending in that file,
+        # at whatever depth. Matching it here keeps one census rather than two that agree
+        # today. The count below is what refuses an ambiguous name.
+        found = sorted(ROOT.glob(f"packages/*/src/**/{name}.py"))
         assert len(found) == 1, f"{name} resolves to {len(found)} files, not one"
         modules[name] = found[0]
     # An exemption for a module the census does not hold is debt that cannot be repaid: it

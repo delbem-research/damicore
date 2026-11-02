@@ -17,8 +17,10 @@ carries anything else, a date included, matches neither and fails the release.
   granularity and nothing more: whether a cited work supports the claim beside it is not
   machine-decidable, and ADR 0015 says so.
 - `serializer` states its basis and is the first module the exemption list does not cover.
-  Its encoding is this project's own, so it cites ADR 0001 rather than a published work —
-  which is also why it is the one module that could declare without anyone reading a paper.
+  Its encoding is this project's own, so it cites ADR 0001 rather than a published work. It
+  went first because it was the shortest path to a non-vacuous gate, not because it is the
+  only module that could take one: `tree_graph` and `neighbor_joining` now have ADRs 0016
+  and 0017 to cite and could follow without anyone reading a paper either.
 - ADR 0016 records how branch lengths become the edge weights FastGreedy is given, and ADR
   0017 records the Neighbor Joining tie rule and its relative band. Both decide what a run
   reports and neither has a published source, so each is now a basis a unit can cite as
