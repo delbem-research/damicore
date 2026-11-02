@@ -4,8 +4,10 @@ import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
+from bibtexparser.entrypoint import parse_file
 
 pytestmark = pytest.mark.contract
 
@@ -200,6 +202,62 @@ def test_critical_modules_declare_references() -> None:
 def test_a_mention_of_references_is_not_a_references_section() -> None:
     assert re.search(REFERENCES_SECTION, "See the References there, per [adr-0001].") is None
     assert re.search(REFERENCES_SECTION, "References\n----------\n.. [adr-0001] x", re.MULTILINE)
+
+
+def test_the_bibliography_reads_back_as_what_it_records() -> None:
+    """An independent reader is what says the generated file is BibTeX.
+
+    `test_generated_bibliography_matches_source` compares the renderer with its own output,
+    so it cannot see a value that renders into something a reader takes differently. This
+    one reads the file with a parser the project did not write and compares what comes back
+    with `docs/refs.json`.
+    """
+    library = parse_file(str(BIBLIOGRAPHY))
+    assert not library.failed_blocks, [str(block) for block in library.failed_blocks]
+    refs = _refs()
+    assert {entry.key for entry in library.entries} == set(refs)
+    for entry in library.entries:
+        source = refs[entry.key]
+        # `refs.json` is deserialized JSON, so every value is `object` until narrowed; the
+        # schema that would carry the types is the resolver's, not ours.
+        authors = cast("list[object]", source["authors"])
+        read = {name: field.value for name, field in entry.fields_dict.items()}
+        assert entry.entry_type == source["type"]
+        assert read["title"] == source["title"]
+        assert read["year"] == str(source["year"])
+        assert read["author"] == " and ".join(str(name) for name in authors)
+
+
+def test_a_value_that_would_not_read_back_is_refused() -> None:
+    """An unbalanced brace does not fail the parse, which is why it needs its own refusal.
+
+    The reader stops at the brace that closes nothing and hands back a shorter string, so a
+    committed entry would disagree with its source silently and the test above is the only
+    thing that could see it. This refuses the value where it is written instead.
+    """
+    unbalanced: dict[str, dict[str, object]] = {
+        "x2026": {"authors": ["A, B"], "title": "growth}", "year": 2026, "type": "article"}
+    }
+    with pytest.raises(ValueError, match="unbalanced braces"):
+        _render_bibliography(unbalanced)
+
+
+def test_no_stored_value_carries_an_html_entity() -> None:
+    """A resolver answers in JSON but its strings come from HTML, so a venue can arrive as
+    `Transmission &amp; Distribution`.
+
+    The entity survives every check that compares our files with each other, because both
+    carry it, and it reaches the published bibliography as part of the work's name.
+    """
+    entity = re.compile(r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);")
+    escaped: list[str] = []
+    for key, entry in _refs().items():
+        for field, value in entry.items():
+            # Serialized, so a list of authors is searched the same way a title is.
+            rendered = json.dumps(value, ensure_ascii=False)
+            if entity.search(rendered):
+                escaped.append(f"{key}.{field} = {rendered}")
+    assert not escaped, "\n".join(["these stored values are HTML-escaped:", *escaped])
 
 
 def test_entries_without_doi_name_an_existing_adr() -> None:
