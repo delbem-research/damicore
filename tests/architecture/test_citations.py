@@ -16,6 +16,7 @@ REFS = ROOT / "docs" / "refs.json"
 BIBLIOGRAPHY = ROOT / "docs" / "references.bib"
 DECISIONS = ROOT / "docs" / "decisions"
 MAKEFILE = ROOT / "Makefile"
+CITATION_FILE = ROOT / "CITATION.cff"
 
 # `[cilibrasi2005]` names a published work; `[adr-0001]` a decision this project made. The
 # lookbehind excludes a subscript, which has the same shape and always follows a name, a `]`
@@ -258,6 +259,32 @@ def test_no_stored_value_carries_an_html_entity() -> None:
             if entity.search(rendered):
                 escaped.append(f"{key}.{field} = {rendered}")
     assert not escaped, "\n".join(["these stored values are HTML-escaped:", *escaped])
+
+
+def test_every_doi_the_citation_file_names_is_in_the_bibliography() -> None:
+    """Citing the software and citing the method must not name different works.
+
+    `CITATION.cff` lists what this software builds on, and `version_guard.py` already
+    refuses a release whose `.cff` version disagrees with the packages and the changelog.
+    What nothing covered is a work named there and absent from the bibliography. The DOI is
+    what is compared, because it identifies the work; a title that differs in punctuation
+    between the two files still names the same paper.
+    """
+    # Read as text rather than parsed: a DOI is one flat line in CFF, and the alternative
+    # is a YAML dependency for one field. A DOI written as a multi-line block would escape
+    # this, and none of the records uses that form.
+    named = {
+        match.group(1)
+        for match in re.finditer(
+            r'^\s*doi:\s*"?([^"\s]+)', CITATION_FILE.read_text(encoding="utf-8"), re.MULTILINE
+        )
+    }
+    recorded = {str(entry["doi"]) for entry in _refs().values() if entry.get("doi")}
+    missing = sorted(named - recorded)
+    assert not missing, (
+        f"CITATION.cff names works the bibliography does not record: {', '.join(missing)}\n"
+        "  run: make ref DOI=<doi>"
+    )
 
 
 def test_entries_without_doi_name_an_existing_adr() -> None:

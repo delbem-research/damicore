@@ -45,6 +45,11 @@ carries anything else, a date included, matches neither and fails the release.
   phylogram-labelling paper, the 2019 fault-location application and the 2023 cluster-count
   method. `pinto2017`, named in issue #55, is left out: two real works by that author match
   the fields the issue lists and neither carries a DOI, so naming it is the maintainer's.
+- Every DOI `CITATION.cff` names is recorded in the bibliography. The file lists what this
+  software builds on, and a work named there and absent from `docs/refs.json` meant citing
+  the software and citing the method named different sets of works. The DOI is what is
+  compared: it identifies the work, where a title can differ in punctuation and still be
+  the same paper. `version_guard.py` already covered the version.
 - `bibtexparser` joins the development group, and the bibliography is read back with it.
   `test_generated_bibliography_matches_source` compares the renderer with its own output,
   so a value that renders into something a reader takes differently is invisible to it; the
