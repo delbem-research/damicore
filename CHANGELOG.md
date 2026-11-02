@@ -59,8 +59,8 @@ carries anything else, a date included, matches neither and fails the release.
 ### Fixed
 
 - The citation in `README.md` named version 0.2.0, two releases behind, and nothing checked
-  it. That file is this repository's PyPI long description, so the stale number was on the
-  project page of every distribution, in the citation a reader is told to copy.
+  it. That file is the repository's landing page, beside the button that offers the same
+  citation from `CITATION.cff`, so the two disagreed where a reader goes to cite this work.
   `version_guard.py` now holds it to the released version, to the release date
   `CITATION.cff` declares, and to the authors that file lists — it checks the surnames are
   present, not their order or initials, which is what catches an author added to one file

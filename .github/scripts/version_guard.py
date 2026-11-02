@@ -76,9 +76,11 @@ def main() -> int:
         mismatches.append(
             f"CITATION.cff: version {declared or 'absent'} != expected version {expected}"
         )
-    # The other one is the citation README.md tells a reader to copy. It is also this
-    # repository's PyPI long description, so a stale number is published on the project
-    # page of every distribution rather than only read in the tree.
+    # The other one is the citation README.md tells a reader to copy. That file is the
+    # repository's landing page on GitHub, beside the button that offers the same citation
+    # from CITATION.cff, so a stale number is read by anyone who cites this work. Each
+    # distribution ships its own README from its package directory, and none of them
+    # carries a citation.
     with open("README.md", encoding="utf-8") as handle:
         readme = handle.read()
     cited = re.findall(r"\(Version ([^)]*)\)", readme)
