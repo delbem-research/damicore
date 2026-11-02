@@ -39,6 +39,29 @@ instead of a resolver, and a unit may cite `[adr-NNNN]` with no bibliography ent
 The contract is total: there is no fourth value and no empty one, so "we decided this
 ourselves" is an answer rather than an absence.
 
+An `adr:` entry is the one path where metadata is written rather than fetched, and that is
+not an exemption from the rule but the limit of it: the rule exists to stop a work that
+*could* have been fetched from being typed instead, and there is nothing to fetch here. What
+replaces the resolver is this record. A work only enters the bibliography this way by being
+named below, and `tests/architecture/test_citations.py` refuses an entry whose ADR does not
+exist.
+
+### Works recorded here because no DOI exists for them
+
+- **Csárdi, G., & Nepusz, T. (2006). The igraph software package for complex network
+  research. *InterJournal, Complex Systems*, 1695.** Key `csardi2006`. `fastgreedy.py` does
+  not implement greedy modularity maximization; it calls igraph. Documenting that stage
+  therefore has to cite the implementation that runs alongside the method it implements, and
+  InterJournal registered no DOI for this article. Checked on 2026-11-02: Crossref returns
+  no record of it, and OpenAlex holds the work with `doi: null`, so there is nothing for
+  `make ref` to resolve.
+- **Jenks, G. F. (1977). *Optimal data classification for choropleth maps*. Department of
+  Geography, University of Kansas.** Key `jenks1977`. The cartographic formulation of the
+  grouping objective `natural_breaks` computes, already cited in prose by
+  `docs/dataset-partitioning.md`. Checked on 2026-11-02: neither Crossref nor OpenAlex holds
+  a record of it at all, which is what a departmental occasional paper from 1977 looks like
+  to both.
+
 ## The generated file is committed
 
 `docs/references.bib` is derived, and a derived file in version control can drift. It is
