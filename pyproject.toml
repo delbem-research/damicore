@@ -11,6 +11,7 @@ constraint-dependencies = ["tornado>=6.6"]
 
 [dependency-groups]
 dev = [
+    "bibtexparser>=2,<3",
     "build>=1.2,<2",
     "hypothesis>=6,<7",
     "nbclient>=0.10,<1",

@@ -32,9 +32,39 @@ carries anything else, a date included, matches neither and fails the release.
 - `tree_graph` and `compressor` join `CRITICAL_MODULES`, which is both the 95% coverage floor
   and the repository's census of scientific code. `tree_graph` decides the graph FastGreedy
   partitions; `compressor` owns the window every NCD value is a function of.
+- `docs/refs.json` records every published work this repository cites, and nothing in it is
+  typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex response, derives
+  the citation key from the fetched metadata, and regenerates `docs/references.bib`, which
+  is generated and never edited. `tests/architecture/test_citations.py` asserts that every
+  key cited from a docstring or a Markdown file resolves, that an entry with no DOI names an
+  existing ADR, and that the committed bibliography matches its source. A pull request that
+  changes an entry re-fetches exactly that entry in CI, which is what catches an entry
+  written by hand. A unit whose basis is a decision rather than a published work cites
+  `[adr-NNNN]`. See ADR 0015.
+- `docs/refs.json` records the DAMICORE line of work itself: the 2016 USP thesis, the 2018
+  phylogram-labelling paper, the 2019 fault-location application and the 2023 cluster-count
+  method. `pinto2017`, named in issue #55, is left out: two real works by that author match
+  the fields the issue lists and neither carries a DOI, so naming it is the maintainer's.
+- Every DOI `CITATION.cff` names is recorded in the bibliography. The file lists what this
+  software builds on, and a work named there and absent from `docs/refs.json` meant citing
+  the software and citing the method named different sets of works. The DOI is what is
+  compared: it identifies the work, where a title can differ in punctuation and still be
+  the same paper. `version_guard.py` already covered the version.
+- `bibtexparser` joins the development group, and the bibliography is read back with it.
+  `test_generated_bibliography_matches_source` compares the renderer with its own output,
+  so a value that renders into something a reader takes differently is invisible to it; the
+  new check reads `docs/references.bib` with a parser this project did not write and
+  compares every field with `docs/refs.json`.
 
 ### Fixed
 
+- A field whose braces do not balance is refused instead of written. BibTeX delimits a
+  value by matching braces, so an unbalanced one does not fail the parse: the reader stops
+  early and hands back a truncated string. A title ending in `}` was written, parsed and
+  read back shorter, and every check comparing our own files with each other agreed.
+- A resolver's strings are HTML-escaped and are now decoded where the two resolvers meet.
+  Crossref returned `IET Generation, Transmission &amp; Distribution`, and the entity was
+  stored, rendered and published as part of the journal's name.
 - `make docs-check` builds with `-E`. Sphinx reused a saved environment, skipped the pages it
   considered current, and did not re-run its consistency checks — so the gate passed or
   failed on whether `docs/_build` happened to be stale. A page in no toctree went undetected
@@ -64,18 +94,6 @@ carries anything else, a date included, matches neither and fails the release.
   this way; reuse now shares the same gate. The error is `OutputDirectoryConflictError`,
   which already exits 5, so no exit code changed. Point the run at a fresh directory to
   recompute.
-
-### Added
-
-- `docs/refs.json` records every published work this repository cites, and nothing in it is
-  typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex response, derives
-  the citation key from the fetched metadata, and regenerates `docs/references.bib`, which
-  is generated and never edited. `tests/architecture/test_citations.py` asserts that every
-  key cited from a docstring or a Markdown file resolves, that an entry with no DOI names an
-  existing ADR, and that the committed bibliography matches its source. A pull request that
-  changes an entry re-fetches exactly that entry in CI, which is what catches an entry
-  written by hand. A unit whose basis is a decision rather than a published work cites
-  `[adr-NNNN]`. See ADR 0015.
 
 ## 0.3.0
 

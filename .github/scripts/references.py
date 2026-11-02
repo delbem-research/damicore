@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import sys
 import unicodedata
@@ -30,7 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path(__file__).parents[2]
 REFS = ROOT / "docs" / "refs.json"
@@ -156,6 +157,20 @@ def _from_openalex(doi: str) -> dict[str, Any]:
     return _present(entry)
 
 
+def _decoded(value: Any) -> Any:
+    """Undo the HTML escaping a resolver's strings carry.
+
+    Both resolvers answer in JSON, but their text comes out of HTML: Crossref returns a
+    venue as `Transmission &amp; Distribution`, and the entity is part of no work's name.
+    It is undone here, where both resolvers meet, rather than in each extractor.
+    """
+    if isinstance(value, str):
+        return html.unescape(value)
+    if isinstance(value, list):
+        return [_decoded(item) for item in cast("list[Any]", value)]
+    return value
+
+
 def fetch(doi: str) -> dict[str, Any]:
     """Resolve ``doi`` to a complete entry, or raise if no resolver can complete it.
 
@@ -174,7 +189,7 @@ def fetch(doi: str) -> dict[str, Any]:
             f"{doi} could not be resolved to a complete entry; missing {', '.join(missing)}. "
             "Record it as a project decision in an ADR instead."
         )
-    return {"doi": doi, **entry}
+    return {"doi": doi, **{field: _decoded(value) for field, value in entry.items()}}
 
 
 def derive_key(entry: dict[str, Any], taken: set[str]) -> str:
@@ -208,7 +223,23 @@ VENUE_FIELD = {
 
 
 def _field(key: str, value: object) -> str:
-    return f"  {key} = {{{value}}},\n"
+    text = str(value)
+    # BibTeX delimits a value by matching braces, so an unbalanced one does not fail: the
+    # reader stops early and the value comes back truncated, or swallows the fields after
+    # it. A resolver response is untrusted input and this is the boundary that writes it to
+    # disk, so the value is refused rather than repaired -- repairing means guessing which
+    # brace the work's own title meant.
+    depth = 0
+    for character in text:
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth < 0:
+                break
+    if depth != 0:
+        raise ValueError(f"{key} has unbalanced braces and would not read back: {text!r}")
+    return f"  {key} = {{{text}}},\n"
 
 
 def render_bibliography(refs: dict[str, dict[str, Any]]) -> str:
