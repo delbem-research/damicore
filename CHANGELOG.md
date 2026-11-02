@@ -9,6 +9,11 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- `tests/architecture/test_citations.py` asserts that every module in `CRITICAL_MODULES`
+  states the basis of what it computes, against a declared list of those that do not yet.
+  The list may only shrink, so the gate is green from the first commit and a module that
+  stops declaring cannot pass. It checks presence and nothing more: whether a cited work
+  supports the claim beside it is not machine-decidable, and ADR 0015 says so.
 - ADR 0016 records how branch lengths become the edge weights FastGreedy is given, and ADR
   0017 records the Neighbor Joining tie rule and its relative band. Both decide what a run
   reports and neither has a published source, so each is now a basis a unit can cite as
