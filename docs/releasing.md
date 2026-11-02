@@ -5,18 +5,22 @@ execute it; this file states the procedure and the facts that live outside the r
 
 ## Position
 
-0.1.0 is published. All five distributions are on PyPI, and `v0.1.0` is tagged. A version
-on PyPI is immutable and its number can never be reused, so the next release is a new
-version — not a rebuild of this one.
+Which version is published is not restated here, because a number written in prose goes
+stale and nothing checks it. `git tag -l 'v*'` lists what has been released, and
+`packages/damicore/pyproject.toml` declares what `main` currently says it is.
 
-`main` has since moved past `v0.1.0` while still declaring `0.1.0`, so two things are true
-until the next version bump, and neither makes any check fail:
+A version on PyPI is immutable and its number can never be reused, so a release is always a
+new version, never a rebuild of one already there.
 
-- Merging changes releases nothing. `auto-tag.yml` finds `v0.1.0` already on the remote,
-  prints `nothing to release`, and exits 0. A green run is not a release.
-- `make build` produces wheels labelled `0.1.0` whose bytes differ from the `0.1.0` on
-  PyPI. Nothing compares a local build against the index, so treat any artifact built from
-  an unbumped `main` as a development build and never upload one.
+Between a release and the next version bump, `main` declares a version that is already
+tagged. Two things are then true, and neither makes any check fail:
+
+- Merging changes releases nothing. `auto-tag.yml` reads the declared version, finds that
+  tag already on the remote, prints `v<version> already exists; nothing to release`, and
+  exits 0. A green run is not a release.
+- `make build` produces wheels labelled with that same published number, whose bytes differ
+  from the ones on PyPI. Nothing compares a local build against the index, so treat any
+  artifact built from an unbumped `main` as a development build and never upload one.
 
 Both close the moment the five versions and the changelog heading move to the next number.
 

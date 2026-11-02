@@ -58,6 +58,15 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Fixed
 
+- The citation in `README.md` named version 0.2.0, two releases behind, and nothing checked
+  it. That file is the repository's landing page, beside the button that offers the same
+  citation from `CITATION.cff`, so the two disagreed where a reader goes to cite this work.
+  `version_guard.py` now holds it to the released version, to the release date
+  `CITATION.cff` declares, and to the authors that file lists — it checks the surnames are
+  present, not their order or initials, which is what catches an author added to one file
+  and not the other. The guard's own comment claimed the citation file was the only copy no
+  packaging tool would notice drifting; the README was a second one, and it is the one that
+  had drifted.
 - A field whose braces do not balance is refused instead of written. BibTeX delimits a
   value by matching braces, so an unbalanced one does not fail the parse: the reader stops
   early and hands back a truncated string. A title ending in `}` was written, parsed and

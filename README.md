@@ -78,7 +78,7 @@ imports `google.colab`, accesses the network, or uploads data.
 If you use this code in scientific works, please cite:
 
 > Lopes, E. P., Tokuda, E. K., & Delbem, A. C. B. (2026). *DAMICORE*
-> (Version 0.2.0) [Computer software].
+> (Version 0.3.0) [Computer software].
 > https://pypi.org/project/damicore/
 
 The DAMICORE methodology was originally introduced in:
