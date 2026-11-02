@@ -135,13 +135,23 @@ def _critical_modules() -> dict[str, Path]:
     `CRITICAL_MODULES` is already the list of modules held to the coverage floor, and
     `AGENTS.md` makes it the list that owes a basis as well. One declaration, two gates.
     """
-    declaration = re.search(r"^CRITICAL_MODULES := (.+)$", MAKEFILE.read_text("utf-8"), re.M)
+    declaration = re.search(
+        r"^CRITICAL_MODULES\s*:=\s*(.+)$",
+        MAKEFILE.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
     assert declaration is not None, "the Makefile no longer declares CRITICAL_MODULES"
     modules: dict[str, Path] = {}
     for name in declaration.group(1).split():
         found = sorted(ROOT.glob(f"packages/*/src/*/{name}.py"))
         assert len(found) == 1, f"{name} resolves to {len(found)} files, not one"
         modules[name] = found[0]
+    # An exemption for a module the census does not hold is debt that cannot be repaid: it
+    # inflates the count nobody can shrink, and a later module reusing the name arrives
+    # already exempt. The sibling at `test_boundaries.py` cross-checks its Makefile list the
+    # same way, against the packages that actually exist.
+    stale = sorted(UNDECLARED - modules.keys())
+    assert not stale, f"UNDECLARED names modules outside the census: {', '.join(stale)}"
     return modules
 
 
@@ -149,19 +159,26 @@ def test_critical_modules_declare_references() -> None:
     """Every module in the census states the basis of what it computes, or is named as not
     yet doing so.
 
-    This checks presence, and presence only. It cannot check that a `References` section is
-    true, and it cannot check that the work it names supports the claim beside it -- neither
-    is machine-decidable, and ADR 0015 says so. What it buys is that **silence is
-    impossible**, which is the failure that actually happens: a module that says nothing
-    passes every other check in this file, because they are all conditional on a citation
-    already being there.
+    It checks presence, at module granularity, and nothing beyond that. One docstring in the
+    file carrying both a `References` heading and a citation satisfies it, so a module with
+    several scientific functions can declare once and leave the rest silent; closing that
+    needs a rule about which function owes which basis, which does not exist yet. It cannot
+    check that a section is true, nor that the work it names supports the claim beside it --
+    neither is machine-decidable, and ADR 0015 says so.
+
+    What it does buy is that a module saying nothing at all cannot pass, which is the
+    failure that actually happens: every other check in this file is conditional on a
+    citation already being there.
     """
     silent: list[str] = []
     for name, path in _critical_modules().items():
         if name in UNDECLARED:
             continue
-        docstrings = "\n".join(_docstrings(path))
-        if "References" not in docstrings or re.search(CITATION, docstrings) is None:
+        declared = any(
+            "References" in docstring and re.search(CITATION, docstring) is not None
+            for docstring in _docstrings(path)
+        )
+        if not declared:
             silent.append(f"  {path.relative_to(ROOT)}")
     assert not silent, "\n".join(["these modules state no basis for what they compute:", *silent])
 
