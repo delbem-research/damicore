@@ -73,21 +73,37 @@ def _resolves(key: str, refs: dict[str, dict[str, object]]) -> bool:
     return key.startswith("adr-") and any(DECISIONS.glob(f"{key.removeprefix('adr-')}-*.md"))
 
 
+def _hint(key: str) -> str:
+    """The repair for an unresolved key, which is not the same for both kinds of basis.
+
+    A bibliography key is fetched. A decision this project made has no DOI to fetch, so
+    telling its author to run `make ref` sends them to the one place the answer cannot be.
+    """
+    if key.startswith("adr-"):
+        number = key.removeprefix("adr-")
+        return f"  write the record: {DECISIONS.relative_to(ROOT)}/{number}-<slug>.md"
+    return "  run: make ref DOI=<doi>   (never edit docs/refs.json or docs/references.bib)"
+
+
+def test_an_unresolved_key_is_told_the_repair_for_its_kind_of_basis() -> None:
+    """The failure message is the convention's only delivery to an assistant with no prior
+    context, so it has to name the repair for the basis it is looking at. A decision this
+    project made has no DOI to fetch, and four of the ten critical functions rest on one."""
+    decision = _hint("adr-0001")
+    assert "docs/decisions/" in decision
+    assert "make ref" not in decision
+    assert "make ref DOI=" in _hint("cilibrasi2005")
+
+
 def test_cited_keys_resolve() -> None:
     refs = _refs()
     unresolved = [
-        f"{path.relative_to(ROOT)} cites [{key}]"
+        f"{path.relative_to(ROOT)} cites [{key}]\n{_hint(key)}"
         for path, text in _citing_files()
         for key in re.findall(CITATION, text)
         if not _resolves(key, refs)
     ]
-    assert not unresolved, "\n".join(
-        [
-            *unresolved,
-            "  run: make ref DOI=<doi>",
-            "  (never edit docs/refs.json or docs/references.bib by hand)",
-        ]
-    )
+    assert not unresolved, "\n".join(unresolved)
 
 
 def test_entries_without_doi_name_an_existing_adr() -> None:

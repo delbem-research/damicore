@@ -212,10 +212,11 @@ that cannot change their outcome.
   boundaries; do not paraphrase signatures or obvious implementation.
 - Comments explain why a constraint exists. Do not leave commented-out code, `TODO`, or
   `FIXME` in place of a scoped implementation or tracked decision.
-- `docs/refs.json` is fetched with `make ref DOI=…` and `docs/references.bib` is generated
-  from it; never edit either by hand. A resolved entry proves the work exists, never that it
-  supports the claim: what a unit does not take from its source is stated in the unit. A
-  basis with no published work cites its ADR (`[adr-NNNN]`). See ADR 0015.
+- A work with a DOI enters `docs/refs.json` through `make ref DOI=…`, never by hand, and
+  `docs/references.bib` is generated from it. A work with no DOI is named in an ADR first;
+  that record is what replaces the resolver. A resolved entry proves the work exists, never
+  that it supports the claim: what a unit does not take from its source is stated in the
+  unit. A basis that is a decision rather than a work cites `[adr-NNNN]`. See ADR 0015.
 - Update this file, schemas/models, tests, and public documentation together when an
   approved public contract changes. Do not create documentation that merely duplicates
   code-readable facts.

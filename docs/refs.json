@@ -42,6 +42,18 @@
     "source": "crossref",
     "fetched": "2026-11-01"
   },
+  "csardi2006": {
+    "source": "adr:0015",
+    "reason": "InterJournal registered no DOI; OpenAlex holds the work with doi null",
+    "type": "article",
+    "title": "The igraph software package for complex network research",
+    "authors": [
+      "Csardi, G.",
+      "Nepusz, T."
+    ],
+    "year": 2006,
+    "venue": "InterJournal, Complex Systems"
+  },
   "fisher1958": {
     "doi": "10.1080/01621459.1958.10501479",
     "title": "On Grouping for Maximum Homogeneity",
@@ -70,6 +82,17 @@
     "type": "misc",
     "source": "openalex",
     "fetched": "2026-11-01"
+  },
+  "jenks1977": {
+    "source": "adr:0015",
+    "reason": "a 1977 departmental occasional paper; neither resolver holds a record",
+    "type": "book",
+    "title": "Optimal data classification for choropleth maps",
+    "authors": [
+      "Jenks, G. F."
+    ],
+    "year": 1977,
+    "venue": "Department of Geography, University of Kansas"
   },
   "li2004": {
     "doi": "10.1109/TIT.2004.838101",

@@ -18,4 +18,6 @@ above the implementation and below `AGENTS.md` in the precedence order that file
 /decisions/0013-the-public-signature-stays-flat
 /decisions/0014-dataset-partitioning
 /decisions/0015-the-bibliography-is-fetched
+/decisions/0016-branch-lengths-become-edge-weights
+/decisions/0017-the-neighbor-joining-tie-rule
 ```

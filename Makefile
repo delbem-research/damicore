@@ -13,8 +13,12 @@ STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 # It publishes last, because it depends on the four that are.
 AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
 
-# Modules held to the 95% critical-coverage floor.
-CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks
+# Modules held to the 95% critical-coverage floor. This list is also the repository's census
+# of scientific code: a module here owes a basis, by the rule in `AGENTS.md`. `tree_graph`
+# decides the graph FastGreedy partitions and therefore the clusters; `compressor` owns the
+# window every NCD value is a function of. `newick` and `numeric_column` are the two that
+# still belong and are not here yet.
+CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks tree_graph compressor
 
 DIST_DIR ?= dist
 
@@ -74,8 +78,13 @@ docs:
 
 # `-W` is the gate: an unresolved cross-reference is how a page comes to promise a symbol
 # that does not exist. check_reference.py then asserts the rendered API is exactly `__all__`.
+#
+# `-E` discards any saved environment. Without it Sphinx reuses one, skips the pages it
+# considers current, and the consistency checks -- a page in no toctree among them -- do not
+# re-run. The gate then passes or fails on whether `docs/_build` happens to be stale, which
+# is not a gate.
 docs-check:
-	$(DOCS_RUN) python -m sphinx -W --keep-going -b html docs docs/_build/html
+	$(DOCS_RUN) python -m sphinx -E -W --keep-going -b html docs docs/_build/html
 	$(DOCS_RUN) python docs/check_reference.py docs/_build/html/objects.inv
 
 build:

@@ -193,6 +193,20 @@ def derive_key(entry: dict[str, Any], taken: set[str]) -> str:
     raise SystemExit(f"too many works share the key {base}")
 
 
+# Where a BibTeX entry of each type carries what this project calls the venue. A thesis is
+# held by a school and a book by a publisher; rendering either as `booktitle` parses but says
+# something false about the work.
+VENUE_FIELD = {
+    "article": "journal",
+    "inproceedings": "booktitle",
+    "incollection": "booktitle",
+    "book": "publisher",
+    "phdthesis": "school",
+    "mastersthesis": "school",
+    "techreport": "institution",
+}
+
+
 def _field(key: str, value: object) -> str:
     return f"  {key} = {{{value}}},\n"
 
@@ -209,7 +223,7 @@ def render_bibliography(refs: dict[str, dict[str, Any]]) -> str:
         rendered += _field("year", entry["year"])
         venue = entry.get("venue")
         if venue:
-            rendered += _field("journal" if kind == "article" else "booktitle", venue)
+            rendered += _field(VENUE_FIELD.get(kind, "howpublished"), venue)
         if entry.get("doi"):
             rendered += _field("doi", entry["doi"])
         chunks.append(rendered + "}\n")

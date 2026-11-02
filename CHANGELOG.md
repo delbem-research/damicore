@@ -7,6 +7,33 @@ carries anything else, a date included, matches neither and fails the release.
 
 ## 0.4.0
 
+### Added
+
+- ADR 0016 records how branch lengths become the edge weights FastGreedy is given, and ADR
+  0017 records the Neighbor Joining tie rule and its relative band. Both decide what a run
+  reports and neither has a published source, so each is now a basis a unit can cite as
+  `[adr-NNNN]`. The reasoning was already in the two functions' docstrings; these records
+  give it the authority rank and the citable name that a docstring cannot carry.
+- `docs/refs.json` records igraph (2006) and Jenks (1977), the two works this project rests
+  on for which no DOI exists. ADR 0015 names them and is what replaces the resolver.
+- `tree_graph` and `compressor` join `CRITICAL_MODULES`, which is both the 95% coverage floor
+  and the repository's census of scientific code. `tree_graph` decides the graph FastGreedy
+  partitions; `compressor` owns the window every NCD value is a function of.
+
+### Fixed
+
+- `make docs-check` builds with `-E`. Sphinx reused a saved environment, skipped the pages it
+  considered current, and did not re-run its consistency checks — so the gate passed or
+  failed on whether `docs/_build` happened to be stale. A page in no toctree went undetected
+  on a warm build.
+- The bibliography renders a venue into the field its entry type actually carries: a thesis
+  into `school`, a book into `publisher`, a report into `institution`. Everything that was
+  not an article rendered as `booktitle`, which parses and says something false about the
+  work.
+- An unresolved `[adr-NNNN]` citation is told to write the decision record. It was told to
+  run `make ref DOI=…`, which is the one place the answer for a project decision cannot be,
+  and four of the ten functions in `CRITICAL_MODULES` rest on one.
+
 ### Changed
 
 - Every distribution's `Documentation` URL now points at the published site,
