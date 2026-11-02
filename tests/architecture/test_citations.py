@@ -36,7 +36,6 @@ MAKEFILE = ROOT / "Makefile"
 # construction is one somebody switches off.
 UNDECLARED: frozenset[str] = frozenset(
     {
-        "serializer",
         "ncd",
         "neighbor_joining",
         "fastgreedy",
@@ -132,17 +131,28 @@ def test_cited_keys_resolve() -> None:
 def _critical_modules() -> dict[str, Path]:
     """The census, read from the `Makefile` that owns it rather than copied beside it.
 
-    `CRITICAL_MODULES` is already the list of modules held to the coverage floor, and
-    `AGENTS.md` makes it the list that owes a basis as well. One declaration, two gates.
+    `CRITICAL_MODULES` is already the list of modules held to the 95% coverage floor. The
+    test below makes it the census that owes a basis as well: one declaration, two gates,
+    and no second copy to drift.
+
+    Which modules owe a basis is decided here and nowhere else. `AGENTS.md` says what a
+    basis is and how it is cited; it does not scope the rule to a set of modules, so citing
+    it for that scope would be citing a document for something it does not contain.
     """
-    declaration = re.search(
-        r"^CRITICAL_MODULES\s*:=\s*(.+)$",
-        MAKEFILE.read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+    # One assignment, read whole. A second line -- `CRITICAL_MODULES += newick` is the edit
+    # the comment beside the list invites next -- would be dropped by the search below and
+    # the appended modules would be exempt without appearing in `UNDECLARED`. Refusing what
+    # this parse does not read in full is the difference between a loud failure and a gate
+    # that quietly covers less than it says.
+    assignments = re.findall(r"^CRITICAL_MODULES\s*[+:]?=", makefile, re.MULTILINE)
+    assert len(assignments) == 1, f"the Makefile assigns CRITICAL_MODULES {len(assignments)} times"
+    declaration = re.search(r"^CRITICAL_MODULES\s*:=\s*(.+)$", makefile, re.MULTILINE)
     assert declaration is not None, "the Makefile no longer declares CRITICAL_MODULES"
     modules: dict[str, Path] = {}
-    for name in declaration.group(1).split():
+    # A trailing `# comment` would otherwise become module names, and the failure would name
+    # `#` rather than the comment that caused it.
+    for name in declaration.group(1).split("#")[0].split():
         found = sorted(ROOT.glob(f"packages/*/src/*/{name}.py"))
         assert len(found) == 1, f"{name} resolves to {len(found)} files, not one"
         modules[name] = found[0]
