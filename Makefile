@@ -14,7 +14,8 @@ STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
 
 # Modules held to the 95% critical-coverage floor. This list is also the repository's census
-# of scientific code: a module here owes a basis, by the rule in `AGENTS.md`. `tree_graph`
+# of scientific code: a module here owes a basis, which
+# `tests/architecture/test_citations.py` enforces. `tree_graph`
 # decides the graph FastGreedy partitions and therefore the clusters; `compressor` owns the
 # window every NCD value is a function of. `newick` and `numeric_column` are the two that
 # still belong and are not here yet.

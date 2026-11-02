@@ -9,13 +9,26 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- `tests/architecture/test_citations.py` asserts that every module in `CRITICAL_MODULES`
+  states the basis of what it computes, except those named in a declared exemption list.
+  The list starts with the modules that do not yet declare, so the gate is green from the
+  first commit; shrinking it is the work, and nothing mechanical stops a future change from
+  adding to it, which is a reviewer's job. The check measures presence at module
+  granularity, and a `References` section carrying a citation is the whole of it. Whether
+  the work it names supports the claim beside it is checked by a reader; ADR 0015 records
+  that no mechanism here attempts that.
+- `serializer` states its basis and is the only module outside the exemption list. Its
+  encoding is this project's own, so it cites ADR 0001 rather than a published work; it
+  went first because that was the shortest path to a gate that is not vacuous, and
+  `tree_graph` and `neighbor_joining` can follow on ADRs 0016 and 0017.
 - ADR 0016 records how branch lengths become the edge weights FastGreedy is given, and ADR
   0017 records the Neighbor Joining tie rule and its relative band. Both decide what a run
   reports and neither has a published source, so each is now a basis a unit can cite as
   `[adr-NNNN]`. The reasoning was already in the two functions' docstrings; these records
   give it the authority rank and the citable name that a docstring cannot carry.
 - `docs/refs.json` records igraph (2006) and Jenks (1977), the two works this project rests
-  on for which no DOI exists. ADR 0015 names them and is what replaces the resolver.
+  on for which neither resolver holds a record. ADR 0015 names them and is what replaces
+  the resolver.
 - `tree_graph` and `compressor` join `CRITICAL_MODULES`, which is both the 95% coverage floor
   and the repository's census of scientific code. `tree_graph` decides the graph FastGreedy
   partitions; `compressor` owns the window every NCD value is a function of.
@@ -31,8 +44,7 @@ carries anything else, a date included, matches neither and fails the release.
   not an article rendered as `booktitle`, which parses and says something false about the
   work.
 - An unresolved `[adr-NNNN]` citation is told to write the decision record. It was told to
-  run `make ref DOI=…`, which is the one place the answer for a project decision cannot be,
-  and four of the ten functions in `CRITICAL_MODULES` rest on one.
+  run `make ref DOI=…`, which is the one place the answer for a project decision cannot be.
 
 ### Changed
 

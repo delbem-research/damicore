@@ -13,15 +13,32 @@ ROOT = Path(__file__).parents[2]
 REFS = ROOT / "docs" / "refs.json"
 BIBLIOGRAPHY = ROOT / "docs" / "references.bib"
 DECISIONS = ROOT / "docs" / "decisions"
+MAKEFILE = ROOT / "Makefile"
 
-# A citation is a bracketed key: a lowercase name, then a four-digit year, then an optional
-# disambiguating letter. `[adr-0001]` is the same shape and names a decision this project
-# made rather than a published work, which is why the hyphen is in the name class. The
-# brackets are what keep this from matching ordinary prose; a bare `@key` is never matched,
-# because it collides with a Python decorator.
-CITATION = r"\[@?((?:[a-z][a-z-]*)[0-9]{4}[a-z]?)\]"
+# `[cilibrasi2005]` names a published work; `[adr-0001]` a decision this project made. The
+# lookbehind excludes a subscript, which has the same shape and always follows a name, a `]`
+# or a `)`.
+CITATION = r"(?<![\w\])])\[@?((?:[a-z][a-z-]*)[0-9]{4}[a-z]?)\]"
+REFERENCES_SECTION = r"^References\n-{3,}"
 
 SOURCES = ("crossref", "openalex")
+
+# The modules of the census that do not yet state the basis of what they compute.
+#
+# It exists so the gate is green from the first commit: a gate that is red by construction
+# is one somebody switches off. It may only shrink, and that direction is a reviewer's
+# judgement rather than a check, because the committed list is the only record of what it
+# used to be.
+UNDECLARED: frozenset[str] = frozenset(
+    {
+        "ncd",
+        "neighbor_joining",
+        "fastgreedy",
+        "natural_breaks",
+        "tree_graph",
+        "compressor",
+    }
+)
 
 
 def _refs() -> dict[str, dict[str, object]]:
@@ -41,8 +58,8 @@ def _docstrings(path: Path) -> Iterator[str]:
 
 
 def _citing_files() -> Iterator[tuple[Path, str]]:
-    # Only docstrings are read from source, never the code around them: a citation is a
-    # claim about what a unit computes, and a bracketed token in an expression is not one.
+    # Docstrings only: a citation is a claim about what a unit computes, and a bracketed
+    # token in the code around it is not one.
     for path in sorted(ROOT.glob("packages/*/src/**/*.py")):
         for docstring in _docstrings(path):
             yield path, docstring
@@ -68,16 +85,14 @@ def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
 def _resolves(key: str, refs: dict[str, dict[str, object]]) -> bool:
     if key in refs:
         return True
-    # A unit whose basis is a decision this project made cites that decision directly, with
-    # no bibliography entry: four of the ten critical functions have no published source.
     return key.startswith("adr-") and any(DECISIONS.glob(f"{key.removeprefix('adr-')}-*.md"))
 
 
 def _hint(key: str) -> str:
     """The repair for an unresolved key, which is not the same for both kinds of basis.
 
-    A bibliography key is fetched. A decision this project made has no DOI to fetch, so
-    telling its author to run `make ref` sends them to the one place the answer cannot be.
+    A bibliography entry is fetched. A decision this project made has no DOI, so telling its
+    author to run `make ref` sends them to the one place the answer cannot be.
     """
     if key.startswith("adr-"):
         number = key.removeprefix("adr-")
@@ -85,14 +100,68 @@ def _hint(key: str) -> str:
     return "  run: make ref DOI=<doi>   (never edit docs/refs.json or docs/references.bib)"
 
 
+def _census_assignments(makefile: str) -> list[str]:
+    """The lines that assign `CRITICAL_MODULES`, identified by what they are.
+
+    Make has six assignment operators and accepts `export` and `override` before any of
+    them, so enumerating them is a list of cases a Make release can extend. Every mention of
+    the variable that is neither a comment nor an expansion of it is the axis instead.
+    """
+    return [
+        line
+        for line in makefile.splitlines()
+        if "CRITICAL_MODULES" in line
+        and not line.lstrip().startswith("#")
+        and "$(CRITICAL_MODULES)" not in line
+    ]
+
+
+def _critical_modules() -> dict[str, Path]:
+    """The census, read from the `Makefile` that owns it rather than copied beside it.
+
+    `CRITICAL_MODULES` is already the list held to the 95% coverage floor. The test below
+    makes it the census that owes a basis as well: one declaration, two gates, and no second
+    copy to drift.
+    """
+    assignments = _census_assignments(MAKEFILE.read_text(encoding="utf-8"))
+    # A second assignment would exempt the modules it names from both gates without their
+    # appearing in `UNDECLARED`, so the parse refuses what it cannot read whole.
+    assert len(assignments) == 1, f"the Makefile assigns CRITICAL_MODULES {len(assignments)} times"
+    _, operator, declared = assignments[0].partition("=")
+    assert operator, f"CRITICAL_MODULES is mentioned but not assigned: {assignments[0]!r}"
+    modules: dict[str, Path] = {}
+    for name in declared.split("#")[0].split():
+        found = sorted(ROOT.glob(f"packages/*/src/**/{name}.py"))
+        assert len(found) == 1, f"{name} resolves to {len(found)} files, not one"
+        modules[name] = found[0]
+    # An exemption for a module the census does not hold is debt that cannot be repaid: a
+    # later module reusing the name would arrive already exempt.
+    stale = sorted(UNDECLARED - modules.keys())
+    assert not stale, f"UNDECLARED names modules outside the census: {', '.join(stale)}"
+    return modules
+
+
 def test_an_unresolved_key_is_told_the_repair_for_its_kind_of_basis() -> None:
-    """The failure message is the convention's only delivery to an assistant with no prior
-    context, so it has to name the repair for the basis it is looking at. A decision this
-    project made has no DOI to fetch, and four of the ten critical functions rest on one."""
     decision = _hint("adr-0001")
     assert "docs/decisions/" in decision
     assert "make ref" not in decision
     assert "make ref DOI=" in _hint("cilibrasi2005")
+
+
+def test_a_subscript_is_not_read_as_a_citation() -> None:
+    for expression in ["values[row2024]", "f()[row2024]", "rows[-1][row2024]"]:
+        assert re.findall(CITATION, expression) == [], expression
+    assert re.findall(CITATION, "see [cilibrasi2005] and [adr-0001].") == [
+        "cilibrasi2005",
+        "adr-0001",
+    ]
+
+
+def test_a_second_assignment_of_the_census_is_refused() -> None:
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+    assert len(_census_assignments(makefile)) == 1
+    for appended in ("CRITICAL_MODULES += newick", "export CRITICAL_MODULES ::= newick"):
+        assert len(_census_assignments(f"{makefile}\n{appended}\n")) == 2, appended
 
 
 def test_cited_keys_resolve() -> None:
@@ -104,6 +173,33 @@ def test_cited_keys_resolve() -> None:
         if not _resolves(key, refs)
     ]
     assert not unresolved, "\n".join(unresolved)
+
+
+def test_critical_modules_declare_references() -> None:
+    """Every module in the census states the basis of what it computes, or is named as not
+    yet doing so.
+
+    This is presence, at module granularity: one `References` section in the file, carrying
+    one citation. Whether the work it names supports the claim beside it is checked by a
+    reader; ADR 0015 records that no mechanism here attempts that.
+    """
+    silent: list[str] = []
+    for name, path in _critical_modules().items():
+        if name in UNDECLARED:
+            continue
+        declared = any(
+            re.search(REFERENCES_SECTION, docstring, re.MULTILINE) is not None
+            and re.search(CITATION, docstring) is not None
+            for docstring in _docstrings(path)
+        )
+        if not declared:
+            silent.append(f"  {path.relative_to(ROOT)}")
+    assert not silent, "\n".join(["these modules state no basis for what they compute:", *silent])
+
+
+def test_a_mention_of_references_is_not_a_references_section() -> None:
+    assert re.search(REFERENCES_SECTION, "See the References there, per [adr-0001].") is None
+    assert re.search(REFERENCES_SECTION, "References\n----------\n.. [adr-0001] x", re.MULTILINE)
 
 
 def test_entries_without_doi_name_an_existing_adr() -> None:
