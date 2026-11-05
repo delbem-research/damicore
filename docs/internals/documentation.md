@@ -81,5 +81,9 @@ stated in the unit, in prose, and is checked by a reader.
 ## Publication
 
 `.github/workflows/docs-pages.yml` publishes to GitHub Pages on every push to the default
-branch, running the same `make docs-check` first. `.readthedocs.yaml` describes the same
-build for Read the Docs. Neither is a pull-request check; `make docs-check` in CI is.
+branch, running the same `make docs-check` first. That is the only published build, and it
+is not a pull-request check; `make docs-check` in CI is.
+
+There is no per-version site, and the repository does not need one: every page here is
+ordinary Markdown, so GitHub renders the documentation of any release at its tag, and the
+API reference is generated from docstrings that ship inside the wheel.

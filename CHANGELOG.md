@@ -85,6 +85,17 @@ carries anything else, a date included, matches neither and fails the release.
 - An unresolved `[adr-NNNN]` citation is told to write the decision record. It was told to
   run `make ref DOI=…`, which is the one place the answer for a project decision cannot be.
 
+### Removed
+
+- `.readthedocs.yaml`. It was added beside the Pages workflow and never built once: no
+  project existed on Read the Docs, so its Python version, its `fail_on_warning`, and its
+  installation of the five distributions by `pip` -- a resolution path nothing in CI covers
+  -- were all unverified. A configuration nobody runs claims a capability the project does
+  not have. The argument for keeping it was a site per release, which this repository
+  already has twice over: every page is ordinary Markdown, so GitHub renders any tag's
+  documentation, and the API reference is generated from docstrings that ship in the wheel.
+  GitHub Pages remains the published build.
+
 ### Changed
 
 - Every distribution's `Documentation` URL now points at the published site,
