@@ -39,6 +39,7 @@ from typing import Any, cast
 ROOT = Path(__file__).parents[2]
 REFS = ROOT / "docs" / "refs.json"
 BIBLIOGRAPHY = ROOT / "docs" / "references.bib"
+PAGE = ROOT / "docs" / "references.md"
 
 # Crossref asks for a contact address and serves a faster pool to requests that carry one.
 USER_AGENT = "damicore-references/0.1 (https://github.com/delbem-research/damicore)"
@@ -275,6 +276,37 @@ def render_bibliography(refs: dict[str, dict[str, Any]]) -> str:
     return "".join(chunks)
 
 
+def render_page(refs: dict[str, dict[str, Any]]) -> str:
+    """Render ``refs`` as the bibliography page of the published site.
+
+    The `.bib` is for a reader who is writing a paper; this is for a reader who met a
+    `[key]` on a page and wants the work behind it. Both come from `docs/refs.json`, so
+    neither can drift from the other without `make references` showing it.
+    """
+    lines = [
+        "# References",
+        "",
+        "Every published work this repository cites, in the form a citation key names it.",
+        "This page is generated from `docs/refs.json` by `make references`; editing it by",
+        "hand is overwritten. `docs/references.bib` carries the same entries as BibTeX.",
+        "",
+    ]
+    for key in sorted(refs):
+        entry = refs[key]
+        authors = ", ".join(str(name) for name in entry["authors"])
+        venue = entry.get("venue")
+        detail = f"{authors} ({entry['year']}). *{entry['title']}*."
+        if venue:
+            detail += f" {venue}."
+        doi = entry.get("doi")
+        lines += [f"## `{key}`", "", detail, ""]
+        if doi:
+            lines += [f"<https://doi.org/{doi}>", ""]
+        else:
+            lines += [f"No DOI; recorded under {entry['source'].replace('adr:', 'ADR ')}.", ""]
+    return "\n".join(lines)
+
+
 def _load() -> dict[str, dict[str, Any]]:
     if not REFS.is_file():
         return {}
@@ -303,6 +335,7 @@ def add(doi: str, today: str) -> str:
     refs[key] = {**entry, "fetched": today}
     _save(refs)
     BIBLIOGRAPHY.write_text(render_bibliography(refs), encoding="utf-8")
+    PAGE.write_text(render_page(refs), encoding="utf-8")
     return key
 
 
@@ -366,7 +399,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{key}] {entry['title']} ({entry['year']}, {entry['source']})")
         return 0
     if arguments.command == "render":
-        BIBLIOGRAPHY.write_text(render_bibliography(_load()), encoding="utf-8")
+        refs = _load()
+        BIBLIOGRAPHY.write_text(render_bibliography(refs), encoding="utf-8")
+        PAGE.write_text(render_page(refs), encoding="utf-8")
         return 0
     keys = list(arguments.keys)
     if arguments.since is not None:

@@ -47,7 +47,7 @@ exclude = [".venv", "dist", "__pycache__"]
 # the whole tree the moment they were added, so they ratchet existing discipline rather
 # than asking for a cleanup.
 [tool.ruff.lint]
-select = ["E", "F", "I", "PGH", "RUF100", "TID", "UP"]
+select = ["E", "ERA", "F", "FIX", "I", "PGH", "RUF100", "TID", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "tests"]

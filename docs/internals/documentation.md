@@ -69,8 +69,9 @@ is generated from docstrings and should stay that way.
 ## Citations
 
 Published sources are cited by key, and the bibliography is fetched rather than written:
-`make ref DOI=…` adds an entry to `docs/refs.json`, and `docs/references.bib` is generated
-from it, and neither is edited by hand for a work a resolver holds. A work no resolver
+`make ref DOI=…` adds an entry to `docs/refs.json`, and both `docs/references.bib` and the
+site's `references.md` page are generated from it, and none is edited by hand for a work a
+resolver holds. A work no resolver
 holds is written by hand only once an ADR names it, which is the path ADR 0015 opens and
 `source: adr:NNNN` marks. A basis with no published work cites its decision record
 instead, as `[adr-NNNN]`. ADR 0015 records why, and `tests/architecture/test_citations.py`
