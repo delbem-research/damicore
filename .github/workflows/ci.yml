@@ -111,7 +111,7 @@ jobs:
       # A floor nobody can read in the log is a floor nobody notices drifting.
       - name: Record the resolved floors
         run: uv pip list
-      - run: uv run pytest -m "not slow"
+      - run: uv run pytest
 
   # The notebook must execute cell by cell in
   # a kernel that only knows the built wheels, so a missing dependency or a broken public

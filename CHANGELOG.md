@@ -32,8 +32,9 @@ carries anything else, a date included, matches neither and fails the release.
 - `tree_graph` and `compressor` join `CRITICAL_MODULES`, which is both the 95% coverage floor
   and the repository's census of scientific code. `tree_graph` decides the graph FastGreedy
   partitions; `compressor` owns the window every NCD value is a function of.
-- `docs/refs.json` records every published work this repository cites, and nothing in it is
-  typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex response, derives
+- `docs/refs.json` records every published work this repository cites, and nothing with a
+  DOI in it is typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex
+  response, derives
   the citation key from the fetched metadata, and regenerates `docs/references.bib`, which
   is generated and never edited. `tests/architecture/test_citations.py` asserts that every
   key cited from a docstring or a Markdown file resolves, that an entry with no DOI names an
@@ -56,7 +57,72 @@ carries anything else, a date included, matches neither and fails the release.
   new check reads `docs/references.bib` with a parser this project did not write and
   compares every field with `docs/refs.json`.
 
+### Removed
+
+- The `slow` pytest marker. It was registered and applied to no test, so the
+  `minimum-versions` job's `pytest -m "not slow"` filtered nothing while reading as a fast
+  subset. The job now runs `pytest`, which is what it was doing.
+- `.readthedocs.yaml`. It was added beside the Pages workflow and never built once: no
+  project existed on Read the Docs, so its Python version, its `fail_on_warning`, and its
+  installation of the five distributions by `pip` -- a resolution path nothing in CI covers
+  -- were all unverified. A configuration nobody runs claims a capability the project does
+  not have. The argument for keeping it was a site per release, which this repository
+  already has twice over: every page is ordinary Markdown, so GitHub renders any tag's
+  documentation, and the API reference is generated from docstrings that ship in the wheel.
+  GitHub Pages remains the published build.
 ### Fixed
+
+- `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
+  rules with that version. 0.3.0 shipped and 0.4.0 is in this changelog, so the file
+  governed two releases it did not name. The qualifier is removed rather than bumped,
+  because a version in prose goes stale and nothing checks it. That widens those four from
+  release-scoped to unconditional -- the closed product scope, the ban on a shared
+  `damicore-core`, the interpreter range for new code, and `argparse` for the CLI now bind
+  without a release named beside them. Each already held; naming the widening is the point.
+- `references.py` said nothing in `docs/refs.json` is ever typed. Two of its seventeen
+  entries are: a work no resolver holds is written by hand once an ADR names it, which ADR
+  0015 permits and `source: adr:NNNN` records. The docstring now says which kind is which.
+- `make help` said `clean` removes build artifacts and the `.venv`. The target prints a
+  sentence and deletes nothing, which is deliberate -- `AGENTS.md` forbids a recursive
+  delete of a user directory -- so the help now describes that.
+
+- Two of the six authors of `gronlund2017` were published with their given name as their
+  surname: `Stefan, S.` for Schneider and `Mingzhou, S.` for Song. OpenAlex mixes two name
+  forms in one response -- `Allan Gronlund` beside `Schneider, Stefan` -- and the rule that
+  took the last whitespace-separated token read the second form backwards. A comma now
+  decides the form. Nothing could see this: `docs/refs.json` and `docs/references.bib`
+  agreed because both carried the transform's output, and `references.py verify` re-fetched
+  through the same transform and reported a match. The four strings OpenAlex actually
+  returned are now a test.
+- Eight statements across the documentation said something the tree does not support, all
+  found by the same audit and all of the same kind -- a rule stated more strongly than it is
+  held. ADR 0015 opened by saying nothing in `docs/refs.json` is ever typed, two sections
+  above the two entries it authorises to be written by hand, and closed a paragraph on
+  unsourced claims with an unsourced rate; `docs/internals/documentation.md` told an editor
+  never to write an entry at all; this changelog repeated the same overstatement. The
+  `Makefile` comment said the citation test enforces a basis for every module of the census,
+  where it enforces one for every module its exemption list does not name -- six of seven
+  are still named. `docs/releasing.md` told a releaser to rename a `## Unreleased` heading
+  that does not exist. `damicore-clusterizer`'s README said it clusters every node of the
+  tree; the root is dropped and its two edges become one joining its children.
+  `docs/dataset-partitioning.md` named the private `synthetic_data` package on a page the
+  site publishes, which `AGENTS.md` forbids.
+- ADR 0017 described a tie order the code does not use and credited the paper it had just
+  said states none. `active` is sorted at the start of every Neighbor Joining round, so
+  pairs are visited in lexicographic label order, not in the order the input supplied --
+  measured, relabelling the same matrix changes the topology and permuting its rows does
+  not. The record said the opposite. It also closed with "choosing the first in index order
+  is also what [saitou1987] does", twelve lines after opening with the statement that
+  neither [saitou1987] nor [studier1988] says what to do on a tie; that sentence is gone.
+  The record now names the order the code uses and points at the test that holds it.
+- ADR 0016 and `_edge_weights`' docstring described a computation the function does not
+  perform. Both said the reciprocals are "translated so the smallest is exactly one" and
+  omitted the division by their standard deviation, which is the step that sets the scale of
+  every weight and therefore the partition FastGreedy returns. The record also claimed the
+  result is unchanged by rescaling every length, which is true of the code and false of the
+  procedure the record described: under the shift alone, doubling the lengths halves the
+  weights. Both now state all three steps, what the division buys that the shift does not,
+  and that every weight is one when the branches are equal.
 
 - The citation in `README.md` named version 0.2.0, two releases behind, and nothing checked
   it. That file is the repository's landing page, beside the button that offers the same

@@ -1,8 +1,11 @@
 """Fetch bibliography entries, and render the bibliography from them.
 
-``docs/refs.json`` is the single source of truth for every work this repository cites, and
-nothing in it is ever typed: the only input is a DOI, and every field is copied from a
-resolver response. ``docs/references.bib`` is generated from it.
+``docs/refs.json`` is the single source of truth for every work this repository cites. A
+work with a DOI is never typed: the only input is the DOI, and every field is copied from a
+resolver response. A work no resolver holds is written by hand, and may be, only once an
+ADR names it and records why -- ADR 0015 sets that bar, and ``source`` carries ``adr:NNNN``
+instead of a resolver's name so the two kinds stay distinguishable.
+``docs/references.bib`` is generated from either.
 
 The reason is the maintainer: an assistant asked to "add the reference" produces a
 plausible, confidently-worded and entirely false citation at no cost, and an entry that
@@ -91,9 +94,20 @@ def _name(given: str, family: str) -> str:
 
 
 def _split_display_name(display_name: str) -> tuple[str, str]:
-    # shortcut: the last whitespace-separated token is the surname, which is wrong for
+    """Split one of OpenAlex's display names into given and family parts.
+
+    OpenAlex mixes two forms in a single response -- `Allan Gronlund` and
+    `Schneider, Stefan` both appear among the authors of one work -- so the form has to be
+    decided per name. A comma is the unambiguous marker of the second, and taking the last
+    whitespace-separated token without checking for it reads `Schneider, Stefan` as a
+    person surnamed Stefan.
+    """
+    family, comma, given = display_name.partition(",")
+    if comma:
+        return given.strip(), family.strip()
+    # shortcut: with no comma the last token is the surname, which is wrong for
     # "van der Berg" and right for everything this repository cites. Upgrade when a
-    # compound surname actually appears.
+    # compound surname actually appears in this form.
     parts = display_name.split()
     if len(parts) < 2:
         return "", display_name

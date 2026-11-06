@@ -1,7 +1,9 @@
 # damicore-clusterizer
 
-damicore-clusterizer clusters every node of a validated DAMICORE tree with
-igraph FastGreedy and projects the resulting communities onto leaves. It is the
+damicore-clusterizer clusters the unrooted form of a validated DAMICORE tree
+with igraph FastGreedy and projects the resulting communities onto leaves. The
+root is left out and its two edges become one joining its children, their
+lengths summed, so every other node is a vertex. It is the
 fourth and final stage of the DAMICORE pipeline; most users install the
 aggregate `damicore` distribution, which runs all four stages end to end.
 Install this package alone to cluster trees without the rest of the pipeline.

@@ -1,7 +1,9 @@
 # ADR 0015: The bibliography is fetched, never written
 
-`docs/refs.json` records every published work this repository cites, and nothing in it is
-typed. The only input is a DOI; every field is copied from a resolver response.
+`docs/refs.json` records every published work this repository cites. A work with a DOI is
+never typed: the only input is the DOI, and every field is copied from a resolver response.
+A work no resolver holds is written by hand, and may be, once this record names it and says
+why -- two entries below are there on that basis.
 `docs/references.bib` is generated from it. This records why the input is that narrow,
 because the obvious alternative — writing entries by hand, as the methodology paper
 [sanches2011] would be written in any other project — is the one that fails here.
@@ -73,7 +75,7 @@ hand edit becomes a failing check rather than a silent divergence.
 ## What this does not do
 
 A resolved entry proves the work exists. It never proves the work supports the claim beside
-it, and no mechanism here attempts that: quotation errors run at around one in six in
-fields with peer review. What an implementation does not take from its source is stated in
+it, and no mechanism here attempts that. What an implementation does not take from its
+source is stated in
 the unit, in prose, and is checked by a reader. Nothing in this ADR should be described as
 verification.

@@ -70,7 +70,9 @@ is generated from docstrings and should stay that way.
 
 Published sources are cited by key, and the bibliography is fetched rather than written:
 `make ref DOI=…` adds an entry to `docs/refs.json`, and `docs/references.bib` is generated
-from it. Never edit either by hand. A basis with no published work cites its decision record
+from it, and neither is edited by hand for a work a resolver holds. A work no resolver
+holds is written by hand only once an ADR names it, which is the path ADR 0015 opens and
+`source: adr:NNNN` marks. A basis with no published work cites its decision record
 instead, as `[adr-NNNN]`. ADR 0015 records why, and `tests/architecture/test_citations.py`
 enforces it offline on every run of `make test`.
 
@@ -81,5 +83,9 @@ stated in the unit, in prose, and is checked by a reader.
 ## Publication
 
 `.github/workflows/docs-pages.yml` publishes to GitHub Pages on every push to the default
-branch, running the same `make docs-check` first. `.readthedocs.yaml` describes the same
-build for Read the Docs. Neither is a pull-request check; `make docs-check` in CI is.
+branch, running the same `make docs-check` first. That is the only published build, and it
+is not a pull-request check; `make docs-check` in CI is.
+
+There is no per-version site, and the repository does not need one: every page here is
+ordinary Markdown, so GitHub renders the documentation of any release at its tag, and the
+API reference is generated from docstrings that ship inside the wheel.
