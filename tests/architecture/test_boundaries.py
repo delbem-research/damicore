@@ -841,3 +841,44 @@ def test_every_test_module_declares_a_registered_marker() -> None:
                 f"{path.relative_to(ROOT)}: marker {found.group(1)!r} is not registered"
             )
     assert not offenders, offenders
+
+
+def test_every_numpy_load_and_save_refuses_pickle() -> None:
+    """`allow_pickle=False` is an invariant `AGENTS.md` states and nothing held.
+
+    A `.npy` loaded with pickling enabled executes whatever the file says, so the flag is
+    what keeps a run directory from being a code path. Every call site passes it today; the
+    risk is the next one, and a grep for the flag would not see a call that simply omits it.
+    The call is read from the syntax tree instead, so a keyword split across lines counts
+    the same as one written inline.
+    """
+    offenders: list[str] = []
+    for package in sorted(PUBLIC | {"synthetic_data"}):
+        source = ROOT / "packages" / package / "src" / package
+        if not source.is_dir():
+            continue
+        for path in sorted(source.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                attribute = node.func
+                if not isinstance(attribute, ast.Attribute) or attribute.attr not in {
+                    "load",
+                    "save",
+                }:
+                    continue
+                # Only numpy's, by the name the import binds: `json.load` and a model's own
+                # `.save` are the same two attribute names and have nothing to do with this.
+                owner = attribute.value
+                if not isinstance(owner, ast.Name) or owner.id not in {"np", "numpy"}:
+                    continue
+                where = f"{path.relative_to(ROOT)}:{node.lineno}"
+                keywords = {word.arg: word.value for word in node.keywords}
+                if "allow_pickle" not in keywords:
+                    offenders.append(f"  {where}: np.{attribute.attr} without allow_pickle")
+                    continue
+                value = keywords["allow_pickle"]
+                if not (isinstance(value, ast.Constant) and value.value is False):
+                    offenders.append(f"  {where}: allow_pickle is not False")
+    assert not offenders, "\n".join(["these calls do not refuse pickled data:", *offenders])

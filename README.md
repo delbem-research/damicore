@@ -8,7 +8,10 @@
 
 DAMICORE clusters local files, or the rows or columns of a local dataset,
 through canonical serialization, exact Normalized Compression Distance (NCD),
-deterministic Neighbor Joining, and FastGreedy community detection.
+deterministic Neighbor Joining, and FastGreedy community detection. What each
+of those four stages computes, where the definition comes from, and what this
+implementation does not take from its source, is stated stage by stage under
+[the method](https://delbem-research.github.io/damicore/method/index.html).
 
 Objects come from one of two sources. A **dataset** is split by column or by
 row: delimited text (`.csv`, `.tsv`, `.txt`, any single-character delimiter) or

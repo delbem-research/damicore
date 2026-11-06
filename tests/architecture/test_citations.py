@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
 import pytest
@@ -14,9 +15,11 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).parents[2]
 REFS = ROOT / "docs" / "refs.json"
 BIBLIOGRAPHY = ROOT / "docs" / "references.bib"
+PAGE = ROOT / "docs" / "references.md"
 DECISIONS = ROOT / "docs" / "decisions"
 MAKEFILE = ROOT / "Makefile"
 CITATION_FILE = ROOT / "CITATION.cff"
+METHOD = ROOT / "docs" / "method"
 
 # `[cilibrasi2005]` names a published work; `[adr-0001]` a decision this project made. The
 # lookbehind excludes a subscript, which has the same shape and always follows a name, a `]`
@@ -29,17 +32,51 @@ SOURCES = ("crossref", "openalex")
 # The modules of the census that do not yet state the basis of what they compute.
 #
 # It exists so the gate is green from the first commit: a gate that is red by construction
-# is one somebody switches off. It may only shrink, and that direction is a reviewer's
-# judgement rather than a check, because the committed list is the only record of what it
-# used to be.
+# is one somebody switches off.
+#
+# What must never fall is the number of census modules that declare, not the size of this
+# list: it also grows when the census does, because a module entering the census without a
+# basis has to be exempt or the gate is red on arrival. A module leaves it when its
+# `References` section lands, and nothing mechanical stops a commit from re-exempting one
+# that already declared. That direction is a reviewer's judgement rather than a check,
+# because the committed list is the only record of what it used to be.
 UNDECLARED: frozenset[str] = frozenset(
     {
-        "ncd",
         "neighbor_joining",
-        "fastgreedy",
-        "natural_breaks",
-        "tree_graph",
-        "compressor",
+    }
+)
+
+
+# The modules that are not scientific code: orchestration, configuration, error types, I/O
+# and artifact plumbing, and the private test generator. They decide no result, so they owe
+# no basis and are held to the ordinary coverage floor rather than the critical one.
+#
+# This list may grow, and that is the difference between it and `UNDECLARED` above. Most
+# modules are not scientific; what matters is that the choice is made and written down, by
+# whoever adds the module and knows the answer.
+#
+# Classification is by module name, so a name used in several packages is classified once.
+# `api`, `config` and `errors` exist in five packages and are the same kind of thing in each.
+# The census cannot work that way -- it resolves each name to exactly one file -- so a
+# scientific module may not reuse a name that appears elsewhere.
+NOT_SCIENTIFIC: frozenset[str] = frozenset(
+    {
+        "api",
+        "artifacts",
+        "cli",
+        "config",
+        "errors",
+        "estimate",
+        "generator",
+        "manifest",
+        "matrix",
+        "models",
+        "newick",
+        "pipeline",
+        "progress",
+        "result",
+        "scan",
+        "shards",
     }
 )
 
@@ -73,7 +110,7 @@ def _citing_files() -> Iterator[tuple[Path, str]]:
             yield path, path.read_text(encoding="utf-8")
 
 
-def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
+def _references() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "references", ROOT / ".github" / "scripts" / "references.py"
     )
@@ -81,7 +118,11 @@ def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
         pytest.fail(".github/scripts/references.py does not exist")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    rendered: str = module.render_bibliography(refs)
+    return module
+
+
+def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
+    rendered: str = _references().render_bibliography(refs)
     return rendered
 
 
@@ -104,15 +145,19 @@ def _hint(key: str) -> str:
 
 
 def _census_assignments(makefile: str) -> list[str]:
-    """The lines that assign `CRITICAL_MODULES`, identified by what they are.
+    r"""The lines that assign `CRITICAL_MODULES`, identified by what they are.
 
     Make has six assignment operators and accepts `export` and `override` before any of
     them, so enumerating them is a list of cases a Make release can extend. Every mention of
     the variable that is neither a comment nor an expansion of it is the axis instead.
+
+    A `\` continuation is joined first, the way Make reads it. Scanning raw lines would see
+    the first and drop the rest, so the census would silently be whatever fitted on one line.
     """
+    joined = makefile.replace("\\\n", " ")
     return [
         line
-        for line in makefile.splitlines()
+        for line in joined.splitlines()
         if "CRITICAL_MODULES" in line
         and not line.lstrip().startswith("#")
         and "$(CRITICAL_MODULES)" not in line
@@ -176,6 +221,36 @@ def test_cited_keys_resolve() -> None:
         if not _resolves(key, refs)
     ]
     assert not unresolved, "\n".join(unresolved)
+
+
+def test_every_module_is_scientific_or_is_declared_not_to_be() -> None:
+    """Every module under `packages/*/src` is classified, so a new one is a decision.
+
+    Nothing used to ask whether a module belongs in the census. `CRITICAL_MODULES` was read
+    and never checked against the tree, so a scientific module nobody listed owed no basis
+    and sat below no coverage floor with every gate green -- verified by adding one and
+    watching the suite pass. The partition closes that: a module in neither list fails here,
+    by name, in the commit that adds it, which is when its author knows which it is.
+    """
+    census = set(_critical_modules())
+    present = {
+        path.stem
+        for path in ROOT.glob("packages/*/src/**/*.py")
+        if path.stem != "__init__" and "__pycache__" not in path.parts
+    }
+    unclassified = sorted(present - census - NOT_SCIENTIFIC)
+    assert not unclassified, "\n".join(
+        [
+            "these modules are in neither the census nor NOT_SCIENTIFIC:",
+            *(f"  {name}" for name in unclassified),
+            "  a scientific module joins CRITICAL_MODULES in the Makefile, and UNDECLARED",
+            "  here until it states its basis; any other joins NOT_SCIENTIFIC.",
+        ]
+    )
+    both = sorted(census & NOT_SCIENTIFIC)
+    assert not both, f"classified as both scientific and not: {', '.join(both)}"
+    gone = sorted(NOT_SCIENTIFIC - present)
+    assert not gone, f"NOT_SCIENTIFIC names modules that no longer exist: {', '.join(gone)}"
 
 
 def test_critical_modules_declare_references() -> None:
@@ -287,6 +362,51 @@ def test_every_doi_the_citation_file_names_is_in_the_bibliography() -> None:
     )
 
 
+def test_a_surname_first_resolver_name_is_not_inverted() -> None:
+    """OpenAlex mixes two name forms in one response, and only a comma tells them apart.
+
+    These four strings are what it returned for the authors of `gronlund2017`. Read by the
+    last whitespace-separated token alone, the last two produce people surnamed Stefan and
+    Mingzhou, and the wrong name reaches `docs/references.bib`. No other check sees it: the
+    bibliography and `docs/refs.json` agree because both carry the transform's output, and
+    `references.py verify` re-fetches through the same transform and reports a match.
+    """
+    references = _references()
+    rendered = {
+        raw: references._name(*references._split_display_name(raw))  # pyright: ignore[reportPrivateUsage]
+        for raw in ("Allan Grønlund", "Kasper Green Larsen", "Schneider, Stefan", "Song, Mingzhou")
+    }
+    assert rendered == {
+        "Allan Grønlund": "Grønlund, A.",
+        "Kasper Green Larsen": "Larsen, K. G.",
+        "Schneider, Stefan": "Schneider, S.",
+        "Song, Mingzhou": "Song, M.",
+    }
+
+
+def test_every_method_page_names_a_basis() -> None:
+    """A page that says what a stage computes states where that came from.
+
+    These pages exist to be the sourced account of the method, so one without a citation is
+    the defect they were written against rather than a page with a gap. The key has to
+    resolve too, which `test_cited_keys_resolve` holds for every Markdown file; this adds
+    that a method page may not be silent.
+    """
+    pages = sorted(METHOD.glob("*.md"))
+    assert pages, "docs/method/ holds no pages"
+    refs = _refs()
+    silent = [
+        str(page.relative_to(ROOT))
+        for page in pages
+        if not any(
+            _resolves(key, refs) for key in re.findall(CITATION, page.read_text(encoding="utf-8"))
+        )
+    ]
+    assert not silent, "\n".join(
+        ["these method pages cite no basis for what they describe:", *(f"  {p}" for p in silent)]
+    )
+
+
 def test_entries_without_doi_name_an_existing_adr() -> None:
     refs = _refs()
     missing: list[str] = []
@@ -304,9 +424,21 @@ def test_entries_without_doi_name_an_existing_adr() -> None:
 
 
 def test_generated_bibliography_matches_source() -> None:
+    """Both generated views of `docs/refs.json` are held to it.
+
+    The `.bib` is for a reader writing a paper; `references.md` is the page the site
+    publishes, for a reader who met a `[key]` and wants the work. One source, two outputs,
+    and neither may drift from it by hand.
+    """
     refs = _refs()
-    assert BIBLIOGRAPHY.is_file(), "docs/references.bib is missing; run `make references`"
-    assert BIBLIOGRAPHY.read_text(encoding="utf-8") == _render_bibliography(refs), (
-        "docs/references.bib does not match docs/refs.json; it is generated, never edited. "
-        "Run `make references`."
-    )
+    references = _references()
+    for path, rendered in (
+        (BIBLIOGRAPHY, references.render_bibliography(refs)),
+        (PAGE, references.render_page(refs)),
+    ):
+        name = path.relative_to(ROOT)
+        assert path.is_file(), f"{name} is missing; run `make references`"
+        assert path.read_text(encoding="utf-8") == rendered, (
+            f"{name} does not match docs/refs.json; it is generated, never edited. "
+            "Run `make references`."
+        )

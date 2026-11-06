@@ -1,3 +1,18 @@
+"""Turn the tree into the weighted graph FastGreedy partitions.
+
+The root is dropped and its two edges become one joining its children with their lengths
+summed, so the graph is the unrooted form of the tree. Branch lengths become strictly
+positive weights.
+
+References
+----------
+.. [adr-0016] Branch lengths become edge weights by a rule this project owns. No published
+   work specifies the mapping, and it decides which clusters a run reports from the same
+   tree, so the record is its basis. What this unit does not take from the record is any
+   claim about the method downstream: the record fixes the weights, and the objective they
+   are fed into is cited where that objective is computed.
+"""
+
 from __future__ import annotations
 
 import math
@@ -49,18 +64,26 @@ class GraphInput:
 def _edge_weights(lengths: list[float]) -> list[float]:
     """Map branch lengths onto the strictly positive edge weights FastGreedy is given.
 
-    A shorter branch joins a closer pair, so the weight is the reciprocal of the length. The
-    reciprocals are then translated so the smallest is exactly one, and that translation is
-    the point of this function: modularity is a weighted sum, so a single unbounded weight
-    would decide the partition by itself, and a reciprocal is unbounded as the length
-    approaches zero. Translating here rather than on the lengths keeps the ratio between
-    weights bounded by the spread of the data.
+    A shorter branch joins a closer pair, so a weight starts as the reciprocal of the length.
+    The reciprocals are then shifted so the smallest sits at zero, divided by their standard
+    deviation, and offset by one: a weight is one plus the number of standard deviations its
+    reciprocal lies above the smallest.
+
+    The division is what bounds the result, and the shift alone would not. Modularity is a
+    weighted sum, so a single unbounded weight would decide the partition by itself, and a
+    reciprocal is unbounded as the length approaches zero; dividing contains that because the
+    branch that sends a reciprocal to infinity sends the standard deviation there with it.
+    The division is also what makes the weights independent of the unit the lengths are
+    measured in. When every branch is the same length there is no spread to divide by and
+    every weight is one, which leaves FastGreedy an unweighted graph -- the honest reading,
+    since the lengths then carry no ordering.
 
     It also settles what a negative branch means. Neighbor Joining emits one where the matrix
     contradicts the split it is making, and the reciprocal of a negative length sorts below
     every positive one, so such a branch becomes the weakest edge rather than the strongest.
 
-    The result is at least one everywhere and is unchanged by rescaling every length.
+    The result is at least one everywhere and is unchanged by rescaling every length, the
+    second being a consequence of the division. See [adr-0016].
 
     Raises
     ------

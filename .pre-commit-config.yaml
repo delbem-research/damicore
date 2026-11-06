@@ -4,12 +4,16 @@
 #   Auto-fix what can be fixed (ruff lint fixable rules, ruff format, whitespace)
 #   Block what cannot (unfixable lint errors, secrets, large files, bad yaml/toml)
 #   pyright and pytest are NOT here — too slow; they run via `make check`/`make test` and CI.
+# `commit-msg` is listed so `pre-commit install` wires it: without it only the pre-commit
+# stage is installed and the message hook never runs.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Must stay inside the workspace's ruff range, in pyproject.toml. A different major here
     # runs a different default rule set than `make check`, so the hook and the gate disagree
     # about the same file and the pre-commit run stops being evidence.
-    rev: v0.16.10
+    rev: v0.17.3
     hooks:
       # Auto-fix import sorting, unused imports, and other fixable lint rules.
       # --exit-non-zero-on-fix: if files were modified, fail so developer sees
@@ -37,3 +41,17 @@ repos:
         args: [--maxkb=2000]
       # Block committing private keys or credentials.
       - id: detect-private-key
+
+  # `AGENTS.md` requires Conventional Commits and nothing held it. A local pygrep hook
+  # rather than commitizen: the rule is one regular expression, and a hook repository is a
+  # dependency to pin, update and trust for what fits on a line. `--negate` fails when the
+  # subject does NOT match, and without `--multiline` the pattern is anchored to the first
+  # line, which is the subject.
+  - repo: local
+    hooks:
+      - id: conventional-commit
+        name: the commit subject is a Conventional Commit
+        language: pygrep
+        entry: '^((build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._-]+\))?!?: .+|Merge |Revert )'
+        args: [--negate]
+        stages: [commit-msg]

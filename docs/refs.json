@@ -115,14 +115,14 @@
       "Larsen, K. G.",
       "Mathiasen, A.",
       "Nielsen, J. S.",
-      "Stefan, S.",
-      "Mingzhou, S."
+      "Schneider, S.",
+      "Song, M."
     ],
     "year": 2017,
     "venue": "arXiv (Cornell University)",
     "type": "misc",
     "source": "openalex",
-    "fetched": "2026-11-01"
+    "fetched": "2026-11-06"
   },
   "jenks1977": {
     "source": "adr:0015",
@@ -150,6 +150,18 @@
     "type": "article",
     "source": "crossref",
     "fetched": "2026-11-01"
+  },
+  "newman2004": {
+    "doi": "10.1103/PhysRevE.70.056131",
+    "title": "Analysis of weighted networks",
+    "authors": [
+      "Newman, M. E. J."
+    ],
+    "year": 2004,
+    "venue": "Physical Review E",
+    "type": "article",
+    "source": "crossref",
+    "fetched": "2026-11-06"
   },
   "saitou1987": {
     "doi": "10.1093/oxfordjournals.molbev.a040454",

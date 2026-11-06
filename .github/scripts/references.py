@@ -1,8 +1,11 @@
 """Fetch bibliography entries, and render the bibliography from them.
 
-``docs/refs.json`` is the single source of truth for every work this repository cites, and
-nothing in it is ever typed: the only input is a DOI, and every field is copied from a
-resolver response. ``docs/references.bib`` is generated from it.
+``docs/refs.json`` is the single source of truth for every work this repository cites. A
+work with a DOI is never typed: the only input is the DOI, and every field is copied from a
+resolver response. A work no resolver holds is written by hand, and may be, only once an
+ADR names it and records why -- ADR 0015 sets that bar, and ``source`` carries ``adr:NNNN``
+instead of a resolver's name so the two kinds stay distinguishable.
+``docs/references.bib`` is generated from either.
 
 The reason is the maintainer: an assistant asked to "add the reference" produces a
 plausible, confidently-worded and entirely false citation at no cost, and an entry that
@@ -36,6 +39,7 @@ from typing import Any, cast
 ROOT = Path(__file__).parents[2]
 REFS = ROOT / "docs" / "refs.json"
 BIBLIOGRAPHY = ROOT / "docs" / "references.bib"
+PAGE = ROOT / "docs" / "references.md"
 
 # Crossref asks for a contact address and serves a faster pool to requests that carry one.
 USER_AGENT = "damicore-references/0.1 (https://github.com/delbem-research/damicore)"
@@ -91,9 +95,20 @@ def _name(given: str, family: str) -> str:
 
 
 def _split_display_name(display_name: str) -> tuple[str, str]:
-    # shortcut: the last whitespace-separated token is the surname, which is wrong for
+    """Split one of OpenAlex's display names into given and family parts.
+
+    OpenAlex mixes two forms in a single response -- `Allan Gronlund` and
+    `Schneider, Stefan` both appear among the authors of one work -- so the form has to be
+    decided per name. A comma is the unambiguous marker of the second, and taking the last
+    whitespace-separated token without checking for it reads `Schneider, Stefan` as a
+    person surnamed Stefan.
+    """
+    family, comma, given = display_name.partition(",")
+    if comma:
+        return given.strip(), family.strip()
+    # shortcut: with no comma the last token is the surname, which is wrong for
     # "van der Berg" and right for everything this repository cites. Upgrade when a
-    # compound surname actually appears.
+    # compound surname actually appears in this form.
     parts = display_name.split()
     if len(parts) < 2:
         return "", display_name
@@ -261,6 +276,37 @@ def render_bibliography(refs: dict[str, dict[str, Any]]) -> str:
     return "".join(chunks)
 
 
+def render_page(refs: dict[str, dict[str, Any]]) -> str:
+    """Render ``refs`` as the bibliography page of the published site.
+
+    The `.bib` is for a reader who is writing a paper; this is for a reader who met a
+    `[key]` on a page and wants the work behind it. Both come from `docs/refs.json`, so
+    neither can drift from the other without `make references` showing it.
+    """
+    lines = [
+        "# References",
+        "",
+        "Every published work this repository cites, in the form a citation key names it.",
+        "This page is generated from `docs/refs.json` by `make references`; editing it by",
+        "hand is overwritten. `docs/references.bib` carries the same entries as BibTeX.",
+        "",
+    ]
+    for key in sorted(refs):
+        entry = refs[key]
+        authors = ", ".join(str(name) for name in entry["authors"])
+        venue = entry.get("venue")
+        detail = f"{authors} ({entry['year']}). *{entry['title']}*."
+        if venue:
+            detail += f" {venue}."
+        doi = entry.get("doi")
+        lines += [f"## `{key}`", "", detail, ""]
+        if doi:
+            lines += [f"<https://doi.org/{doi}>", ""]
+        else:
+            lines += [f"No DOI; recorded under {entry['source'].replace('adr:', 'ADR ')}.", ""]
+    return "\n".join(lines)
+
+
 def _load() -> dict[str, dict[str, Any]]:
     if not REFS.is_file():
         return {}
@@ -289,6 +335,7 @@ def add(doi: str, today: str) -> str:
     refs[key] = {**entry, "fetched": today}
     _save(refs)
     BIBLIOGRAPHY.write_text(render_bibliography(refs), encoding="utf-8")
+    PAGE.write_text(render_page(refs), encoding="utf-8")
     return key
 
 
@@ -352,7 +399,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{key}] {entry['title']} ({entry['year']}, {entry['source']})")
         return 0
     if arguments.command == "render":
-        BIBLIOGRAPHY.write_text(render_bibliography(_load()), encoding="utf-8")
+        refs = _load()
+        BIBLIOGRAPHY.write_text(render_bibliography(refs), encoding="utf-8")
+        PAGE.write_text(render_page(refs), encoding="utf-8")
         return 0
     keys = list(arguments.keys)
     if arguments.since is not None:

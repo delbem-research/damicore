@@ -28,10 +28,22 @@ scalability
 ```
 
 ```{toctree}
+:caption: The method
+:maxdepth: 1
+
+method/index
+method/normalization
+method/ncd
+method/neighbor-joining
+method/community-detection
+```
+
+```{toctree}
 :caption: Reference
 :maxdepth: 2
 
 reference/index
+references
 ```
 
 ```{toctree}

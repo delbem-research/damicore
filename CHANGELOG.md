@@ -32,8 +32,9 @@ carries anything else, a date included, matches neither and fails the release.
 - `tree_graph` and `compressor` join `CRITICAL_MODULES`, which is both the 95% coverage floor
   and the repository's census of scientific code. `tree_graph` decides the graph FastGreedy
   partitions; `compressor` owns the window every NCD value is a function of.
-- `docs/refs.json` records every published work this repository cites, and nothing in it is
-  typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex response, derives
+- `docs/refs.json` records every published work this repository cites, and nothing with a
+  DOI in it is typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex
+  response, derives
   the citation key from the fetched metadata, and regenerates `docs/references.bib`, which
   is generated and never edited. `tests/architecture/test_citations.py` asserts that every
   key cited from a docstring or a Markdown file resolves, that an entry with no DOI names an
@@ -56,7 +57,133 @@ carries anything else, a date included, matches neither and fails the release.
   new check reads `docs/references.bib` with a parser this project did not write and
   compares every field with `docs/refs.json`.
 
+### Removed
+
+- The `slow` pytest marker. It was registered and applied to no test, so the
+  `minimum-versions` job's `pytest -m "not slow"` filtered nothing while reading as a fast
+  subset. The job now runs `pytest`, which is what it was doing.
+- `.readthedocs.yaml`. It was added beside the Pages workflow and never built once: no
+  project existed on Read the Docs, so its Python version, its `fail_on_warning`, and its
+  installation of the five distributions by `pip` -- a resolution path nothing in CI covers
+  -- were all unverified. A configuration nobody runs claims a capability the project does
+  not have. The argument for keeping it was a site per release, which this repository
+  already has twice over: every page is ordinary Markdown, so GitHub renders any tag's
+  documentation, and the API reference is generated from docstrings that ship in the wheel.
+  GitHub Pages remains the published build.
+- `docs/references.md`, generated from `docs/refs.json` beside `docs/references.bib` and
+  published with the site. The bibliography existed, was fetched, was gated and reached no
+  reader: nothing rendered it, so `[clauset2004]` and five other keys appeared on the
+  published pages as plain text with nothing behind them. The `.bib` serves a reader writing
+  a paper; this page serves one who met a key and wants the work. Both are held to the same
+  source by `test_generated_bibliography_matches_source`, so neither can drift by hand.
+
+- Three rules `AGENTS.md` states and nothing held now fail on their own.
+  `tests/architecture/test_boundaries.py` reads every `np.load` and `np.save` under
+  `packages/*/src` from the syntax tree and requires `allow_pickle=False`, so a call that
+  omits the flag fails as loudly as one that sets it to `True` -- a `.npy` loaded with
+  pickling enabled runs whatever the file says, which is what would turn a run directory
+  into a code path. Ruff's `ERA` and `FIX` rules are selected in all seven configurations,
+  so commented-out code and a `TODO` stop entering. A local `pygrep` hook holds the commit
+  subject to Conventional Commits, and `default_install_hook_types` wires the `commit-msg`
+  stage that `pre-commit install` would otherwise skip.
+
+- ADR 0016 cited [clauset2004] for the quantity FastGreedy maximizes. `fastgreedy.py`
+  calls `community_fastgreedy(weights="weight")`, so the quantity is modularity on a
+  weighted graph, and that paper defines modularity with `A_vw` equal to 1 or 0 -- saying
+  of it, "This assumes the graph is unweighted; weighted graphs are a simple
+  generalization", and deferring that to a different work. `newman2004` is now recorded and
+  cited for the weighted objective, leaving [clauset2004] cited for the greedy agglomerative
+  procedure, which is what it does give. The key resolved and the work was real; it did not
+  support the claim beside it, which is the failure ADR 0015 says no mechanism here can
+  catch. It was found by reading the paper.
+
+- `docs/method/`, one page per pipeline stage plus an index, stating what the stage
+  computes, where the definition comes from, and what this implementation does not take
+  from its source. Every formula on them was checked by running the function it describes
+  and reproducing the numbers by hand, and the pages show those inputs and results. Where a
+  page states what a published work says, it quotes it; where an attribution has not been
+  read against the primary work, the page says so rather than implying it has.
+  `test_every_method_page_names_a_basis` refuses a method page that cites nothing.
+
+- `natural_breaks` states its basis, leaving `neighbor_joining` as the only census module
+  that does not. Its five works were already attributed in the References section of
+  `docs/dataset-partitioning.md`, in prose the maintainer wrote saying what each one
+  contributes; the module carries those forward and the page now cites by key instead of
+  repeating author, year and title that `docs/refs.json` already holds. The docstring says
+  plainly that none of the five has been read against this code, which is what issue #93
+  is for.
+- `newick` is infrastructure, not scientific code, and is classified as such. It
+  serialises a tree that `tree.json` already holds authoritatively -- the clusterizer reads
+  the JSON -- so it decides nothing a run reports, even though `DamicoreResult.tree_newick`
+  is public. It leaves the census and the 95% floor with it; the global floor still covers
+  it, and it is at 100% today.
+- Nine of the thirteen census modules that stated no basis now state one, taking the
+  exemption list from thirteen to four. `ncd` cites [cilibrasi2005] and says what it does
+  not take from it: the paper proves its results for a compressor that is *normal*, and
+  nothing here establishes that `zlib` -- a member of the family the paper calls "possibly
+  not precisely symmetric" -- is. `fastgreedy` cites the procedure, the weighted objective
+  and igraph separately, because they are three different works and only one of them runs.
+  `tree_graph` and the six normalizer modules cite the records that decide what they
+  compute. `ncd.py`, `fastgreedy.py`, `tree_graph.py` and the six had no module docstring
+  at all; these are their first.
+- `compressor`, `newick`, `natural_breaks` and `neighbor_joining` stay exempt, and the
+  reason is the point of the number: the first two need a decision record that does not
+  exist yet, and the last two rest on published work nobody has read against the code. A
+  list that said zero here would be saying something false.
+
 ### Fixed
+
+- `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
+  rules with that version. 0.3.0 shipped and 0.4.0 is in this changelog, so the file
+  governed two releases it did not name. The qualifier is removed rather than bumped,
+  because a version in prose goes stale and nothing checks it. That widens those four from
+  release-scoped to unconditional -- the closed product scope, the ban on a shared
+  `damicore-core`, the interpreter range for new code, and `argparse` for the CLI now bind
+  without a release named beside them. Each already held; naming the widening is the point.
+- `references.py` said nothing in `docs/refs.json` is ever typed. Two of its seventeen
+  entries are: a work no resolver holds is written by hand once an ADR names it, which ADR
+  0015 permits and `source: adr:NNNN` records. The docstring now says which kind is which.
+- `make help` said `clean` removes build artifacts and the `.venv`. The target prints a
+  sentence and deletes nothing, which is deliberate -- `AGENTS.md` forbids a recursive
+  delete of a user directory -- so the help now describes that.
+
+- Two of the six authors of `gronlund2017` were published with their given name as their
+  surname: `Stefan, S.` for Schneider and `Mingzhou, S.` for Song. OpenAlex mixes two name
+  forms in one response -- `Allan Gronlund` beside `Schneider, Stefan` -- and the rule that
+  took the last whitespace-separated token read the second form backwards. A comma now
+  decides the form. Nothing could see this: `docs/refs.json` and `docs/references.bib`
+  agreed because both carried the transform's output, and `references.py verify` re-fetched
+  through the same transform and reported a match. The four strings OpenAlex actually
+  returned are now a test.
+- Eight statements across the documentation said something the tree does not support, all
+  found by the same audit and all of the same kind -- a rule stated more strongly than it is
+  held. ADR 0015 opened by saying nothing in `docs/refs.json` is ever typed, two sections
+  above the two entries it authorises to be written by hand, and closed a paragraph on
+  unsourced claims with an unsourced rate; `docs/internals/documentation.md` told an editor
+  never to write an entry at all; this changelog repeated the same overstatement. The
+  `Makefile` comment said the citation test enforces a basis for every module of the census,
+  where it enforces one for every module its exemption list does not name -- six of seven
+  are still named. `docs/releasing.md` told a releaser to rename a `## Unreleased` heading
+  that does not exist. `damicore-clusterizer`'s README said it clusters every node of the
+  tree; the root is dropped and its two edges become one joining its children.
+  `docs/dataset-partitioning.md` named the private `synthetic_data` package on a page the
+  site publishes, which `AGENTS.md` forbids.
+- ADR 0017 described a tie order the code does not use and credited the paper it had just
+  said states none. `active` is sorted at the start of every Neighbor Joining round, so
+  pairs are visited in lexicographic label order, not in the order the input supplied --
+  measured, relabelling the same matrix changes the topology and permuting its rows does
+  not. The record said the opposite. It also closed with "choosing the first in index order
+  is also what [saitou1987] does", twelve lines after opening with the statement that
+  neither [saitou1987] nor [studier1988] says what to do on a tie; that sentence is gone.
+  The record now names the order the code uses and points at the test that holds it.
+- ADR 0016 and `_edge_weights`' docstring described a computation the function does not
+  perform. Both said the reciprocals are "translated so the smallest is exactly one" and
+  omitted the division by their standard deviation, which is the step that sets the scale of
+  every weight and therefore the partition FastGreedy returns. The record also claimed the
+  result is unchanged by rescaling every length, which is true of the code and false of the
+  procedure the record described: under the shift alone, doubling the lengths halves the
+  weights. Both now state all three steps, what the division buys that the shift does not,
+  and that every weight is one when the branches are equal.
 
 - The citation in `README.md` named version 0.2.0, two releases behind, and nothing checked
   it. That file is the repository's landing page, beside the button that offers the same
@@ -84,6 +211,23 @@ carries anything else, a date included, matches neither and fails the release.
   work.
 - An unresolved `[adr-NNNN]` citation is told to write the decision record. It was told to
   run `make ref DOI=…`, which is the one place the answer for a project decision cannot be.
+
+- Every module under `packages/*/src` is now classified: it is in `CRITICAL_MODULES`, the
+  census of code that decides what a run reports, or in `NOT_SCIENTIFIC` beside the test
+  that enforces the split. A module in neither fails the suite by name. Nothing asked that
+  question before -- the census was read and never compared with the tree, so a scientific
+  module nobody listed owed no basis and sat below no coverage floor with every gate green.
+  Verified by adding one and watching the suite pass, then fail.
+- `CRITICAL_MODULES` grows from seven modules to thirteen: `numeric_column`,
+  `delimited_reader`, `spreadsheet_reader`, `table_split`, `file_corpus` and `partition`
+  join it. Each decides what a run reports -- the bytes an object is made of, the rule that
+  reads a number, the subsets a dataset is cut into, the format the tree is recorded in --
+  and each was already above the 95% floor, so the census grew at no cost in test work. The
+  exemption list grows with it, because a module entering the census without a basis has to
+  be exempt or the gate is red on arrival; what must never fall is the number that declare.
+- The census parser joins a `\` continuation the way Make does. The list no longer fits on
+  one line, and scanning raw lines would have read seven of the fourteen and called it the
+  whole census.
 
 ### Changed
 

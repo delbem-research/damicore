@@ -1,3 +1,18 @@
+"""Read a delimited dataset as text, and only as text.
+
+Any single-character delimiter is accepted, so `.csv`, `.tsv` and `.txt` are one format.
+No value is parsed, coerced or inferred: a cell arrives at the serializer as the characters
+the file held.
+
+References
+----------
+.. [adr-0001] Foundational decisions, section "Canonical CSV serialization": "CSV values
+   remain text." That is the whole of what this unit takes from the record. The record also
+   fixes the form of the bytes an object is made of, which is `serializer.py`'s to honour,
+   not this module's -- this one decides which characters reach it, never how they are
+   encoded.
+"""
+
 from __future__ import annotations
 
 import codecs
