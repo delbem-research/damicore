@@ -40,22 +40,40 @@ nitpick_ignore = [
     ("py:class", "Path"),
     ("py:class", "NDArray"),
     ("py:class", "pd.DataFrame"),
-    # Internal types that appear in public signatures. These are NOT documentation defects:
-    # each one is a type a reader of the reference can see and cannot follow, because the
-    # distribution does not export it. Narrowing or exporting them changes the public
-    # surface, which `tests/architecture/test_boundaries.py` freezes, so it is a decision
-    # rather than a docs fix. The list is kept explicit so the gap stays countable.
-    ("py:class", "ObjectSource"),
+    # Internal types that appear in a public signature. Each was dispositioned under #100,
+    # and every one is kept internal: none is a concept a caller has to name, and the
+    # information a reader actually needs -- the values, or the shape -- is already
+    # documented where they go looking for it. The list stays explicit, one entry per type,
+    # so the surface stays countable rather than hidden behind a pattern.
+    #
+    # Aliases for a `Literal` whose values a reader wants. The values are not in the
+    # reference, and they do not need to be: `docs/input-contract.md` states the object
+    # encodings, and `docs/dataset-partitioning.md` states the partition methods and ends,
+    # beside the rule that decides which to pass. A caller writes the string, never the
+    # alias.
     ("py:class", "ObjectEncoding"),
-    ("py:class", "NormalizationInput"),
-    ("py:class", "PartitionInput"),
     ("py:class", "PartitionMethod"),
     ("py:class", "PartitionEnd"),
+    # A union of three types the distribution already exports. `NormalizationConfig.source`
+    # renders the alias, but a caller constructs `DelimitedSource`, `SpreadsheetSource` or
+    # `FileCorpusSource`, each public and each documented. Only the convenience name is
+    # unfollowable.
+    ("py:class", "ObjectSource"),
+    # Manifest payloads, and the two unions over them, discriminated on `kind`. A caller
+    # reads these off a validated manifest and branches on `kind`, whose values --
+    # `delimited`, `xlsx`, `files` -- are the source axis `docs/input-contract.md` and
+    # `AGENTS.md` both describe. Exporting seven models so that two aliases resolve would
+    # commit the project to names nobody should write.
+    ("py:class", "NormalizationInput"),
+    ("py:class", "PartitionInput"),
     ("py:class", "damicore_normalizer.manifest.DelimitedDatasetInput"),
     ("py:class", "damicore_normalizer.manifest.DelimitedPartitionInput"),
     ("py:class", "damicore_normalizer.manifest.SpreadsheetDatasetInput"),
     ("py:class", "damicore_normalizer.manifest.SpreadsheetPartitionInput"),
     ("py:class", "damicore_normalizer.manifest.FileCorpusInput"),
+    # A protocol a caller implements, so its shape is what matters rather than its name.
+    # `compute_distance_matrix` documents the call it makes, which is what an implementer
+    # needs; the name would add a public commitment and tell them nothing more.
     ("py:class", "damicore_distance.api.ProgressCallback"),
 ]
 
