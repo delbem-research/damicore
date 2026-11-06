@@ -97,6 +97,14 @@ carries anything else, a date included, matches neither and fails the release.
   support the claim beside it, which is the failure ADR 0015 says no mechanism here can
   catch. It was found by reading the paper.
 
+- `docs/method/`, one page per pipeline stage plus an index, stating what the stage
+  computes, where the definition comes from, and what this implementation does not take
+  from its source. Every formula on them was checked by running the function it describes
+  and reproducing the numbers by hand, and the pages show those inputs and results. Where a
+  page states what a published work says, it quotes it; where an attribution has not been
+  read against the primary work, the page says so rather than implying it has.
+  `test_every_method_page_names_a_basis` refuses a method page that cites nothing.
+
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
