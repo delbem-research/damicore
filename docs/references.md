@@ -70,6 +70,12 @@ Li, M., Chen, X., Li, X., Ma, B., Vitanyi, P. (2004). *The Similarity Metric*. I
 
 <https://doi.org/10.1109/TIT.2004.838101>
 
+## `newman2004`
+
+Newman, M. E. J. (2004). *Analysis of weighted networks*. Physical Review E.
+
+<https://doi.org/10.1103/PhysRevE.70.056131>
+
 ## `saitou1987`
 
 Saitou, N., Nei, M. (1987). *The neighbor-joining method: a new method for reconstructing phylogenetic trees.*. Molecular Biology and Evolution.

@@ -87,6 +87,16 @@ carries anything else, a date included, matches neither and fails the release.
   subject to Conventional Commits, and `default_install_hook_types` wires the `commit-msg`
   stage that `pre-commit install` would otherwise skip.
 
+- ADR 0016 cited [clauset2004] for the quantity FastGreedy maximizes. `fastgreedy.py`
+  calls `community_fastgreedy(weights="weight")`, so the quantity is modularity on a
+  weighted graph, and that paper defines modularity with `A_vw` equal to 1 or 0 -- saying
+  of it, "This assumes the graph is unweighted; weighted graphs are a simple
+  generalization", and deferring that to a different work. `newman2004` is now recorded and
+  cited for the weighted objective, leaving [clauset2004] cited for the greedy agglomerative
+  procedure, which is what it does give. The key resolved and the work was real; it did not
+  support the claim beside it, which is the failure ADR 0015 says no mechanism here can
+  catch. It was found by reading the paper.
+
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
