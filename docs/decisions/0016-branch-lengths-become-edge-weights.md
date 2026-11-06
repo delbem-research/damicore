@@ -15,8 +15,10 @@ decision by name.
 A shorter branch joins a closer pair, so a weight starts as the reciprocal of the length.
 The reciprocals are then shifted so the smallest sits at zero, **divided by their standard
 deviation**, and offset by one. A weight is therefore one plus the number of standard
-deviations its reciprocal lies above the smallest, and the shortest branch weighs exactly
-one.
+deviations its reciprocal lies above the smallest. The branch weighing exactly one is
+whichever has the smallest reciprocal -- the longest, while every length is positive, and
+otherwise a negative one, for the reason given below. The shortest positive branch carries
+the largest weight, which is the ordering the whole mapping exists to produce.
 
 The shift and the division do different work, and the division is the one that bounds the
 result.

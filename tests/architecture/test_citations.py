@@ -304,10 +304,10 @@ def test_a_surname_first_resolver_name_is_not_inverted() -> None:
     references = _references()
     rendered = {
         raw: references._name(*references._split_display_name(raw))  # pyright: ignore[reportPrivateUsage]
-        for raw in ("Allan Gronlund", "Kasper Green Larsen", "Schneider, Stefan", "Song, Mingzhou")
+        for raw in ("Allan Grønlund", "Kasper Green Larsen", "Schneider, Stefan", "Song, Mingzhou")
     }
     assert rendered == {
-        "Allan Gronlund": "Gronlund, A.",
+        "Allan Grønlund": "Grønlund, A.",
         "Kasper Green Larsen": "Larsen, K. G.",
         "Schneider, Stefan": "Schneider, S.",
         "Song, Mingzhou": "Song, M.",

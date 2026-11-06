@@ -61,13 +61,23 @@ carries anything else, a date included, matches neither and fails the release.
 - The `slow` pytest marker. It was registered and applied to no test, so the
   `minimum-versions` job's `pytest -m "not slow"` filtered nothing while reading as a fast
   subset. The job now runs `pytest`, which is what it was doing.
-
+- `.readthedocs.yaml`. It was added beside the Pages workflow and never built once: no
+  project existed on Read the Docs, so its Python version, its `fail_on_warning`, and its
+  installation of the five distributions by `pip` -- a resolution path nothing in CI covers
+  -- were all unverified. A configuration nobody runs claims a capability the project does
+  not have. The argument for keeping it was a site per release, which this repository
+  already has twice over: every page is ordinary Markdown, so GitHub renders any tag's
+  documentation, and the API reference is generated from docstrings that ship in the wheel.
+  GitHub Pages remains the published build.
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
   rules with that version. 0.3.0 shipped and 0.4.0 is in this changelog, so the file
-  governed two releases it did not name. **No rule changed** -- only the label, which is now
-  absent rather than bumped, because a version in prose goes stale and nothing checks it.
+  governed two releases it did not name. The qualifier is removed rather than bumped,
+  because a version in prose goes stale and nothing checks it. That widens those four from
+  release-scoped to unconditional -- the closed product scope, the ban on a shared
+  `damicore-core`, the interpreter range for new code, and `argparse` for the CLI now bind
+  without a release named beside them. Each already held; naming the widening is the point.
 - `references.py` said nothing in `docs/refs.json` is ever typed. Two of its seventeen
   entries are: a work no resolver holds is written by hand once an ADR names it, which ADR
   0015 permits and `source: adr:NNNN` records. The docstring now says which kind is which.
@@ -118,17 +128,6 @@ carries anything else, a date included, matches neither and fails the release.
   work.
 - An unresolved `[adr-NNNN]` citation is told to write the decision record. It was told to
   run `make ref DOI=…`, which is the one place the answer for a project decision cannot be.
-
-### Removed
-
-- `.readthedocs.yaml`. It was added beside the Pages workflow and never built once: no
-  project existed on Read the Docs, so its Python version, its `fail_on_warning`, and its
-  installation of the five distributions by `pip` -- a resolution path nothing in CI covers
-  -- were all unverified. A configuration nobody runs claims a capability the project does
-  not have. The argument for keeping it was a site per release, which this repository
-  already has twice over: every page is ordinary Markdown, so GitHub renders any tag's
-  documentation, and the API reference is generated from docstrings that ship in the wheel.
-  GitHub Pages remains the published build.
 
 ### Changed
 
