@@ -87,6 +87,50 @@ carries anything else, a date included, matches neither and fails the release.
   subject to Conventional Commits, and `default_install_hook_types` wires the `commit-msg`
   stage that `pre-commit install` would otherwise skip.
 
+- ADR 0016 cited [clauset2004] for the quantity FastGreedy maximizes. `fastgreedy.py`
+  calls `community_fastgreedy(weights="weight")`, so the quantity is modularity on a
+  weighted graph, and that paper defines modularity with `A_vw` equal to 1 or 0 -- saying
+  of it, "This assumes the graph is unweighted; weighted graphs are a simple
+  generalization", and deferring that to a different work. `newman2004` is now recorded and
+  cited for the weighted objective, leaving [clauset2004] cited for the greedy agglomerative
+  procedure, which is what it does give. The key resolved and the work was real; it did not
+  support the claim beside it, which is the failure ADR 0015 says no mechanism here can
+  catch. It was found by reading the paper.
+
+- `docs/method/`, one page per pipeline stage plus an index, stating what the stage
+  computes, where the definition comes from, and what this implementation does not take
+  from its source. Every formula on them was checked by running the function it describes
+  and reproducing the numbers by hand, and the pages show those inputs and results. Where a
+  page states what a published work says, it quotes it; where an attribution has not been
+  read against the primary work, the page says so rather than implying it has.
+  `test_every_method_page_names_a_basis` refuses a method page that cites nothing.
+
+- `natural_breaks` states its basis, leaving `neighbor_joining` as the only census module
+  that does not. Its five works were already attributed in the References section of
+  `docs/dataset-partitioning.md`, in prose the maintainer wrote saying what each one
+  contributes; the module carries those forward and the page now cites by key instead of
+  repeating author, year and title that `docs/refs.json` already holds. The docstring says
+  plainly that none of the five has been read against this code, which is what issue #93
+  is for.
+- `newick` is infrastructure, not scientific code, and is classified as such. It
+  serialises a tree that `tree.json` already holds authoritatively -- the clusterizer reads
+  the JSON -- so it decides nothing a run reports, even though `DamicoreResult.tree_newick`
+  is public. It leaves the census and the 95% floor with it; the global floor still covers
+  it, and it is at 100% today.
+- Nine of the thirteen census modules that stated no basis now state one, taking the
+  exemption list from thirteen to four. `ncd` cites [cilibrasi2005] and says what it does
+  not take from it: the paper proves its results for a compressor that is *normal*, and
+  nothing here establishes that `zlib` -- a member of the family the paper calls "possibly
+  not precisely symmetric" -- is. `fastgreedy` cites the procedure, the weighted objective
+  and igraph separately, because they are three different works and only one of them runs.
+  `tree_graph` and the six normalizer modules cite the records that decide what they
+  compute. `ncd.py`, `fastgreedy.py`, `tree_graph.py` and the six had no module docstring
+  at all; these are their first.
+- `compressor`, `newick`, `natural_breaks` and `neighbor_joining` stay exempt, and the
+  reason is the point of the number: the first two need a decision record that does not
+  exist yet, and the last two rest on published work nobody has read against the code. A
+  list that said zero here would be saying something false.
+
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
@@ -174,7 +218,7 @@ carries anything else, a date included, matches neither and fails the release.
   question before -- the census was read and never compared with the tree, so a scientific
   module nobody listed owed no basis and sat below no coverage floor with every gate green.
   Verified by adding one and watching the suite pass, then fail.
-- `CRITICAL_MODULES` grows from seven modules to fourteen: `newick`, `numeric_column`,
+- `CRITICAL_MODULES` grows from seven modules to thirteen: `numeric_column`,
   `delimited_reader`, `spreadsheet_reader`, `table_split`, `file_corpus` and `partition`
   join it. Each decides what a run reports -- the bytes an object is made of, the rule that
   reads a number, the subsets a dataset is cut into, the format the tree is recorded in --

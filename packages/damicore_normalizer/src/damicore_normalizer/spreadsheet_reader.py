@@ -1,3 +1,19 @@
+"""Read `.xlsx` and `.xlsm` rows, bounded in memory, and cross typed cells to text.
+
+References
+----------
+.. [adr-0009] openpyxl reads spreadsheets, through its own API, in `read_only` mode and
+   iterating rows. What this unit takes from the record is the engine and the iteration;
+   what it does not take is any licence to use the engine's conveniences, since
+   `pandas.read_excel` was rejected there for materializing the whole sheet and losing the
+   bounded-memory invariant.
+.. [adr-0010] Spreadsheet cells become text by a rule this project owns, versioned as
+   `cell_text_rule` and recorded in the manifest. The rule is the record's, not this
+   module's: a change here that alters what a typed cell becomes is a change to the rule
+   and therefore a new version of it, because a `.csv` and an `.xlsx` of the same logical
+   table must produce identical object bytes.
+"""
+
 from __future__ import annotations
 
 import datetime as dt
