@@ -675,7 +675,7 @@ non-empty output directory; a corrupted emitted file; a failed manifest write
 leaving no temporary file; a refusal before pass C leaving no directory.
 
 Tests are named `test_<behavior_under_condition>`, use minimal fixtures
-constructed in the test, and use `synthetic_data` only where a size or scale
+constructed in the test, and reach for generated fixtures only where a size or scale
 property is the claim.
 
 ## Repository consequences

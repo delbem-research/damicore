@@ -32,8 +32,9 @@ carries anything else, a date included, matches neither and fails the release.
 - `tree_graph` and `compressor` join `CRITICAL_MODULES`, which is both the 95% coverage floor
   and the repository's census of scientific code. `tree_graph` decides the graph FastGreedy
   partitions; `compressor` owns the window every NCD value is a function of.
-- `docs/refs.json` records every published work this repository cites, and nothing in it is
-  typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex response, derives
+- `docs/refs.json` records every published work this repository cites, and nothing with a
+  DOI in it is typed: `make ref DOI=…` copies each field from a Crossref or OpenAlex
+  response, derives
   the citation key from the fetched metadata, and regenerates `docs/references.bib`, which
   is generated and never edited. `tests/architecture/test_citations.py` asserts that every
   key cited from a docstring or a Markdown file resolves, that an entry with no DOI names an
@@ -93,6 +94,19 @@ carries anything else, a date included, matches neither and fails the release.
   agreed because both carried the transform's output, and `references.py verify` re-fetched
   through the same transform and reported a match. The four strings OpenAlex actually
   returned are now a test.
+- Eight statements across the documentation said something the tree does not support, all
+  found by the same audit and all of the same kind -- a rule stated more strongly than it is
+  held. ADR 0015 opened by saying nothing in `docs/refs.json` is ever typed, two sections
+  above the two entries it authorises to be written by hand, and closed a paragraph on
+  unsourced claims with an unsourced rate; `docs/internals/documentation.md` told an editor
+  never to write an entry at all; this changelog repeated the same overstatement. The
+  `Makefile` comment said the citation test enforces a basis for every module of the census,
+  where it enforces one for every module its exemption list does not name -- six of seven
+  are still named. `docs/releasing.md` told a releaser to rename a `## Unreleased` heading
+  that does not exist. `damicore-clusterizer`'s README said it clusters every node of the
+  tree; the root is dropped and its two edges become one joining its children.
+  `docs/dataset-partitioning.md` named the private `synthetic_data` package on a page the
+  site publishes, which `AGENTS.md` forbids.
 - ADR 0017 described a tie order the code does not use and credited the paper it had just
   said states none. `active` is sorted at the start of every Neighbor Joining round, so
   pairs are visited in lexicographic label order, not in the order the input supplied --

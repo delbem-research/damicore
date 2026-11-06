@@ -40,9 +40,10 @@ this repository, so it cannot be reviewed in a pull request — confirm it delib
 fully automatic flow needs no reviewers; adding them turns each publish into approval
 clicks, two per release per distribution.
 
-To release: set the five `pyproject.toml` versions, rename the `## Unreleased` changelog
-heading to `## X.Y.Z`, run `uv sync --all-packages --group dev` so `uv.lock` records the new
-versions (every CI job installs with `--locked` and fails on a stale lock), and merge.
+To release: set the five `pyproject.toml` versions, confirm the top changelog heading is
+`## X.Y.Z` for the version being released, run `uv sync --all-packages --group dev` so
+`uv.lock` records the new versions (every CI job installs with `--locked` and fails on a
+stale lock), and merge.
 
 ## Gate chain (`.github/workflows/release.yml`)
 
