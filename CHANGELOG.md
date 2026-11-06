@@ -105,6 +105,20 @@ carries anything else, a date included, matches neither and fails the release.
   read against the primary work, the page says so rather than implying it has.
   `test_every_method_page_names_a_basis` refuses a method page that cites nothing.
 
+- Nine of the thirteen census modules that stated no basis now state one, taking the
+  exemption list from thirteen to four. `ncd` cites [cilibrasi2005] and says what it does
+  not take from it: the paper proves its results for a compressor that is *normal*, and
+  nothing here establishes that `zlib` -- a member of the family the paper calls "possibly
+  not precisely symmetric" -- is. `fastgreedy` cites the procedure, the weighted objective
+  and igraph separately, because they are three different works and only one of them runs.
+  `tree_graph` and the six normalizer modules cite the records that decide what they
+  compute. `ncd.py`, `fastgreedy.py`, `tree_graph.py` and the six had no module docstring
+  at all; these are their first.
+- `compressor`, `newick`, `natural_breaks` and `neighbor_joining` stay exempt, and the
+  reason is the point of the number: the first two need a decision record that does not
+  exist yet, and the last two rest on published work nobody has read against the code. A
+  list that said zero here would be saying something false.
+
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its

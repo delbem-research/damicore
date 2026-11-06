@@ -51,3 +51,12 @@ reproducing the numbers by hand; the pages show the inputs and the results. Wher
 states what a published work says, it quotes it. Where it has not been checked against the
 primary source, it says so rather than implying it has — a citation that resolves proves the
 work exists, never that the work supports the sentence beside it.
+
+## Status in this implementation
+
+| | |
+|---|---|
+| Stated and checked against the code | every formula on these pages, by running the function and reproducing the numbers |
+| Stated and read from the source | the NCD definition and the normal-compressor properties of [cilibrasi2005]; the greedy procedure of [clauset2004] and its deferral of the weighted objective to [newman2004] |
+| Cited but not yet read against the primary work | [saitou1987] and [studier1988] on the Neighbor Joining page, [sanches2011] here. Tracked by issue #93 |
+| Not stated anywhere yet | a comparison of this implementation against the published DAMICORE results |

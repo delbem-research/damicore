@@ -43,18 +43,9 @@ SOURCES = ("crossref", "openalex")
 UNDECLARED: frozenset[str] = frozenset(
     {
         "compressor",
-        "delimited_reader",
-        "fastgreedy",
-        "file_corpus",
         "natural_breaks",
-        "ncd",
         "neighbor_joining",
         "newick",
-        "numeric_column",
-        "partition",
-        "spreadsheet_reader",
-        "table_split",
-        "tree_graph",
     }
 )
 
@@ -410,8 +401,7 @@ def test_every_method_page_names_a_basis() -> None:
         str(page.relative_to(ROOT))
         for page in pages
         if not any(
-            _resolves(key, refs)
-            for key in re.findall(CITATION, page.read_text(encoding="utf-8"))
+            _resolves(key, refs) for key in re.findall(CITATION, page.read_text(encoding="utf-8"))
         )
     ]
     assert not silent, "\n".join(
