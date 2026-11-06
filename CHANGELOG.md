@@ -77,6 +77,16 @@ carries anything else, a date included, matches neither and fails the release.
   a paper; this page serves one who met a key and wants the work. Both are held to the same
   source by `test_generated_bibliography_matches_source`, so neither can drift by hand.
 
+- Three rules `AGENTS.md` states and nothing held now fail on their own.
+  `tests/architecture/test_boundaries.py` reads every `np.load` and `np.save` under
+  `packages/*/src` from the syntax tree and requires `allow_pickle=False`, so a call that
+  omits the flag fails as loudly as one that sets it to `True` -- a `.npy` loaded with
+  pickling enabled runs whatever the file says, which is what would turn a run directory
+  into a code path. Ruff's `ERA` and `FIX` rules are selected in all seven configurations,
+  so commented-out code and a `TODO` stop entering. A local `pygrep` hook holds the commit
+  subject to Conventional Commits, and `default_install_hook_types` wires the `commit-msg`
+  stage that `pre-commit install` would otherwise skip.
+
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
