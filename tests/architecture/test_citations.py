@@ -15,6 +15,7 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).parents[2]
 REFS = ROOT / "docs" / "refs.json"
 BIBLIOGRAPHY = ROOT / "docs" / "references.bib"
+PAGE = ROOT / "docs" / "references.md"
 DECISIONS = ROOT / "docs" / "decisions"
 MAKEFILE = ROOT / "Makefile"
 CITATION_FILE = ROOT / "CITATION.cff"
@@ -410,9 +411,21 @@ def test_entries_without_doi_name_an_existing_adr() -> None:
 
 
 def test_generated_bibliography_matches_source() -> None:
+    """Both generated views of `docs/refs.json` are held to it.
+
+    The `.bib` is for a reader writing a paper; `references.md` is the page the site
+    publishes, for a reader who met a `[key]` and wants the work. One source, two outputs,
+    and neither may drift from it by hand.
+    """
     refs = _refs()
-    assert BIBLIOGRAPHY.is_file(), "docs/references.bib is missing; run `make references`"
-    assert BIBLIOGRAPHY.read_text(encoding="utf-8") == _render_bibliography(refs), (
-        "docs/references.bib does not match docs/refs.json; it is generated, never edited. "
-        "Run `make references`."
-    )
+    references = _references()
+    for path, rendered in (
+        (BIBLIOGRAPHY, references.render_bibliography(refs)),
+        (PAGE, references.render_page(refs)),
+    ):
+        name = path.relative_to(ROOT)
+        assert path.is_file(), f"{name} is missing; run `make references`"
+        assert path.read_text(encoding="utf-8") == rendered, (
+            f"{name} does not match docs/refs.json; it is generated, never edited. "
+            "Run `make references`."
+        )

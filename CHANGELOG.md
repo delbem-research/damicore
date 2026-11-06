@@ -70,6 +70,13 @@ carries anything else, a date included, matches neither and fails the release.
   already has twice over: every page is ordinary Markdown, so GitHub renders any tag's
   documentation, and the API reference is generated from docstrings that ship in the wheel.
   GitHub Pages remains the published build.
+- `docs/references.md`, generated from `docs/refs.json` beside `docs/references.bib` and
+  published with the site. The bibliography existed, was fetched, was gated and reached no
+  reader: nothing rendered it, so `[clauset2004]` and five other keys appeared on the
+  published pages as plain text with nothing behind them. The `.bib` serves a reader writing
+  a paper; this page serves one who met a key and wants the work. Both are held to the same
+  source by `test_generated_bibliography_matches_source`, so neither can drift by hand.
+
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its

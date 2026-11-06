@@ -32,6 +32,7 @@ scalability
 :maxdepth: 2
 
 reference/index
+references
 ```
 
 ```{toctree}
