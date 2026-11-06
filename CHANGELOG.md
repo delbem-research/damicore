@@ -151,6 +151,23 @@ carries anything else, a date included, matches neither and fails the release.
 - An unresolved `[adr-NNNN]` citation is told to write the decision record. It was told to
   run `make ref DOI=…`, which is the one place the answer for a project decision cannot be.
 
+- Every module under `packages/*/src` is now classified: it is in `CRITICAL_MODULES`, the
+  census of code that decides what a run reports, or in `NOT_SCIENTIFIC` beside the test
+  that enforces the split. A module in neither fails the suite by name. Nothing asked that
+  question before -- the census was read and never compared with the tree, so a scientific
+  module nobody listed owed no basis and sat below no coverage floor with every gate green.
+  Verified by adding one and watching the suite pass, then fail.
+- `CRITICAL_MODULES` grows from seven modules to fourteen: `newick`, `numeric_column`,
+  `delimited_reader`, `spreadsheet_reader`, `table_split`, `file_corpus` and `partition`
+  join it. Each decides what a run reports -- the bytes an object is made of, the rule that
+  reads a number, the subsets a dataset is cut into, the format the tree is recorded in --
+  and each was already above the 95% floor, so the census grew at no cost in test work. The
+  exemption list grows with it, because a module entering the census without a basis has to
+  be exempt or the gate is red on arrival; what must never fall is the number that declare.
+- The census parser joins a `\` continuation the way Make does. The list no longer fits on
+  one line, and scanning raw lines would have read seven of the fourteen and called it the
+  whole census.
+
 ### Changed
 
 - Every distribution's `Documentation` URL now points at the published site,
