@@ -5,7 +5,7 @@ cross-tool source; tool-specific files may import it but must not restate it.
 
 ## Authority and scope
 
-- This file is the normative contract for DAMICORE 0.2, enforced by the executable checks:
+- This file is the normative contract for this repository, enforced by the executable checks:
   the test suite, Ruff, Pyright strict mode, the coverage gates, and CI. Read the sections
   relevant to a change before editing.
 - Apply this precedence when sources disagree: this file; ADRs under `docs/decisions/` and
@@ -16,7 +16,7 @@ cross-tool source; tool-specific files may import it but must not restate it.
   down to portability. No check can decide that trade-off, which is why it is written down.
 - Treat a disagreement as a defect in the lower-authority source. Do not weaken a rule here
   to preserve accidental behavior in the implementation.
-- The 0.2 scope is closed. Reopening a deferred decision -- approximate NCD, Dask or Ray,
+- The product scope is closed. Reopening a deferred decision -- approximate NCD, Dask or Ray,
   PyArrow or Polars, GPU, alternative compressors, DataFrame or stream input, Parquet
   output, remote service, legacy `.xls`, `.xlsb`, `.ods`, archive expansion -- or adding a
   domain to the product and package map below requires a new ADR under `docs/decisions/`
@@ -83,7 +83,7 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
 - `damicore_normalizer`, `damicore_distance`, `damicore_tree_builder`, and
   `damicore_clusterizer` each own one stage and must not import one another.
 - Stages exchange versioned artifacts, standard-library values, and the explicitly
-  specified in-memory NumPy arrays. Do not add a shared `damicore-core` package in 0.2.
+  specified in-memory NumPy arrays. Do not add a shared `damicore-core` package.
 - `packages/synthetic_data` is private test infrastructure. Published/runtime packages
   must not depend on it, and user-facing documentation must not expose it.
 - The five public distributions are independently installable, use lockstep SemVer, and
@@ -141,7 +141,7 @@ that cannot change their outcome.
 
 ## Python design and implementation
 
-- New 0.2 code must support Python `>=3.11,<3.15`, use the `src/` layout, pass Ruff, and
+- New code must support Python `>=3.11,<3.15`, use the `src/` layout, pass Ruff, and
   satisfy Pyright strict mode.
 - Prefer a functional core with an imperative shell: pure transformations in the center;
   path access, process pools, persistence, logging, and progress at explicit boundaries.
@@ -167,7 +167,7 @@ that cannot change their outcome.
   as `utils`, `helpers`, `common`, `core`, `services`, `internal`, or `misc` when a domain
   name exists.
 - The runtime dependency set and its ranges are closed and asserted by
-  `tests/architecture/test_boundaries.py`. Prefer the standard library; the 0.2 CLI uses
+  `tests/architecture/test_boundaries.py`. Prefer the standard library; the CLI uses
   `argparse`, not Typer or Click.
 - Preserve the streaming, bounded-memory, deterministic, atomic-write, checkpoint,
   hashing, path-containment, and `allow_pickle=False` invariants. Never add a

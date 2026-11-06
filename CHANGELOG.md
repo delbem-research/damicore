@@ -56,7 +56,24 @@ carries anything else, a date included, matches neither and fails the release.
   new check reads `docs/references.bib` with a parser this project did not write and
   compares every field with `docs/refs.json`.
 
+### Removed
+
+- The `slow` pytest marker. It was registered and applied to no test, so the
+  `minimum-versions` job's `pytest -m "not slow"` filtered nothing while reading as a fast
+  subset. The job now runs `pytest`, which is what it was doing.
+
 ### Fixed
+
+- `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
+  rules with that version. 0.3.0 shipped and 0.4.0 is in this changelog, so the file
+  governed two releases it did not name. **No rule changed** -- only the label, which is now
+  absent rather than bumped, because a version in prose goes stale and nothing checks it.
+- `references.py` said nothing in `docs/refs.json` is ever typed. Two of its seventeen
+  entries are: a work no resolver holds is written by hand once an ADR names it, which ADR
+  0015 permits and `source: adr:NNNN` records. The docstring now says which kind is which.
+- `make help` said `clean` removes build artifacts and the `.venv`. The target prints a
+  sentence and deletes nothing, which is deliberate -- `AGENTS.md` forbids a recursive
+  delete of a user directory -- so the help now describes that.
 
 - Two of the six authors of `gronlund2017` were published with their given name as their
   surname: `Stefan, S.` for Schneider and `Mingzhou, S.` for Song. OpenAlex mixes two name

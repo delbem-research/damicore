@@ -59,7 +59,6 @@ markers = [
     "contract: cross-package contract tests",
     "e2e: complete pipeline tests",
     "notebook: executable notebook tests",
-    "slow: stress and benchmark-adjacent tests",
 ]
 
 [tool.coverage.run]

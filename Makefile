@@ -37,7 +37,7 @@ help:
 	@echo "  print-public-packages Print the publish allowlist"
 	@echo "  print-stage-packages  Print the allowlist without the orchestrator"
 	@echo "  print-aggregate-package Print the orchestrator distribution alone"
-	@echo "  clean                 Remove build artifacts and the shared .venv"
+	@echo "  clean                 Print what to remove by hand; it deletes nothing"
 
 install:
 	uv sync --all-packages --group dev
