@@ -44,7 +44,6 @@ UNDECLARED: frozenset[str] = frozenset(
     {
         "natural_breaks",
         "neighbor_joining",
-        "newick",
     }
 )
 
@@ -73,6 +72,7 @@ NOT_SCIENTIFIC: frozenset[str] = frozenset(
         "manifest",
         "matrix",
         "models",
+        "newick",
         "pipeline",
         "progress",
         "result",

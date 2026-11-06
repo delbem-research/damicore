@@ -105,6 +105,11 @@ carries anything else, a date included, matches neither and fails the release.
   read against the primary work, the page says so rather than implying it has.
   `test_every_method_page_names_a_basis` refuses a method page that cites nothing.
 
+- `newick` is infrastructure, not scientific code, and is classified as such. It
+  serialises a tree that `tree.json` already holds authoritatively -- the clusterizer reads
+  the JSON -- so it decides nothing a run reports, even though `DamicoreResult.tree_newick`
+  is public. It leaves the census and the 95% floor with it; the global floor still covers
+  it, and it is at 100% today.
 - Nine of the thirteen census modules that stated no basis now state one, taking the
   exemption list from thirteen to four. `ncd` cites [cilibrasi2005] and says what it does
   not take from it: the paper proves its results for a compressor that is *normal*, and
@@ -206,7 +211,7 @@ carries anything else, a date included, matches neither and fails the release.
   question before -- the census was read and never compared with the tree, so a scientific
   module nobody listed owed no basis and sat below no coverage floor with every gate green.
   Verified by adding one and watching the suite pass, then fail.
-- `CRITICAL_MODULES` grows from seven modules to fourteen: `newick`, `numeric_column`,
+- `CRITICAL_MODULES` grows from seven modules to thirteen: `numeric_column`,
   `delimited_reader`, `spreadsheet_reader`, `table_split`, `file_corpus` and `partition`
   join it. Each decides what a run reports -- the bytes an object is made of, the rule that
   reads a number, the subsets a dataset is cut into, the format the tree is recorded in --
