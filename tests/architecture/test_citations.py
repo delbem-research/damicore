@@ -42,7 +42,6 @@ SOURCES = ("crossref", "openalex")
 # because the committed list is the only record of what it used to be.
 UNDECLARED: frozenset[str] = frozenset(
     {
-        "compressor",
         "natural_breaks",
         "neighbor_joining",
         "newick",

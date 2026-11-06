@@ -1,3 +1,23 @@
+"""Produce C(s): the compressed size one stream gives for an object, or for a pair.
+
+A single `zlib.compressobj` is opened and every chunk of every path is pushed through it, so
+a pair is compressed as a concatenation that is never written to disk. The window is the
+maximum the chosen format allows: `zlib.MAX_WBITS` for `zlib`, 31 for `gzip`.
+
+References
+----------
+.. [cilibrasi2005] Clustering by Compression. This module is the C of its equation (3.1),
+   and the paper is explicit that its results hold for a compressor that is *normal*:
+   idempotent, monotonic, symmetric and distributive, each up to an additive O(log n) term
+   (its Definition 3.2). What this unit does not take from the paper is any of those
+   guarantees. It establishes none of the four, measures none of them, and the paper itself
+   names the Lempel-Ziv family -- which `zlib` belongs to -- as "possibly not precisely
+   symmetric". The window is a property of this unit rather than of the method: the paper
+   does not fix one, and every NCD value is a function of whichever is in force, which is
+   why `DistanceConfig.compressor` is a `Literal` and why a name outside it must fail to
+   type-check rather than compress as something else.
+"""
+
 from __future__ import annotations
 
 import zlib
