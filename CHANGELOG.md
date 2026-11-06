@@ -105,6 +105,13 @@ carries anything else, a date included, matches neither and fails the release.
   read against the primary work, the page says so rather than implying it has.
   `test_every_method_page_names_a_basis` refuses a method page that cites nothing.
 
+- `natural_breaks` states its basis, leaving `neighbor_joining` as the only census module
+  that does not. Its five works were already attributed in the References section of
+  `docs/dataset-partitioning.md`, in prose the maintainer wrote saying what each one
+  contributes; the module carries those forward and the page now cites by key instead of
+  repeating author, year and title that `docs/refs.json` already holds. The docstring says
+  plainly that none of the five has been read against this code, which is what issue #93
+  is for.
 - `newick` is infrastructure, not scientific code, and is classified as such. It
   serialises a tree that `tree.json` already holds authoritatively -- the clusterizer reads
   the JSON -- so it decides nothing a run reports, even though `DamicoreResult.tree_newick`
