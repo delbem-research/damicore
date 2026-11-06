@@ -68,6 +68,7 @@ from damicore.errors import (
 )
 from damicore.estimate import ResourceEstimate, preflight
 from damicore.manifest import (
+    RUN_METHOD,
     ClustersArtifact,
     LabelsArtifact,
     RunManifest,
@@ -811,6 +812,9 @@ def run(
         "config_hash": config_hash,
         "estimate": preview.model_dump(mode="json"),
         "runtime": runtime_fingerprint(),
+        # Recorded per run rather than inferred from the version: a directory outlives the
+        # release that wrote it, and a rule that is constant today is a variant later.
+        "method": RUN_METHOD.model_dump(mode="json"),
         "stages": {},
         "artifacts": {},
         "warnings": [],

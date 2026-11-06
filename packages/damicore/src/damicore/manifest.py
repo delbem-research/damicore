@@ -101,6 +101,52 @@ class StageReceipt(BaseModel):
     metrics: dict[str, int | float | str | bool]
 
 
+class MethodRule(BaseModel):
+    """One named, versioned rule, and the works that are its basis.
+
+    A rule is a name rather than a parameter value because a citation, a manifest field and
+    a method page can all carry a name and none of them can carry one branch of a `Literal`.
+    The parameters a run chose within a rule -- which compressor, how many clusters -- stay
+    in `config`, where the configuration hash already covers them.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9-]*/v[0-9]+$")
+    refs: tuple[str, ...] = Field(min_length=1)
+
+
+class RunMethod(BaseModel):
+    """The rule in force at each stage, so a run directory can still say what produced it.
+
+    Constant for a given release today, and recorded per run anyway: a constant now is a
+    variant later, and a directory from a year ago cannot be asked which release wrote it
+    once the release is gone. ADR 0008 set this pattern for `object_encoding`; this extends
+    it to the stages that had no name at all.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    objects: MethodRule
+    distance: MethodRule
+    tree: MethodRule
+    clusters: MethodRule
+
+
+# The rules this release implements. Every key here must resolve in `docs/refs.json` or name
+# an ADR, which `tests/architecture/test_citations.py` holds: a typo would otherwise reach a
+# run directory as provenance pointing nowhere.
+RUN_METHOD = RunMethod(
+    objects=MethodRule(name="canonical-json-lines/v1", refs=("adr-0001", "adr-0008", "adr-0010")),
+    distance=MethodRule(name="ncd-max/v1", refs=("cilibrasi2005",)),
+    tree=MethodRule(name="neighbor-joining-q/v1", refs=("saitou1987", "studier1988", "adr-0017")),
+    clusters=MethodRule(
+        name="fastgreedy-modularity/v1",
+        refs=("clauset2004", "newman2004", "csardi2006", "adr-0016"),
+    ),
+)
+
+
 class RunManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
@@ -128,6 +174,9 @@ class RunManifest(BaseModel):
     config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     estimate: ResourceEstimate
     runtime: dict[str, str]
+    # Absent on a run written before provenance was recorded, which is the honest reading of
+    # `None`: that run does not say which rules produced it, and nothing can infer them.
+    method: RunMethod | None = None
     stages: dict[str, StageReceipt]
     artifacts: dict[str, FinalArtifactRecord]
     warnings: tuple[str, ...]
