@@ -131,6 +131,20 @@ carries anything else, a date included, matches neither and fails the release.
   exist yet, and the last two rest on published work nobody has read against the code. A
   list that said zero here would be saying something false.
 
+- `manifest.json` carries a `method` block naming the rule in force at each stage --
+  `canonical-json-lines/v1`, `ncd-max/v1`, `neighbor-joining-q/v1`,
+  `fastgreedy-modularity/v1` -- each with the citation keys that are its basis. A run
+  directory now says which variant of the method produced it without the release that
+  wrote it being available to ask, which is the point: every open roadmap issue turns one
+  of those constants into a variant. Parameters stay in `config`, where `config_hash`
+  already covers them; the rule names the method a choice was made inside.
+  **The block is additive and the schema version did not change**, so no existing run
+  directory was invalidated: a manifest written before it reads back with `method` absent,
+  which states that the run does not say which rules produced it rather than guessing.
+  Every key in the block is asserted to resolve, because this is the one place a citation
+  is written in Python and the scanner that holds every other one does not read it. See
+  ADR 0018.
+
 ### Fixed
 
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its

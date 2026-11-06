@@ -407,6 +407,26 @@ def test_every_method_page_names_a_basis() -> None:
     )
 
 
+def test_every_rule_the_manifest_records_cites_a_basis_that_resolves() -> None:
+    """A run directory carries the rules that produced it, so those keys must be real.
+
+    `RUN_METHOD` is typed in Python, not in a docstring or a Markdown file, so it is the one
+    place a citation key can be written by hand and reach a user. `test_cited_keys_resolve`
+    does not read it. A typo there would be provenance pointing nowhere, in an artifact
+    whose whole purpose is to still answer a year from now.
+    """
+    from damicore.manifest import RUN_METHOD
+
+    refs = _refs()
+    unresolved = [
+        f"  {stage}: {rule['name']} cites [{key}]\n{_hint(key)}"
+        for stage, rule in RUN_METHOD.model_dump().items()
+        for key in rule["refs"]
+        if not _resolves(key, refs)
+    ]
+    assert not unresolved, "\n".join(["the manifest would record unresolvable basis:", *unresolved])
+
+
 def test_entries_without_doi_name_an_existing_adr() -> None:
     refs = _refs()
     missing: list[str] = []

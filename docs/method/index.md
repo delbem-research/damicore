@@ -37,6 +37,14 @@ Four of the six have no published source at all. That is the reason this section
 naming the paper a stage comes from does not identify the result a run reports, because the
 result also depends on every choice the paper left open.
 
+## The run says which of these produced it
+
+Every run's `manifest.json` carries a `method` block naming the rule in force at each stage,
+with the citation keys above beside it. A run directory therefore answers this page's
+question on its own, a year later, without the release that wrote it being available to ask.
+See [ADR 0018](../decisions/0018-method-provenance-in-the-manifest.md) and
+[the artifact contract](../artifacts.md).
+
 ## Where the method comes from
 
 DAMICORE was introduced in [sanches2011]. **This page does not yet state what this

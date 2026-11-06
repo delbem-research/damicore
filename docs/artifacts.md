@@ -14,6 +14,25 @@ small results use same-directory temporary files, `fsync`, and atomic
 replacement. `load_result` verifies every declared size and SHA-256 before
 returning a read-only matrix view.
 
+`manifest.json` carries a `method` block naming the rule in force at each stage, so a run
+directory says which variant of the method produced it without being asked to the release
+that wrote it. One entry per stage — `objects`, `distance`, `tree`, `clusters` — each a
+versioned name and the citation keys that are its basis, resolvable in `docs/refs.json`:
+
+```json
+"method": {
+  "distance": {"name": "ncd-max/v1", "refs": ["cilibrasi2005"]},
+  "tree": {"name": "neighbor-joining-q/v1", "refs": ["saitou1987", "studier1988", "adr-0017"]}
+}
+```
+
+A rule is not a parameter. Which compressor and how many clusters stay in `config`, which
+`config_hash` covers; the rule names the method those choices were made inside. The block
+is optional and the schema version did not change for it, so a manifest written before it
+reads back with `method` absent — which states that the run does not say which rules
+produced it, rather than guessing. See
+[ADR 0018](decisions/0018-method-provenance-in-the-manifest.md).
+
 Only `completed` is a successful terminal state. `failed` and `interrupted`
 reports remain diagnostic and may be resumed when their input, configuration,
 schema, runtime fingerprint, receipts, and checkpoints remain compatible.

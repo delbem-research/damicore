@@ -564,3 +564,31 @@ def test_a_completed_manifest_without_a_completion_time_is_rejected(tmp_path: Pa
     manifest["completed_at"] = None
     with pytest.raises(ValidationError, match="lacks completion metadata or objects"):
         RunManifest.model_validate_json(json.dumps(manifest))
+
+
+def test_a_run_records_the_rule_in_force_at_every_stage(tmp_path: Path) -> None:
+    """A run directory outlives the release that wrote it, so it carries its own provenance.
+
+    The rules are constant for this release, which is exactly why recording them matters: a
+    reader a year from now cannot ask the release what it implemented, and a rule that is
+    constant today is a variant after any roadmap issue lands.
+    """
+    manifest = _completed_manifest(tmp_path)
+    method = manifest["method"]
+    assert set(method) == {"objects", "distance", "tree", "clusters"}
+    assert method["distance"] == {"name": "ncd-max/v1", "refs": ["cilibrasi2005"]}
+    assert all(rule["refs"] for rule in method.values())
+
+
+def test_a_manifest_written_before_provenance_still_loads(tmp_path: Path) -> None:
+    """The block is additive, so no run directory was invalidated to add it.
+
+    A manifest from a release that recorded no method is schema v2 like this one; it simply
+    does not carry the key. `None` is the honest reading -- that run does not say which
+    rules produced it -- rather than a default that would invent them.
+    """
+    manifest = _completed_manifest(tmp_path)
+    del manifest["method"]
+    loaded = RunManifest.model_validate_json(json.dumps(manifest))
+    assert loaded.method is None
+    assert loaded.schema_version == 2
