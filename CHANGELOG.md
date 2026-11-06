@@ -93,6 +93,14 @@ carries anything else, a date included, matches neither and fails the release.
   agreed because both carried the transform's output, and `references.py verify` re-fetched
   through the same transform and reported a match. The four strings OpenAlex actually
   returned are now a test.
+- ADR 0017 described a tie order the code does not use and credited the paper it had just
+  said states none. `active` is sorted at the start of every Neighbor Joining round, so
+  pairs are visited in lexicographic label order, not in the order the input supplied --
+  measured, relabelling the same matrix changes the topology and permuting its rows does
+  not. The record said the opposite. It also closed with "choosing the first in index order
+  is also what [saitou1987] does", twelve lines after opening with the statement that
+  neither [saitou1987] nor [studier1988] says what to do on a tie; that sentence is gone.
+  The record now names the order the code uses and points at the test that holds it.
 - ADR 0016 and `_edge_weights`' docstring described a computation the function does not
   perform. Both said the reciprocals are "translated so the smallest is exactly one" and
   omitted the division by their standard deviation, which is the step that sets the scale of

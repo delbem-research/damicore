@@ -23,14 +23,24 @@ Two scores within a relative band are one tie. The band is
 `1e-9 * max(1.0, abs(best_score))`, so it scales with the magnitude of the better score
 rather than being absolute.
 
-Among pairs in a tie, the one reached first in index order wins: a later pair replaces the
-best only when it is better by more than the band, and a better score inside the band
-tightens the band's centre without changing the pair. Index order follows the label order,
-which follows the input, so the tree is a function of the matrix and its labels and of
-nothing else.
+Among pairs in a tie, the one reached first wins: a later pair replaces the best only when
+it is better by more than the band, and a better score inside the band tightens the band's
+centre without changing the pair.
 
-Choosing the first in index order is also what [saitou1987] does. The band is this project's
-addition; the preference it resolves is not a departure from the method.
+What "first" means is the part worth recording, because it is not the input. The active set
+is sorted at the start of every round, so pairs are visited in **lexicographic label
+order**: the running pair is always the lexicographically earliest one seen so far.
+Relabelling can therefore change which pair wins a tie; reordering the rows of the same
+matrix cannot. Internal nodes are named `nj_%06d`, zero-padded so that their lexicographic
+order is also the order they were created in. The tree is a function of the matrix and its
+labels and of nothing else, which
+`damicore_tree_builder`'s `test_an_exact_q_tie_is_broken_by_the_smallest_id_pair` holds by
+running the same tie through three permutations of the input and requiring the same join.
+
+The band and this ordering are both this project's. The opening of this record says
+[saitou1987] states no tie rule, and nothing here walks that back: what is claimed is that
+resolving a tie by a fixed, label-derived order is a choice the method leaves open, not a
+departure from it.
 
 ## What the band buys, and what it costs
 
