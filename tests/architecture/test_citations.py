@@ -19,6 +19,7 @@ PAGE = ROOT / "docs" / "references.md"
 DECISIONS = ROOT / "docs" / "decisions"
 MAKEFILE = ROOT / "Makefile"
 CITATION_FILE = ROOT / "CITATION.cff"
+METHOD = ROOT / "docs" / "method"
 
 # `[cilibrasi2005]` names a published work; `[adr-0001]` a decision this project made. The
 # lookbehind excludes a subscript, which has the same shape and always follows a name, a `]`
@@ -41,19 +42,7 @@ SOURCES = ("crossref", "openalex")
 # because the committed list is the only record of what it used to be.
 UNDECLARED: frozenset[str] = frozenset(
     {
-        "compressor",
-        "delimited_reader",
-        "fastgreedy",
-        "file_corpus",
-        "natural_breaks",
-        "ncd",
         "neighbor_joining",
-        "newick",
-        "numeric_column",
-        "partition",
-        "spreadsheet_reader",
-        "table_split",
-        "tree_graph",
     }
 )
 
@@ -82,6 +71,7 @@ NOT_SCIENTIFIC: frozenset[str] = frozenset(
         "manifest",
         "matrix",
         "models",
+        "newick",
         "pipeline",
         "progress",
         "result",
@@ -392,6 +382,29 @@ def test_a_surname_first_resolver_name_is_not_inverted() -> None:
         "Schneider, Stefan": "Schneider, S.",
         "Song, Mingzhou": "Song, M.",
     }
+
+
+def test_every_method_page_names_a_basis() -> None:
+    """A page that says what a stage computes states where that came from.
+
+    These pages exist to be the sourced account of the method, so one without a citation is
+    the defect they were written against rather than a page with a gap. The key has to
+    resolve too, which `test_cited_keys_resolve` holds for every Markdown file; this adds
+    that a method page may not be silent.
+    """
+    pages = sorted(METHOD.glob("*.md"))
+    assert pages, "docs/method/ holds no pages"
+    refs = _refs()
+    silent = [
+        str(page.relative_to(ROOT))
+        for page in pages
+        if not any(
+            _resolves(key, refs) for key in re.findall(CITATION, page.read_text(encoding="utf-8"))
+        )
+    ]
+    assert not silent, "\n".join(
+        ["these method pages cite no basis for what they describe:", *(f"  {p}" for p in silent)]
+    )
 
 
 def test_entries_without_doi_name_an_existing_adr() -> None:

@@ -30,7 +30,7 @@ by the standard deviation does, because the same branch that sends a reciprocal 
 sends the standard deviation there with it. Measured, the largest weight then grows with the
 number of branches rather than with how short the shortest one is: about 3.5 for five
 branches and about 8.1 for fifty, with the same 1e-12 branch among them. That is what stops
-one edge from dominating the objective [clauset2004] maximizes.
+one edge from dominating the objective being maximized.
 
 The division is also what makes the weights independent of the unit the lengths are measured
 in. Doubling every branch halves every reciprocal and halves their standard deviation with
@@ -65,5 +65,13 @@ This mapping is this project's own and is versioned by this record. A change to 
 record, never a silent redefinition, because it changes which clusters a run reports from the
 same tree.
 
-No published work is cited as its source. [clauset2004] is cited above for what FastGreedy
-maximizes, not for how the weights it is given are built.
+No published work is cited as its source.
+
+The objective is cited carefully, because the obvious citation is wrong. `fastgreedy.py`
+calls `community_fastgreedy(weights="weight")`, so what is maximized is modularity on a
+*weighted* graph. [clauset2004] defines modularity in its equation (4) with `A_vw` equal to
+1 or 0, and says of it: "This assumes the graph is unweighted; weighted graphs are a simple
+generalization", deferring that generalization to [newman2004]. So [clauset2004] is the
+source of the greedy agglomerative procedure this stage runs, and [newman2004] is the source
+of the quantity it maximizes on the graph this project builds. Citing the first for both
+would be citing a paper for a formula it explicitly does not give.

@@ -23,8 +23,8 @@ AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
 # the suite by name -- which is how a module added later becomes a decision instead of an
 # omission.
 CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks tree_graph \
-	compressor newick numeric_column delimited_reader spreadsheet_reader table_split \
-	file_corpus partition
+	compressor numeric_column delimited_reader spreadsheet_reader table_split file_corpus \
+	partition
 
 DIST_DIR ?= dist
 

@@ -1,3 +1,18 @@
+"""Turn the tree into the weighted graph FastGreedy partitions.
+
+The root is dropped and its two edges become one joining its children with their lengths
+summed, so the graph is the unrooted form of the tree. Branch lengths become strictly
+positive weights.
+
+References
+----------
+.. [adr-0016] Branch lengths become edge weights by a rule this project owns. No published
+   work specifies the mapping, and it decides which clusters a run reports from the same
+   tree, so the record is its basis. What this unit does not take from the record is any
+   claim about the method downstream: the record fixes the weights, and the objective they
+   are fed into is cited where that objective is computed.
+"""
+
 from __future__ import annotations
 
 import math

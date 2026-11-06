@@ -802,20 +802,12 @@ the ADR, and repeated here so the issue shows them at a glance.
 
 ## References
 
-- Fisher, W. D. (1958). On grouping for maximum homogeneity. *Journal of the
-  American Statistical Association*, 53(284), 789–798. The exact
-  dynamic-programming grouping that `jenks` computes.
-- Jenks, G. F. (1977). *Optimal data classification for choropleth maps*.
-  Department of Geography, University of Kansas. The natural-breaks
-  formulation of the same objective.
-- Wang, H., & Song, M. (2011). Ckmeans.1d.dp: optimal k-means clustering in
-  one dimension by dynamic programming. *The R Journal*, 3(2), 29–33.
-- Grønlund, A., Larsen, K. G., Mathiasen, A., Nielsen, J. S., Schneider, S.,
-  & Song, M. (2017). Fast exact k-means, k-medians and Bregman divergence
-  clustering in 1D. arXiv:1701.07204. Establishes the Monge property of the
-  one-dimensional sum-of-squares cost that makes the monotone-argmin
-  divide-and-conquer exact.
-- Song, M., & Zhong, H. (2020). Efficient weighted univariate clustering maps
-  outstanding dysregulated genomic zones in human cancers. *Bioinformatics*,
-  36(20), 5027–5036. The weighted extension used to compute over distinct
-  values with counts.
+Cited by key; `docs/references.md` and `docs/references.bib` carry the full entry for each,
+generated from `docs/refs.json` so the metadata lives in one place.
+
+- [fisher1958] — the exact dynamic-programming grouping that `jenks` computes.
+- [jenks1977] — the natural-breaks formulation of the same objective.
+- [wang2011] — optimal one-dimensional k-means by dynamic programming.
+- [gronlund2017] — establishes the Monge property of the one-dimensional sum-of-squares
+  cost that makes the monotone-argmin divide-and-conquer exact.
+- [song2020] — the weighted extension used to compute over distinct values with counts.

@@ -1,3 +1,30 @@
+"""Exact Fisher-Jenks natural breaks over a sorted one-dimensional sample.
+
+The grouping minimises the within-class sum of squares exactly, by dynamic programming with
+a monotone-argmin divide-and-conquer inner solve, over distinct values carrying counts.
+
+References
+----------
+.. [fisher1958] On Grouping for Maximum Homogeneity. The exact dynamic-programming grouping
+   this module computes.
+.. [jenks1977] Optimal data classification for choropleth maps. The natural-breaks
+   formulation of the same objective, and the name this project uses for the rule.
+.. [gronlund2017] Fast Exact k-Means, k-Medians and Bregman Divergence Clustering in 1D.
+   Establishes the Monge property of the one-dimensional sum-of-squares cost, which is what
+   makes the divide-and-conquer inner solve exact rather than a heuristic.
+.. [song2020] Efficient weighted univariate clustering. The weighted extension, which is
+   what lets this module work over distinct values with counts instead of every sample.
+.. [wang2011] Ckmeans.1d.dp. The R implementation of the same objective; this module does
+   not wrap it and shares no code with it.
+
+   These five attributions are carried forward from the References section of
+   `docs/dataset-partitioning.md`, where the maintainer recorded what each work contributes.
+   **None has been read against this code.** What this module does not take from each --
+   the part that identifies the implementation rather than the method -- is owed, and issue
+   #93 carries it. A resolved key proves the work exists, never that it supports the
+   sentence beside it.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
