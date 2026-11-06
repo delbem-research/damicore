@@ -58,6 +58,23 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Fixed
 
+- Two of the six authors of `gronlund2017` were published with their given name as their
+  surname: `Stefan, S.` for Schneider and `Mingzhou, S.` for Song. OpenAlex mixes two name
+  forms in one response -- `Allan Gronlund` beside `Schneider, Stefan` -- and the rule that
+  took the last whitespace-separated token read the second form backwards. A comma now
+  decides the form. Nothing could see this: `docs/refs.json` and `docs/references.bib`
+  agreed because both carried the transform's output, and `references.py verify` re-fetched
+  through the same transform and reported a match. The four strings OpenAlex actually
+  returned are now a test.
+- ADR 0016 and `_edge_weights`' docstring described a computation the function does not
+  perform. Both said the reciprocals are "translated so the smallest is exactly one" and
+  omitted the division by their standard deviation, which is the step that sets the scale of
+  every weight and therefore the partition FastGreedy returns. The record also claimed the
+  result is unchanged by rescaling every length, which is true of the code and false of the
+  procedure the record described: under the shift alone, doubling the lengths halves the
+  weights. Both now state all three steps, what the division buys that the shift does not,
+  and that every weight is one when the branches are equal.
+
 - The citation in `README.md` named version 0.2.0, two releases behind, and nothing checked
   it. That file is the repository's landing page, beside the button that offers the same
   citation from `CITATION.cff`, so the two disagreed where a reader goes to cite this work.

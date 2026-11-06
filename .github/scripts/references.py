@@ -91,9 +91,20 @@ def _name(given: str, family: str) -> str:
 
 
 def _split_display_name(display_name: str) -> tuple[str, str]:
-    # shortcut: the last whitespace-separated token is the surname, which is wrong for
+    """Split one of OpenAlex's display names into given and family parts.
+
+    OpenAlex mixes two forms in a single response -- `Allan Gronlund` and
+    `Schneider, Stefan` both appear among the authors of one work -- so the form has to be
+    decided per name. A comma is the unambiguous marker of the second, and taking the last
+    whitespace-separated token without checking for it reads `Schneider, Stefan` as a
+    person surnamed Stefan.
+    """
+    family, comma, given = display_name.partition(",")
+    if comma:
+        return given.strip(), family.strip()
+    # shortcut: with no comma the last token is the surname, which is wrong for
     # "van der Berg" and right for everything this repository cites. Upgrade when a
-    # compound surname actually appears.
+    # compound surname actually appears in this form.
     parts = display_name.split()
     if len(parts) < 2:
         return "", display_name

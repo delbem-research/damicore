@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
 import pytest
@@ -73,7 +74,7 @@ def _citing_files() -> Iterator[tuple[Path, str]]:
             yield path, path.read_text(encoding="utf-8")
 
 
-def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
+def _references() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "references", ROOT / ".github" / "scripts" / "references.py"
     )
@@ -81,7 +82,11 @@ def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
         pytest.fail(".github/scripts/references.py does not exist")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    rendered: str = module.render_bibliography(refs)
+    return module
+
+
+def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
+    rendered: str = _references().render_bibliography(refs)
     return rendered
 
 
@@ -285,6 +290,28 @@ def test_every_doi_the_citation_file_names_is_in_the_bibliography() -> None:
         f"CITATION.cff names works the bibliography does not record: {', '.join(missing)}\n"
         "  run: make ref DOI=<doi>"
     )
+
+
+def test_a_surname_first_resolver_name_is_not_inverted() -> None:
+    """OpenAlex mixes two name forms in one response, and only a comma tells them apart.
+
+    These four strings are what it returned for the authors of `gronlund2017`. Read by the
+    last whitespace-separated token alone, the last two produce people surnamed Stefan and
+    Mingzhou, and the wrong name reaches `docs/references.bib`. No other check sees it: the
+    bibliography and `docs/refs.json` agree because both carry the transform's output, and
+    `references.py verify` re-fetches through the same transform and reports a match.
+    """
+    references = _references()
+    rendered = {
+        raw: references._name(*references._split_display_name(raw))  # pyright: ignore[reportPrivateUsage]
+        for raw in ("Allan Gronlund", "Kasper Green Larsen", "Schneider, Stefan", "Song, Mingzhou")
+    }
+    assert rendered == {
+        "Allan Gronlund": "Gronlund, A.",
+        "Kasper Green Larsen": "Larsen, K. G.",
+        "Schneider, Stefan": "Schneider, S.",
+        "Song, Mingzhou": "Song, M.",
+    }
 
 
 def test_entries_without_doi_name_an_existing_adr() -> None:
