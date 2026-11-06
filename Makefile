@@ -14,14 +14,17 @@ STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
 
 # Modules held to the 95% critical-coverage floor. This list is also the repository's census
-# of scientific code: a module here owes a basis, which
+# of scientific code: a module here decides what a run reports, so it owes a basis, which
 # `tests/architecture/test_citations.py` enforces for every module its exemption list does
-# not name -- six of these seven are still named there, and shrinking that list is the work.
-# `tree_graph`
-# decides the graph FastGreedy partitions and therefore the clusters; `compressor` owns the
-# window every NCD value is a function of. `newick` and `numeric_column` are the two that
-# still belong and are not here yet.
-CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks tree_graph compressor
+# not name.
+#
+# The list is not maintained by hand alone. Every module under `packages/*/src` is either in
+# this census or named in that test's `NOT_SCIENTIFIC` list, and a module in neither fails
+# the suite by name -- which is how a module added later becomes a decision instead of an
+# omission.
+CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks tree_graph \
+	compressor newick numeric_column delimited_reader spreadsheet_reader table_split \
+	file_corpus partition
 
 DIST_DIR ?= dist
 

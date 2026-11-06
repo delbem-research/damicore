@@ -30,17 +30,62 @@ SOURCES = ("crossref", "openalex")
 # The modules of the census that do not yet state the basis of what they compute.
 #
 # It exists so the gate is green from the first commit: a gate that is red by construction
-# is one somebody switches off. It may only shrink, and that direction is a reviewer's
-# judgement rather than a check, because the committed list is the only record of what it
-# used to be.
+# is one somebody switches off.
+#
+# What must never fall is the number of census modules that declare, not the size of this
+# list: it also grows when the census does, because a module entering the census without a
+# basis has to be exempt or the gate is red on arrival. A module leaves it when its
+# `References` section lands, and nothing mechanical stops a commit from re-exempting one
+# that already declared. That direction is a reviewer's judgement rather than a check,
+# because the committed list is the only record of what it used to be.
 UNDECLARED: frozenset[str] = frozenset(
     {
+        "compressor",
+        "delimited_reader",
+        "fastgreedy",
+        "file_corpus",
+        "natural_breaks",
         "ncd",
         "neighbor_joining",
-        "fastgreedy",
-        "natural_breaks",
+        "newick",
+        "numeric_column",
+        "partition",
+        "spreadsheet_reader",
+        "table_split",
         "tree_graph",
-        "compressor",
+    }
+)
+
+
+# The modules that are not scientific code: orchestration, configuration, error types, I/O
+# and artifact plumbing, and the private test generator. They decide no result, so they owe
+# no basis and are held to the ordinary coverage floor rather than the critical one.
+#
+# This list may grow, and that is the difference between it and `UNDECLARED` above. Most
+# modules are not scientific; what matters is that the choice is made and written down, by
+# whoever adds the module and knows the answer.
+#
+# Classification is by module name, so a name used in several packages is classified once.
+# `api`, `config` and `errors` exist in five packages and are the same kind of thing in each.
+# The census cannot work that way -- it resolves each name to exactly one file -- so a
+# scientific module may not reuse a name that appears elsewhere.
+NOT_SCIENTIFIC: frozenset[str] = frozenset(
+    {
+        "api",
+        "artifacts",
+        "cli",
+        "config",
+        "errors",
+        "estimate",
+        "generator",
+        "manifest",
+        "matrix",
+        "models",
+        "pipeline",
+        "progress",
+        "result",
+        "scan",
+        "shards",
     }
 )
 
@@ -109,15 +154,19 @@ def _hint(key: str) -> str:
 
 
 def _census_assignments(makefile: str) -> list[str]:
-    """The lines that assign `CRITICAL_MODULES`, identified by what they are.
+    r"""The lines that assign `CRITICAL_MODULES`, identified by what they are.
 
     Make has six assignment operators and accepts `export` and `override` before any of
     them, so enumerating them is a list of cases a Make release can extend. Every mention of
     the variable that is neither a comment nor an expansion of it is the axis instead.
+
+    A `\` continuation is joined first, the way Make reads it. Scanning raw lines would see
+    the first and drop the rest, so the census would silently be whatever fitted on one line.
     """
+    joined = makefile.replace("\\\n", " ")
     return [
         line
-        for line in makefile.splitlines()
+        for line in joined.splitlines()
         if "CRITICAL_MODULES" in line
         and not line.lstrip().startswith("#")
         and "$(CRITICAL_MODULES)" not in line
@@ -181,6 +230,36 @@ def test_cited_keys_resolve() -> None:
         if not _resolves(key, refs)
     ]
     assert not unresolved, "\n".join(unresolved)
+
+
+def test_every_module_is_scientific_or_is_declared_not_to_be() -> None:
+    """Every module under `packages/*/src` is classified, so a new one is a decision.
+
+    Nothing used to ask whether a module belongs in the census. `CRITICAL_MODULES` was read
+    and never checked against the tree, so a scientific module nobody listed owed no basis
+    and sat below no coverage floor with every gate green -- verified by adding one and
+    watching the suite pass. The partition closes that: a module in neither list fails here,
+    by name, in the commit that adds it, which is when its author knows which it is.
+    """
+    census = set(_critical_modules())
+    present = {
+        path.stem
+        for path in ROOT.glob("packages/*/src/**/*.py")
+        if path.stem != "__init__" and "__pycache__" not in path.parts
+    }
+    unclassified = sorted(present - census - NOT_SCIENTIFIC)
+    assert not unclassified, "\n".join(
+        [
+            "these modules are in neither the census nor NOT_SCIENTIFIC:",
+            *(f"  {name}" for name in unclassified),
+            "  a scientific module joins CRITICAL_MODULES in the Makefile, and UNDECLARED",
+            "  here until it states its basis; any other joins NOT_SCIENTIFIC.",
+        ]
+    )
+    both = sorted(census & NOT_SCIENTIFIC)
+    assert not both, f"classified as both scientific and not: {', '.join(both)}"
+    gone = sorted(NOT_SCIENTIFIC - present)
+    assert not gone, f"NOT_SCIENTIFIC names modules that no longer exist: {', '.join(gone)}"
 
 
 def test_critical_modules_declare_references() -> None:
