@@ -107,6 +107,16 @@ not a separate act that could have failed to happen. The reason in `Not read:` m
 empty, which is the device `NOT_A_CHOICE` already uses — the honest state costs a sentence
 and the dishonest one costs a deliberate dated claim.
 
+The mark is **one line**, and a wrapped one is not a mark: the check reads a single line
+and a reason continued on the next is invisible to it. Keep the reason inside the hundred
+columns Ruff allows and put anything longer in the delta sentence above, where it belongs
+anyway.
+
+A page may cite a work without carrying its mark, when the unit that makes the claim
+already does: `community-detection.md` names [clauset2004] because `fastgreedy.py` declares
+it. What no page may do is name a published work that nothing anywhere has declared, which
+is what `test_every_work_a_method_page_cites_is_marked_somewhere` refuses.
+
 What this does not do is check that a `Read:` is true, and nothing can: a date typed in a
 docstring is evidence of nothing. `make ref` keeps the fetch script free of a clock by
 taking `--today` from the shell, and a mark is typed by its author in the same spirit —
