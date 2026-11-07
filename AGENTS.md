@@ -216,7 +216,10 @@ that cannot change their outcome.
   `docs/references.bib` is generated from it. A work with no DOI is named in an ADR first;
   that record is what replaces the resolver. A resolved entry proves the work exists, never
   that it supports the claim: what a unit does not take from its source is stated in the
-  unit. A basis that is a decision rather than a work cites `[adr-NNNN]`. See ADR 0015.
+  unit, and an attribution nobody has read against the code says so in its own entry --
+  that sentence is the only thing separating a checked citation from an assumed one, and no
+  check can tell them apart. A basis that is a decision rather than a work cites
+  `[adr-NNNN]`. See ADR 0015.
 - Update this file, schemas/models, tests, and public documentation together when an
   approved public contract changes. Do not create documentation that merely duplicates
   code-readable facts.
