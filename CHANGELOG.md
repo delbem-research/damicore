@@ -9,6 +9,30 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- Every attribution to a published work declares whether anybody read that work against
+  this code: `Read: YYYY-MM-DD, primary.`, the same with `secondary.`, or `Not read:
+  <why not>.` with a reason that may not be empty.
+  `test_every_attribution_declares_whether_its_work_was_read` requires exactly one such
+  line per attribution and checks nothing about its content, which is the only thing a
+  check can do here — ADR 0016 was a resolved key, a real work and a wrong sentence with
+  every gate green. The mark hangs on the attribution rather than the module because
+  `natural_breaks` names five works whose states now differ. A `[adr-NNNN]` basis carries
+  none: the decision is in this repository and reading it is not a separate act. See
+  ADR 0019.
+- `test_every_bibliography_entry_is_cited` holds the direction `test_cited_keys_resolve`
+  left open. An entry nothing cites asserts a lineage the code does not claim, which is the
+  same defect inverted.
+- `neighbor_joining` states its basis, and `UNDECLARED` is empty. It leaves the exemption
+  list by declaring [saitou1987] and [studier1988] and marking both unread: free to read at
+  the publisher, obtainable by no automated route here. The arithmetic they describe is
+  pinned regardless — Neighbor Joining is exact on an additive matrix, so the five-taxon
+  fixture fails on any change to the Q criterion, the split or the reduction — but
+  equivalence is not attribution, and the marks say so.
+- Four attributions were read against the code on 2026-11-07 and now carry their delta
+  sentence: [gronlund2017], [song2020] and [wang2011] in `natural_breaks`, and [sanches2011]
+  on `docs/method/index.md`, which states what this implementation takes from the DAMICORE
+  paper and what it leaves out — the derived "DNA" representation, the consensus across two
+  representations, and the hardware-merge purpose downstream of the clustering.
 - `tests/architecture/test_citations.py` asserts that every module in `CRITICAL_MODULES`
   states the basis of what it computes, except those named in a declared exemption list.
   The list starts with the modules that do not yet declare, so the gate is green from the
@@ -42,9 +66,10 @@ carries anything else, a date included, matches neither and fails the release.
   changes an entry re-fetches exactly that entry in CI, which is what catches an entry
   written by hand. A unit whose basis is a decision rather than a published work cites
   `[adr-NNNN]`. See ADR 0015.
-- `docs/refs.json` records the DAMICORE line of work itself: the 2016 USP thesis, the 2018
-  phylogram-labelling paper, the 2019 fault-location application and the 2023 cluster-count
-  method. `pinto2017`, named in issue #55, is left out: two real works by that author match
+- `docs/refs.json` records the normalized-information-distance lineage NCD descends from:
+  the information distance of Bennett et al. (1998) and its normalization by Li et al.
+  (2004), cited on `docs/method/ncd.md` with what this implementation does not inherit from
+  either. `pinto2017`, named in issue #55, is left out: two real works by that author match
   the fields the issue lists and neither carries a DOI, so naming it is the maintainer's.
 - Every DOI `CITATION.cff` names is recorded in the bibliography. The file lists what this
   software builds on, and a work named there and absent from `docs/refs.json` meant citing

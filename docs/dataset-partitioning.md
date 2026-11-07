@@ -803,7 +803,10 @@ the ADR, and repeated here so the issue shows them at a glance.
 ## References
 
 Cited by key; `docs/references.md` and `docs/references.bib` carry the full entry for each,
-generated from `docs/refs.json` so the metadata lives in one place.
+generated from `docs/refs.json` so the metadata lives in one place. This list names the
+works; whether each has been read against the code, and what the implementation does not
+take from it, is declared on the attribution itself in the `References` section of
+`damicore_normalizer.natural_breaks`, and is not repeated here.
 
 - [fisher1958] — the exact dynamic-programming grouping that `jenks` computes.
 - [jenks1977] — the natural-breaks formulation of the same objective.

@@ -60,11 +60,15 @@ rows cannot. [adr-0017] records the rule, the band and what each buys, and
 The method is [saitou1987]. The `Q` criterion in the form implemented here — the
 `(r - 2) * D[i][j] - row_sum(i) - row_sum(j)` above — is the reformulation of [studier1988].
 
-**This section is not yet checked against the primary sources.** The attribution is carried
-forward from [adr-0017], which records that neither work states what to do when two pairs
-tie. What this implementation takes from each, and what it does not, is owed and tracked by
-issue #93: a resolved citation proves the work exists, never that it supports the sentence
-beside it.
+Neither attribution has been read against this code, and the `References` section of
+`damicore_tree_builder.neighbor_joining` says so in each entry: both works are free to read
+at the publisher and neither is obtainable here. What *is* established without them is the
+arithmetic. Neighbor Joining is exact on an additive matrix, so the five-taxon fixture in
+`test_additive_matrix_yields_the_expected_topology_and_branch_lengths` and the independent
+path-sum check beside it fail on any change to the `Q` criterion, to the branch-length
+split or to the reduction. Equivalence is not attribution: those tests cannot say which
+work states which formula, which is why the marks stay unread until a copy arrives
+(issue #112).
 
 ## What this implementation does not do
 

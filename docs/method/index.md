@@ -47,10 +47,10 @@ See [ADR 0018](../decisions/0018-method-provenance-in-the-manifest.md) and
 
 ## Where the method comes from
 
-DAMICORE was introduced in [sanches2011]. **This page does not yet state what this
-implementation takes from that paper and what it changes** — that check is owed, and issue
-#93 carries it. The individual stage pages cite the source of each stage's method, and mark
-the same way any attribution that has not been read against the primary work.
+DAMICORE was introduced in [sanches2011], which combines the three stages above — NCD, then
+Neighbor Joining, then Fast Newman — and applies them to software. This implementation is
+that pipeline and only that pipeline; what the paper does around it, it does not. The
+entry in `## Sources` states the difference.
 
 ## How to read these pages against the code
 
@@ -64,7 +64,21 @@ work exists, never that the work supports the sentence beside it.
 
 | | |
 |---|---|
-| Stated and checked against the code | every formula on these pages, by running the function and reproducing the numbers |
-| Stated and read from the source | the NCD definition and the normal-compressor properties of [cilibrasi2005]; the greedy procedure of [clauset2004] and its deferral of the weighted objective to [newman2004] |
-| Cited but not yet read against the primary work | [saitou1987] and [studier1988] on the Neighbor Joining page, [sanches2011] here. Tracked by issue #93 |
-| Not stated anywhere yet | a comparison of this implementation against the published DAMICORE results |
+| Checked against the code | every formula on these pages, by running the function and reproducing the numbers |
+| Checked against the source | which attributions have been read, and which have not, is declared on each attribution itself — in the `References` section of the module that makes the claim, and in the `## Sources` section of the page that makes it. Nothing restates it here, because two places holding one fact is how they come to disagree |
+| Not stated anywhere yet | a comparison of this implementation's output against the results published in [sanches2011] |
+
+## Sources
+
+- [sanches2011] — the paper that names this pipeline: NCD for the distances, Neighbor
+  Joining for the tree, Fast Newman for the communities, applied to software. What this
+  implementation does not take from it is everything around that pipeline. The paper feeds
+  DAMICORE two representations of the same programs — the C source, and a "DNA" string
+  produced from it by transformation rules that map each construct to a letter — and reads
+  the *consensus* of the two clusterings; this library measures the bytes it is given,
+  offers the two encodings of [adr-0008] and derives neither representation. The paper's
+  purpose, merging kernels into one FPGA core and measuring the area saved, is downstream
+  of the clustering and absent here. Its own NCD, Neighbor Joining and Fast Newman
+  attributions are to other works, which the stage pages cite directly rather than through
+  it.
+  Read: 2026-11-07, primary.
