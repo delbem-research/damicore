@@ -77,6 +77,10 @@ holds is written by hand only once an ADR names it, which is the path ADR 0015 o
 instead, as `[adr-NNNN]`. ADR 0015 records why, and `tests/architecture/test_citations.py`
 enforces it offline on every run of `make test`.
 
+A citation nobody has read against the code says so in its own entry. Writing that sentence
+costs nothing and is the difference between a bibliography and a claim; leaving it out is
+how a presumed attribution becomes indistinguishable from a checked one.
+
 A resolved entry proves the work exists. It never proves the work supports the claim beside
 it, and nothing here checks that: what an implementation does not take from its source is
 stated in the unit, in prose, and is checked by a reader.

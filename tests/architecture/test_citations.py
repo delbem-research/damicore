@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Any, Literal, cast, get_args, get_origin
 
 import pytest
 from bibtexparser.entrypoint import parse_file
@@ -20,6 +20,34 @@ DECISIONS = ROOT / "docs" / "decisions"
 MAKEFILE = ROOT / "Makefile"
 CITATION_FILE = ROOT / "CITATION.cff"
 METHOD = ROOT / "docs" / "method"
+
+# A multi-valued string `Literal` on a published model is a choice someone makes and the
+# documentation has to name, by the spelling they pass. `CHOICE_PAGES` says which page owes
+# each one; `NOT_A_CHOICE` names the fields that are not a choice at all, and why. A field
+# in neither fails by name, which is how a `Literal` added by a later feature becomes a
+# decision rather than an omission -- the same partition the census uses for modules.
+CHOICE_PAGES = {
+    "DistanceConfig.compressor": "docs/method/ncd.md",
+    "DelimitedSource.split": "docs/method/normalization.md",
+    "SpreadsheetSource.split": "docs/method/normalization.md",
+    "PartitionFile.method": "docs/dataset-partitioning.md",
+    "PartitionFile.end": "docs/dataset-partitioning.md",
+    "ResourceEstimate.source_kind": "docs/input-contract.md",
+    "ResourceEstimate.split": "docs/method/normalization.md",
+    "RunReport.status": "docs/artifacts.md",
+}
+
+NOT_A_CHOICE = {
+    "NormalizationManifest.object_encoding": (
+        "a consequence of the source rather than a choice: a dataset produces one encoding "
+        "and a file corpus the other, and the manifest records which"
+    ),
+    "PartitionManifest.decimal": (
+        "detected by falsification against every cell, never passed; a column two separators "
+        "could explain is refused rather than resolved"
+    ),
+    "TreeNode.kind": "structural -- a node is a leaf or it is not -- rather than a choice",
+}
 
 # `[cilibrasi2005]` names a published work; `[adr-0001]` a decision this project made. The
 # lookbehind excludes a subscript, which has the same shape and always follows a name, a `]`
@@ -382,6 +410,84 @@ def test_a_surname_first_resolver_name_is_not_inverted() -> None:
         "Schneider, Stefan": "Schneider, S.",
         "Song, Mingzhou": "Song, M.",
     }
+
+
+def _string_choices() -> dict[str, tuple[str, ...]]:
+    """Every multi-valued string `Literal` a published model exposes, by `Model.field`.
+
+    Read from the models rather than from a list beside them, so a `Literal` that a later
+    feature widens or adds is seen here without anyone remembering to say so.
+    """
+    import damicore
+    import damicore_clusterizer
+    import damicore_distance
+    import damicore_normalizer
+    import damicore_tree_builder
+
+    def literals(annotation: object) -> Iterator[tuple[object, ...]]:
+        if get_origin(annotation) is Literal:
+            yield get_args(annotation)
+            return
+        for argument in get_args(annotation):
+            yield from literals(argument)
+
+    found: dict[str, tuple[str, ...]] = {}
+    packages = (
+        damicore,
+        damicore_normalizer,
+        damicore_distance,
+        damicore_tree_builder,
+        damicore_clusterizer,
+    )
+    for package in packages:
+        for name in package.__all__:
+            model = getattr(package, name)
+            fields = getattr(model, "model_fields", None)
+            if not isinstance(model, type) or not isinstance(fields, dict):
+                continue
+            for field, info in cast("dict[str, Any]", fields).items():
+                for values in literals(info.annotation):
+                    if len(values) > 1 and all(isinstance(value, str) for value in values):
+                        found[f"{name}.{field}"] = cast("tuple[str, ...]", values)
+    return found
+
+
+def test_every_choice_a_model_offers_is_classified() -> None:
+    """A `Literal` is a choice someone makes or it is not, and the repository says which.
+
+    Nothing used to ask. A feature could widen a `Literal` -- the next one does exactly
+    that -- and the page describing the stage would go on listing the old values with every
+    gate green, which is how documentation comes to promise what the code does not do.
+    """
+    choices = _string_choices()
+    unclassified = sorted(set(choices) - set(CHOICE_PAGES) - set(NOT_A_CHOICE))
+    assert not unclassified, "\n".join(
+        [
+            "these Literal fields are neither mapped to a page nor declared not a choice:",
+            *(f"  {field} = {choices[field]}" for field in unclassified),
+            "  map it in CHOICE_PAGES to the page that must name its values, or say in",
+            "  NOT_A_CHOICE why it is not a choice someone makes.",
+        ]
+    )
+    gone = sorted((set(CHOICE_PAGES) | set(NOT_A_CHOICE)) - set(choices))
+    assert not gone, f"classified fields that no longer exist: {', '.join(gone)}"
+
+
+def test_every_choice_is_named_on_the_page_that_owes_it() -> None:
+    """The page names the value a caller passes, spelled the way they pass it.
+
+    Prose describing the choice is not enough: a reader looking for `jenks` searches for
+    `jenks`, and a feature that adds a value has to be forced to the page rather than
+    trusted to remember it.
+    """
+    choices = _string_choices()
+    missing = [
+        f"  {field}: {value!r} is not named in {page}"
+        for field, page in sorted(CHOICE_PAGES.items())
+        for value in choices[field]
+        if not re.search(rf"\b{re.escape(value)}\b", (ROOT / page).read_text(encoding="utf-8"))
+    ]
+    assert not missing, "\n".join(["these choices are documented nowhere:", *missing])
 
 
 def test_every_method_page_names_a_basis() -> None:
