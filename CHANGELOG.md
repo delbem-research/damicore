@@ -145,17 +145,23 @@ carries anything else, a date included, matches neither and fails the release.
   is written in Python and the scanner that holds every other one does not read it. See
   ADR 0018.
 
-- Every multi-valued string `Literal` a published model exposes is classified: mapped to
-  the documentation page that must name each of its values, or declared not a choice with
-  the reason. A field in neither fails the suite by name. This is the gap the first feature
-  would have walked into -- adding a compressor leaves `docs/method/ncd.md` saying "Not
-  available: any other compressor" with every gate green, verified by adding one and
-  watching nothing break. Eight fields are mapped and three are not choices: the object
-  encoding is a consequence of the source, the decimal separator is detected rather than
-  passed, and a tree node's kind is structural.
-- `docs/method/normalization.md` names `columns` and `rows`. The page described the split
-  in prose and never used the two words a caller actually passes, so a reader searching for
-  the value they are about to write found nothing.
+- Every multi-valued string `Literal` a public model declares is classified: mapped to the
+  one documentation page that must name each of its values, or declared not a choice with
+  a reason the suite asserts is not empty. A field in neither fails by name. This is the
+  gap the first feature would have walked into -- adding a compressor leaves
+  `docs/method/ncd.md` saying "Not available: any other compressor" with every gate green,
+  verified by adding one and watching nothing break. The models are found by walking every
+  module of the five packages, not by reading each package's `__all__`: a model reaches a
+  user through an artifact it serializes as much as through an export, and `RunConfig`,
+  the config a caller fills, is not exported at all.
+- A value counts as named only where it stands alone in an inline code span, or is the
+  right-hand side of one (`` `split="columns"` ``). A word-boundary match had passed
+  `delimited` on the sentence "always `,`-delimited UTF-8" and `xlsx` on the file
+  extension `.xlsx`, so the one mapped field whose values are ordinary vocabulary was
+  green on three accidents and documented nowhere; `.` and `,`, were they ever mapped,
+  would have matched every page in the repository.
+- `docs/input-contract.md` names `delimited`, `xlsx`, and `files` as the values a caller
+  passes. The page described all three sources at length and never gave the spellings.
 - `AGENTS.md` and `docs/internals/documentation.md` state that an attribution nobody has
   read against the code says so in its own entry. Nothing can check whether a work supports
   the sentence beside it, so that sentence is the only thing separating a checked citation

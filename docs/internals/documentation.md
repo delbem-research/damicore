@@ -77,6 +77,16 @@ holds is written by hand only once an ADR names it, which is the path ADR 0015 o
 instead, as `[adr-NNNN]`. ADR 0015 records why, and `tests/architecture/test_citations.py`
 enforces it offline on every run of `make test`.
 
+A multi-valued string `Literal` on a public model is a choice someone makes, so the
+documentation has to name each of its values by the spelling a caller writes.
+`tests/architecture/test_citations.py` holds two lists over every such field found by
+walking the packages: `CHOICE_PAGES` maps a field to the one page that owes its values,
+and `NOT_A_CHOICE` names the fields nobody chooses, with the reason. A field in neither
+fails the suite by name, so widening a `Literal` is a decision about the documentation
+rather than something to remember. Map a field to the page that owns its caller-facing
+spelling and to no other: a second page is how the same contract comes to be defined
+twice.
+
 A citation nobody has read against the code says so in its own entry. Writing that sentence
 costs nothing and is the difference between a bibliography and a claim; leaving it out is
 how a presumed attribution becomes indistinguishable from a checked one.

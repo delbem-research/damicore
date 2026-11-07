@@ -1,6 +1,8 @@
 import ast
+import importlib
 import importlib.util
 import json
+import pkgutil
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Any, Literal, cast, get_args, get_origin
 
 import pytest
 from bibtexparser.entrypoint import parse_file
+from pydantic import BaseModel
 
 pytestmark = pytest.mark.contract
 
@@ -21,19 +24,30 @@ MAKEFILE = ROOT / "Makefile"
 CITATION_FILE = ROOT / "CITATION.cff"
 METHOD = ROOT / "docs" / "method"
 
-# A multi-valued string `Literal` on a published model is a choice someone makes and the
+# A multi-valued string `Literal` on a public model is a choice someone makes and the
 # documentation has to name, by the spelling they pass. `CHOICE_PAGES` says which page owes
-# each one; `NOT_A_CHOICE` names the fields that are not a choice at all, and why. A field
-# in neither fails by name, which is how a `Literal` added by a later feature becomes a
+# each one; `NOT_A_CHOICE` names the fields that are not a choice at all, and the reason,
+# which is asserted non-empty so the entry cannot become a bare exemption. A field in
+# neither fails by name, which is how a `Literal` added by a later feature becomes a
 # decision rather than an omission -- the same partition the census uses for modules.
+#
+# One page per field, and it is the page that owns the caller-facing spelling. Mapping a
+# field to a second page is what produced a duplicate definition of `split` here once: the
+# contract was already stated on the input page, and satisfying the map wrote it again.
 CHOICE_PAGES = {
     "DistanceConfig.compressor": "docs/method/ncd.md",
-    "DelimitedSource.split": "docs/method/normalization.md",
-    "SpreadsheetSource.split": "docs/method/normalization.md",
+    "RunConfig.compressor": "docs/method/ncd.md",
+    "DelimitedDatasetInput.split": "docs/input-contract.md",
+    "DelimitedSource.split": "docs/input-contract.md",
+    "ResourceEstimate.split": "docs/input-contract.md",
+    "RunConfig.split": "docs/input-contract.md",
+    "SpreadsheetDatasetInput.split": "docs/input-contract.md",
+    "SpreadsheetSource.split": "docs/input-contract.md",
+    "ResourceEstimate.source_kind": "docs/input-contract.md",
+    "RunConfig.source_kind": "docs/input-contract.md",
+    "RunInput.kind": "docs/input-contract.md",
     "PartitionFile.method": "docs/dataset-partitioning.md",
     "PartitionFile.end": "docs/dataset-partitioning.md",
-    "ResourceEstimate.source_kind": "docs/input-contract.md",
-    "ResourceEstimate.split": "docs/method/normalization.md",
     "RunReport.status": "docs/artifacts.md",
 }
 
@@ -47,6 +61,13 @@ NOT_A_CHOICE = {
         "could explain is refused rather than resolved"
     ),
     "TreeNode.kind": "structural -- a node is a leaf or it is not -- rather than a choice",
+    "RunManifest.status": (
+        "how far the run got, written by the run and read by resume; nobody passes it, and "
+        "a state the pipeline never reaches is unreachable rather than undocumented"
+    ),
+    "StageReceipt.status": (
+        "the same recorded progress at stage granularity: a receipt is open or it is closed"
+    ),
 }
 
 # `[cilibrasi2005]` names a published work; `[adr-0001]` a decision this project made. The
@@ -413,10 +434,16 @@ def test_a_surname_first_resolver_name_is_not_inverted() -> None:
 
 
 def _string_choices() -> dict[str, tuple[str, ...]]:
-    """Every multi-valued string `Literal` a published model exposes, by `Model.field`.
+    """Every multi-valued string `Literal` a public model declares, by `Model.field`.
 
-    Read from the models rather than from a list beside them, so a `Literal` that a later
-    feature widens or adds is seen here without anyone remembering to say so.
+    Every module of the five packages is walked, not the `__all__` of each one. A model
+    reaches a user through an artifact it serializes as much as through an export, and the
+    config a caller fills is not itself exported; reading `__all__` left nine of twenty
+    such fields invisible, `RunConfig.compressor` and the ten run states among them.
+
+    Two classes of the same name are one entry whose values are the union of theirs, so a
+    copy of a model that drifts from its original shows up as a value no page names rather
+    than as whichever copy was walked last.
     """
     import damicore
     import damicore_clusterizer
@@ -440,16 +467,48 @@ def _string_choices() -> dict[str, tuple[str, ...]]:
         damicore_clusterizer,
     )
     for package in packages:
-        for name in package.__all__:
-            model = getattr(package, name)
-            fields = getattr(model, "model_fields", None)
-            if not isinstance(model, type) or not isinstance(fields, dict):
-                continue
-            for field, info in cast("dict[str, Any]", fields).items():
-                for values in literals(info.annotation):
-                    if len(values) > 1 and all(isinstance(value, str) for value in values):
-                        found[f"{name}.{field}"] = cast("tuple[str, ...]", values)
+        modules = [package.__name__]
+        modules += [
+            info.name for info in pkgutil.walk_packages(package.__path__, f"{package.__name__}.")
+        ]
+        for module_name in modules:
+            module = importlib.import_module(module_name)
+            for name, model in vars(module).items():
+                if name.startswith("_") or not isinstance(model, type):
+                    continue
+                if not issubclass(model, BaseModel) or model.__module__ != module_name:
+                    continue
+                for field, info in cast("dict[str, Any]", model.model_fields).items():
+                    for values in literals(info.annotation):
+                        if len(values) < 2 or not all(isinstance(v, str) for v in values):
+                            continue
+                        key = f"{name}.{field}"
+                        merged = found.get(key, ()) + cast("tuple[str, ...]", values)
+                        found[key] = tuple(dict.fromkeys(merged))
     return found
+
+
+SPAN = re.compile(r"`([^`\n]+)`")
+
+
+def _names(page: str, value: str) -> bool:
+    """True when the page names `value` as a value rather than spelling it by accident.
+
+    The value has to stand alone in an inline code span, or be the right-hand side of one
+    (`` `split="columns"` ``). A bare word match let `delimited` pass on the sentence
+    "always `,`-delimited UTF-8" and `xlsx` pass on the file extension `.xlsx`, neither of
+    which tells a reader the value exists; `.` and `,`, were they ever mapped, would match
+    any page in the repository. A word boundary is also unable to match a value ending in
+    a non-word character, so it silently fails a `zstd-19` nobody could then document.
+    """
+    for span in SPAN.findall(page):
+        text = span.strip()
+        if text == value:
+            return True
+        key, separator, rest = text.partition("=")
+        if separator and key.isidentifier() and rest.strip().strip("\"'") == value:
+            return True
+    return False
 
 
 def test_every_choice_a_model_offers_is_classified() -> None:
@@ -465,12 +524,20 @@ def test_every_choice_a_model_offers_is_classified() -> None:
         [
             "these Literal fields are neither mapped to a page nor declared not a choice:",
             *(f"  {field} = {choices[field]}" for field in unclassified),
-            "  map it in CHOICE_PAGES to the page that must name its values, or say in",
-            "  NOT_A_CHOICE why it is not a choice someone makes.",
+            "  in tests/architecture/test_citations.py, map it in CHOICE_PAGES to the",
+            "  page that must name its values, or say in NOT_A_CHOICE why it is not a",
+            "  choice someone makes.",
         ]
     )
     gone = sorted((set(CHOICE_PAGES) | set(NOT_A_CHOICE)) - set(choices))
-    assert not gone, f"classified fields that no longer exist: {', '.join(gone)}"
+    assert not gone, (
+        f"classified fields that no longer exist: {', '.join(gone)}; drop each from "
+        "CHOICE_PAGES or NOT_A_CHOICE in tests/architecture/test_citations.py"
+    )
+    unexplained = sorted(field for field, reason in NOT_A_CHOICE.items() if not reason.strip())
+    assert not unexplained, (
+        f"these fields are declared not a choice with no reason given: {', '.join(unexplained)}"
+    )
 
 
 def test_every_choice_is_named_on_the_page_that_owes_it() -> None:
@@ -478,14 +545,15 @@ def test_every_choice_is_named_on_the_page_that_owes_it() -> None:
 
     Prose describing the choice is not enough: a reader looking for `jenks` searches for
     `jenks`, and a feature that adds a value has to be forced to the page rather than
-    trusted to remember it.
+    trusted to remember it. `choices.get` rather than `choices[field]` so that a renamed
+    field fails by name in the classification test instead of erroring here first.
     """
     choices = _string_choices()
     missing = [
         f"  {field}: {value!r} is not named in {page}"
         for field, page in sorted(CHOICE_PAGES.items())
-        for value in choices[field]
-        if not re.search(rf"\b{re.escape(value)}\b", (ROOT / page).read_text(encoding="utf-8"))
+        for value in choices.get(field, ())
+        if not _names((ROOT / page).read_text(encoding="utf-8"), value)
     ]
     assert not missing, "\n".join(["these choices are documented nowhere:", *missing])
 

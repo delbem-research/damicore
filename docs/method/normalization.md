@@ -13,10 +13,6 @@ a **dataset** is split into objects, and **files** already are the objects. See
 
 ### `json-lines/1` — a dataset split into objects
 
-A dataset is split one of two ways, named by the value passed as `split`: `columns` makes
-one object per column, `rows` one per row. Which one is the first choice that changes every
-number downstream, because it decides what a thing being compared *is*.
-
 Every object's bytes come from `serializer.py`, which is the only producer of them:
 
 ```
