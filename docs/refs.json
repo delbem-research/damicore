@@ -15,17 +15,6 @@
     "source": "crossref",
     "fetched": "2026-11-01"
   },
-  "cesar2016": {
-    "doi": "10.11606/d.55.2016.tde-16112016-170837",
-    "title": "Estudo e extensão da metodologia DAMICORE para tarefas de classificação",
-    "authors": [
-      "Cesar, B. K. M."
-    ],
-    "year": 2016,
-    "type": "phdthesis",
-    "source": "crossref",
-    "fetched": "2026-11-02"
-  },
   "cilibrasi2005": {
     "doi": "10.1109/TIT.2005.844059",
     "title": "Clustering by Compression",
@@ -64,36 +53,6 @@
     ],
     "year": 2006,
     "venue": "InterJournal, Complex Systems"
-  },
-  "dearaujo2018": {
-    "doi": "10.1109/ijcnn.2018.8489325",
-    "title": "Automatic Cluster Labeling Based on Phylogram Analysis",
-    "authors": [
-      "de Araujo, F. N.",
-      "Machado, V. P.",
-      "Soares, A. H.",
-      "de M.S. Veras, R."
-    ],
-    "year": 2018,
-    "venue": "2018 International Joint Conference on Neural Networks (IJCNN)",
-    "type": "inproceedings",
-    "source": "crossref",
-    "fetched": "2026-11-02"
-  },
-  "desousa2019": {
-    "doi": "10.1049/iet-gtd.2018.6651",
-    "title": "Cloud computing in the smart grid context: an application to aid fault location in distribution systems concerning the multiple estimation problem",
-    "authors": [
-      "de Sousa, J. V.",
-      "Reche, E. A.",
-      "Coury, D. V.",
-      "Fernandes, R. A."
-    ],
-    "year": 2019,
-    "venue": "IET Generation, Transmission & Distribution",
-    "type": "article",
-    "source": "crossref",
-    "fetched": "2026-11-02"
   },
   "fisher1958": {
     "doi": "10.1080/01621459.1958.10501479",
@@ -189,22 +148,6 @@
     "type": "inproceedings",
     "source": "crossref",
     "fetched": "2026-11-01"
-  },
-  "silva2023": {
-    "doi": "10.14569/ijacsa.2023.01403102",
-    "title": "Method for Inferring the Optimal Number of Clusters with Subsequent Automatic Data Labeling based on Standard Deviation",
-    "authors": [
-      "Silva, A. M. L.",
-      "Sousa, F. A. d. S.",
-      "Santos, A. R. d. F.",
-      "Machado, V. P.",
-      "Santana, A. M."
-    ],
-    "year": 2023,
-    "venue": "International Journal of Advanced Computer Science and Applications",
-    "type": "article",
-    "source": "crossref",
-    "fetched": "2026-11-02"
   },
   "song2020": {
     "doi": "10.1093/bioinformatics/btaa613",

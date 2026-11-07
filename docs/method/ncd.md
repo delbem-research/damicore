@@ -30,6 +30,12 @@ Defaults, from `DistanceConfig`: `compressor="zlib"`, `compression_level=6`,
 
 ## What the definition comes from
 
+The quantity has a lineage, and the three works in it are not interchangeable:
+[bennett1998] defines the distance, [li2004] normalizes it, and [cilibrasi2005] replaces
+the uncomputable term with a compressor. Only the last of the three is what this code
+computes; the first two are why the quantity is worth computing, and they are cited in
+`## Sources` below with what this implementation does not inherit from each.
+
 The formula is equation (3.1) of [cilibrasi2005], which writes it as
 
 ```
@@ -77,3 +83,24 @@ that family, and takes no step to correct it.
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
 | Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
+
+## Sources
+
+- [bennett1998] — defines the information distance this quantity descends from, "The max
+  distance E1 between x and y is defined by E1(x, y) := max{K(x|y), K(y|x)}", and proves it
+  universal among admissible distances. What this implementation does not take: everything
+  the proof rests on. `K` is uncomputable, the metric and universality statements hold only
+  up to additive logarithmic terms, and nothing here is `E1` — a compressed size is not a
+  Kolmogorov complexity, and no bound relates the two.
+  Read: 2026-11-07, primary.
+- [li2004] — normalizes that distance into `d(x, y) = max{K(x|y*), K(y|x*)} / max{K(x),
+  K(y)}` and is where the compression form this code computes first appears, as NCD in its
+  Section VII. What this implementation does not take: the universality and metricity
+  results, which the paper proves for the uncomputable `d` and not for its compressed
+  approximation.
+  Read: 2026-11-07, primary.
+- [cilibrasi2005] — the equation this stage computes, and the normality conditions it is
+  proved under. Stated in full under "What the definition comes from" above, and in the
+  `References` section of `damicore_distance.ncd`, which is where the module's own
+  attribution lives.
+  Read: 2026-11-06, primary.

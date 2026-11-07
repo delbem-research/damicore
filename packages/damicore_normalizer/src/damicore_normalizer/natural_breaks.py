@@ -6,23 +6,32 @@ a monotone-argmin divide-and-conquer inner solve, over distinct values carrying 
 References
 ----------
 .. [fisher1958] On Grouping for Maximum Homogeneity. The exact dynamic-programming grouping
-   this module computes.
-.. [jenks1977] Optimal data classification for choropleth maps. The natural-breaks
-   formulation of the same objective, and the name this project uses for the rule.
+   this module computes, carried forward from `docs/dataset-partitioning.md`.
+   Not read: closed access and no open copy, so what this module leaves out is owed (#112).
+.. [jenks1977] Optimal data classification for choropleth maps. Cited for one thing only:
+   the natural-breaks formulation of the same objective, and the name a caller writes as
+   `method="jenks"`.
+   Not read: 1977 monograph, no DOI and no obtainable copy; cited for the name, not the rule.
 .. [gronlund2017] Fast Exact k-Means, k-Medians and Bregman Divergence Clustering in 1D.
-   Establishes the Monge property of the one-dimensional sum-of-squares cost, which is what
-   makes the divide-and-conquer inner solve exact rather than a heuristic.
-.. [song2020] Efficient weighted univariate clustering. The weighted extension, which is
-   what lets this module work over distinct values with counts instead of every sample.
-.. [wang2011] Ckmeans.1d.dp. The R implementation of the same objective; this module does
-   not wrap it and shares no code with it.
-
-   These five attributions are carried forward from the References section of
-   `docs/dataset-partitioning.md`, where the maintainer recorded what each work contributes.
-   **None has been read against this code.** What this module does not take from each --
-   the part that identifies the implementation rather than the method -- is owed, and issue
-   #93 carries it. A resolved key proves the work exists, never that it supports the
-   sentence beside it.
+   Its Monge-concavity result, "CC(v, b) + CC(u, a) <= CC(u, b) + CC(v, a)", is what makes
+   the monotone-argmin inner solve exact rather than a heuristic. What this module does not
+   take is the speedup that result is used for there: the paper reduces the recurrence to
+   O(kn) with a SMAWK-style row search, and this module keeps the divide-and-conquer solve
+   at O(kn log n). Its k-medians and Bregman-divergence generalisations are not implemented
+   either; only the squared-deviation case is.
+   Read: 2026-11-07, primary.
+.. [song2020] Efficient weighted univariate clustering. The weighted formulation -- sorted
+   values with non-negative weights -- is what lets this module work over distinct values
+   carrying counts instead of over every row. What it does not take: the paper selects the
+   number of clusters by BIC under a Gaussian-mixture assumption, and this module returns
+   the optimal grouping for every class count up to `max_classes` and selects none.
+   Read: 2026-11-07, primary.
+.. [wang2011] Ckmeans.1d.dp. The prior implementation of the same objective: an exact
+   dynamic-programming solution to 1-D k-means, stated there at O(n^2 k) over n samples and
+   written in C++ behind an R package. This module shares no code with it, is not a
+   wrapper, and does not inherit that runtime, because its recurrence runs over distinct
+   weighted values rather than over samples.
+   Read: 2026-11-07, primary.
 """
 
 from __future__ import annotations
