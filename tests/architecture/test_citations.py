@@ -697,6 +697,37 @@ def test_every_attribution_declares_whether_its_work_was_read() -> None:
     assert not unmarked, "\n".join(["these attributions do not declare their state:", *unmarked])
 
 
+def test_every_work_a_method_page_cites_is_marked_somewhere() -> None:
+    """A method page may cite a work without restating its mark, but not without one.
+
+    The mark lives where the claim is made, so `community-detection.md` naming
+    [clauset2004] points at a declaration `fastgreedy.py` already carries, and repeating it
+    on the page would be the duplicated truth that drifts. That leaves one case the mark
+    gate cannot see, because a page owes a `## Sources` section only for the works no
+    module claims: a page naming a published work that nothing anywhere has declared read
+    or unread. This refuses it.
+    """
+    declared = {
+        key
+        for path, text in _citing_files()
+        for key, entry in _attributions(path, text)
+        if MARK.search(entry)
+    }
+    undeclared: list[str] = []
+    for page in sorted(METHOD.glob("*.md")):
+        for key in sorted(set(re.findall(CITATION, page.read_text(encoding="utf-8")))):
+            if not key.startswith("adr-") and key not in declared:
+                undeclared.append(f"  {page.relative_to(ROOT)}: [{key}]")
+    assert not undeclared, "\n".join(
+        [
+            "these works are named on a method page and declared nowhere:",
+            *undeclared,
+            "  state what the implementation takes from each, in the unit that takes it,",
+            "  or in a `## Sources` entry on the page, and mark it read or not read",
+        ]
+    )
+
+
 def test_every_bibliography_entry_is_cited() -> None:
     """Nothing is in the bibliography that no unit names.
 
