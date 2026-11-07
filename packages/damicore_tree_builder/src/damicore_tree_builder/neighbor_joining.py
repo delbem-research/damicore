@@ -1,3 +1,32 @@
+"""Deterministic Neighbor Joining over a distance matrix.
+
+Each round joins the pair with the smallest Q score, gives the joined pair its two branch
+lengths, and replaces it with one cluster whose distance to every remaining node is the
+published average. The split is written as one length plus its complement,
+``right = D(i,j) - left``, which is the symmetric published form rearranged; the reduction
+is ``0.5 * (D[i][k] + D[j][k] - D[i][j])``.
+
+Both formulas are pinned numerically rather than by prose: Neighbor Joining is exact on an
+additive matrix, so the five-taxon fixture in ``tests/test_neighbor_joining.py`` fails on
+any change to the Q criterion, the split or the reduction. What is *not* pinned there is
+which published work states each in which form, and that is a reading rather than a test.
+
+References
+----------
+.. [saitou1987] The neighbor-joining method: a new method for reconstructing phylogenetic
+   trees. The method this module implements -- pair selection, the branch-length split,
+   and the reduction that replaces a joined pair with one cluster.
+   Not read: free at the publisher, reachable by no automated route here; the delta is owed.
+.. [studier1988] A note on the neighbor-joining algorithm of Saitou and Nei. [adr-0017]
+   credits it with the Q reformulation computed below,
+   ``(r - 2) * D[i][j] - row_sum(i) - row_sum(j)``; that credit itself has never been
+   checked against the work.
+   Not read: same access as [saitou1987]; the credit above is unchecked against the work.
+.. [adr-0017] Which pair joins when two Q scores tie, and the relative band that makes the
+   tie visible in float64. Neither work above states a tie rule, so this one is this
+   project's and changes the tree a run reports from the same matrix.
+"""
+
 from __future__ import annotations
 
 import math

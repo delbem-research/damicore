@@ -220,6 +220,12 @@ that cannot change their outcome.
   that sentence is the only thing separating a checked citation from an assumed one, and no
   check can tell them apart. A basis that is a decision rather than a work cites
   `[adr-NNNN]`. See ADR 0015.
+- When it is not established that a work supports the sentence, the sentence is not
+  written: the unit states no basis, or the attribution carries the mark that says the work
+  was not read. An absent basis is a gap somebody can find; a wrong one is a defect every
+  later reader inherits as fact. Every attribution to a published work declares which of
+  the two states it is in, in the grammar `docs/internals/documentation.md` fixes and
+  `tests/architecture/test_citations.py` enforces. See ADR 0019.
 - Update this file, schemas/models, tests, and public documentation together when an
   approved public contract changes. Do not create documentation that merely duplicates
   code-readable facts.

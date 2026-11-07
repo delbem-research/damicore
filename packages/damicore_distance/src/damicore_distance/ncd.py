@@ -16,6 +16,7 @@ References
    theory developed in [29] does not hold directly for the (possibly poorly) approximating
    NCD". The matrix is symmetric because each unordered pair is computed once and written
    to both triangles, not because C(xy) = C(yx) was checked. See `docs/method/ncd.md`.
+   Read: 2026-11-06, primary.
 """
 
 from __future__ import annotations

@@ -10,12 +10,6 @@ Bennett, C., Gacs, P., Ming Li, Vitanyi, P., Zurek, W. (1998). *Information dist
 
 <https://doi.org/10.1109/18.681318>
 
-## `cesar2016`
-
-Cesar, B. K. M. (2016). *Estudo e extensão da metodologia DAMICORE para tarefas de classificação*.
-
-<https://doi.org/10.11606/d.55.2016.tde-16112016-170837>
-
 ## `cilibrasi2005`
 
 Cilibrasi, R., Vitanyi, P. (2005). *Clustering by Compression*. IEEE Transactions on Information Theory.
@@ -33,18 +27,6 @@ Clauset, A., Newman, M. E. J., Moore, C. (2004). *Finding community structure in
 Csardi, G., Nepusz, T. (2006). *The igraph software package for complex network research*. InterJournal, Complex Systems.
 
 No DOI; recorded under ADR 0015.
-
-## `dearaujo2018`
-
-de Araujo, F. N., Machado, V. P., Soares, A. H., de M.S. Veras, R. (2018). *Automatic Cluster Labeling Based on Phylogram Analysis*. 2018 International Joint Conference on Neural Networks (IJCNN).
-
-<https://doi.org/10.1109/ijcnn.2018.8489325>
-
-## `desousa2019`
-
-de Sousa, J. V., Reche, E. A., Coury, D. V., Fernandes, R. A. (2019). *Cloud computing in the smart grid context: an application to aid fault location in distribution systems concerning the multiple estimation problem*. IET Generation, Transmission & Distribution.
-
-<https://doi.org/10.1049/iet-gtd.2018.6651>
 
 ## `fisher1958`
 
@@ -87,12 +69,6 @@ Saitou, N., Nei, M. (1987). *The neighbor-joining method: a new method for recon
 Sanches, A., Cardoso, J. M., Delbem, A. C. (2011). *Identifying Merge-Beneficial Software Kernels for Hardware Implementation*. 2011 International Conference on Reconfigurable Computing and FPGAs.
 
 <https://doi.org/10.1109/ReConFig.2011.51>
-
-## `silva2023`
-
-Silva, A. M. L., Sousa, F. A. d. S., Santos, A. R. d. F., Machado, V. P., Santana, A. M. (2023). *Method for Inferring the Optimal Number of Clusters with Subsequent Automatic Data Labeling based on Standard Deviation*. International Journal of Advanced Computer Science and Applications.
-
-<https://doi.org/10.14569/ijacsa.2023.01403102>
 
 ## `song2020`
 

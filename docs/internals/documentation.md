@@ -91,6 +91,28 @@ A citation nobody has read against the code says so in its own entry. Writing th
 costs nothing and is the difference between a bibliography and a claim; leaving it out is
 how a presumed attribution becomes indistinguishable from a checked one.
 
+That sentence has one spelling, so it can be counted rather than searched for. An
+**attribution** is a `.. [key]` entry in a `References` section of a docstring, or a
+`- [key]` entry in a `## Sources` section of a method page — the places where a unit says
+what it takes from a work. Each one that names a published work carries exactly one line:
+
+```
+Read: YYYY-MM-DD, primary.      the work itself was opened, on that date
+Read: YYYY-MM-DD, secondary.    another work's account of it was read, not the work
+Not read: <why not>.            closed access, no obtainable copy, cited for a name
+```
+
+A `[adr-NNNN]` basis carries no mark: the decision is in this repository, and reading it is
+not a separate act that could have failed to happen. The reason in `Not read:` may not be
+empty, which is the device `NOT_A_CHOICE` already uses — the honest state costs a sentence
+and the dishonest one costs a deliberate dated claim.
+
+What this does not do is check that a `Read:` is true, and nothing can: a date typed in a
+docstring is evidence of nothing. `make ref` keeps the fetch script free of a clock by
+taking `--today` from the shell, and a mark is typed by its author in the same spirit —
+shape enforced, truth reviewed. ADR 0019 records the reasoning, and why obtainability is
+recorded in the `Not read:` reason rather than as a field of `docs/refs.json`.
+
 A resolved entry proves the work exists. It never proves the work supports the claim beside
 it, and nothing here checks that: what an implementation does not take from its source is
 stated in the unit, in prose, and is checked by a reader.

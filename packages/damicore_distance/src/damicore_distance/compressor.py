@@ -16,6 +16,7 @@ References
    does not fix one, and every NCD value is a function of whichever is in force, which is
    why `DistanceConfig.compressor` is a `Literal` and why a name outside it must fail to
    type-check rather than compress as something else.
+   Read: 2026-11-06, primary.
 """
 
 from __future__ import annotations

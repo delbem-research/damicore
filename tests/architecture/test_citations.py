@@ -76,6 +76,25 @@ NOT_A_CHOICE = {
 CITATION = r"(?<![\w\])])\[@?((?:[a-z][a-z-]*)[0-9]{4}[a-z]?)\]"
 REFERENCES_SECTION = r"^References\n-{3,}"
 
+# An attribution to a published work declares whether anybody read that work against this
+# code. Two states, one line, and a reason that cannot be empty: the honest state costs a
+# sentence and the dishonest one costs a deliberate dated claim. Nothing here can tell a
+# true `Read:` from a false one -- ADR 0019 records why the check stops at the declaration.
+#
+# A `[adr-NNNN]` basis carries no mark. The decision is in this repository, under version
+# control, and reading it is not a separate act that could have failed to happen.
+MARK = re.compile(
+    r"^[ \t]*(?:Read: (?P<date>\d{4}-\d{2}-\d{2}), (?P<depth>primary|secondary)\."
+    r"|Not read: (?P<reason>\S[^\n]*?)\.)[ \t]*$",
+    re.MULTILINE,
+)
+# `.. [key]` opens an attribution in a docstring and `- [key]` in a `## Sources` list on a
+# method page. One grammar, two places it can be written, because a page states claims the
+# code does not.
+DOCSTRING_ATTRIBUTION = r"\n(?=\.\. \[)"
+PAGE_ATTRIBUTION = r"\n(?=- \[)"
+SOURCES_SECTION = r"^## Sources$"
+
 SOURCES = ("crossref", "openalex")
 
 # The modules of the census that do not yet state the basis of what they compute.
@@ -89,11 +108,11 @@ SOURCES = ("crossref", "openalex")
 # `References` section lands, and nothing mechanical stops a commit from re-exempting one
 # that already declared. That direction is a reviewer's judgement rather than a check,
 # because the committed list is the only record of what it used to be.
-UNDECLARED: frozenset[str] = frozenset(
-    {
-        "neighbor_joining",
-    }
-)
+#
+# It is empty. `neighbor_joining` left it by stating its basis and marking both works
+# unread, which is the honest state for a work nobody here can obtain -- not by somebody
+# writing the sentence the empty set invites.
+UNDECLARED: frozenset[str] = frozenset()
 
 
 # The modules that are not scientific code: orchestration, configuration, error types, I/O
@@ -168,6 +187,36 @@ def _references() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _attributions(path: Path, text: str) -> list[tuple[str, str]]:
+    """Every attribution in `text`, as the key it names and the body that carries its mark.
+
+    A docstring opens one with `.. [key]` under `References`; a method page with `- [key]`
+    under `## Sources`. Both are read here so the mark has one grammar wherever the claim
+    is written, and a key mentioned in running prose -- which asserts nothing about having
+    read the work -- is not an attribution and is not required to carry one.
+    """
+    section, split = (
+        (REFERENCES_SECTION, DOCSTRING_ATTRIBUTION)
+        if path.suffix == ".py"
+        else (SOURCES_SECTION, PAGE_ATTRIBUTION)
+    )
+    opened = re.search(section, text, re.MULTILINE)
+    if opened is None:
+        return []
+    body = text[opened.end() :]
+    if path.suffix != ".py":
+        # A Markdown section ends where the next heading begins; a docstring section runs
+        # to the end of the docstring.
+        following = re.search(r"^#{1,6} ", body, re.MULTILINE)
+        body = body[: following.start()] if following else body
+    entries: list[tuple[str, str]] = []
+    for part in re.split(split, body):
+        opener = re.match(r"(?:\.\. |- )\[([^\]]+)\]", part.strip("\n"))
+        if opener is not None:
+            entries.append((opener.group(1), part))
+    return entries
 
 
 def _render_bibliography(refs: dict[str, dict[str, object]]) -> str:
@@ -615,6 +664,57 @@ def test_entries_without_doi_name_an_existing_adr() -> None:
         if not any(DECISIONS.glob(f"{source.removeprefix('adr:')}-*.md")):
             missing.append(f"{key} names {source}, which does not exist")
     assert not missing, "\n".join(missing)
+
+
+def test_every_attribution_declares_whether_its_work_was_read() -> None:
+    """An attribution to a published work says whether anybody read that work against this
+    code, in the one grammar `MARK` accepts.
+
+    The check is presence and shape, never truth: ADR 0016 was a resolved key, a real work
+    and a wrong sentence, and every gate was green. What this makes impossible is the
+    silent third state -- an attribution that neither claims a reading nor admits the lack
+    of one -- which is what left thirteen of them indistinguishable before.
+    """
+    unmarked: list[str] = []
+    for path, text in _citing_files():
+        for key, entry in _attributions(path, text):
+            marks = MARK.findall(entry)
+            where = f"  {path.relative_to(ROOT)}: [{key}]"
+            if key.startswith("adr-"):
+                if marks:
+                    unmarked.append(
+                        f"{where} carries a read mark; a decision of this project is in the "
+                        "repository and is not a work somebody reads against the code"
+                    )
+            elif len(marks) != 1:
+                unmarked.append(
+                    f"{where} carries {len(marks)} marks, not one\n"
+                    "    write one of:\n"
+                    "      Read: YYYY-MM-DD, primary.      (the work itself was opened)\n"
+                    "      Read: YYYY-MM-DD, secondary.    (another work's account of it)\n"
+                    "      Not read: <why not>.            (closed access, no copy, ...)"
+                )
+    assert not unmarked, "\n".join(["these attributions do not declare their state:", *unmarked])
+
+
+def test_every_bibliography_entry_is_cited() -> None:
+    """Nothing is in the bibliography that no unit names.
+
+    `test_cited_keys_resolve` holds the other direction: a key that cites nothing real. An
+    entry that nothing cites is the same defect inverted -- a bibliography asserting a
+    lineage the code does not claim -- and it is how four works added for planned features
+    came to sit here describing an implementation that has none of them.
+    """
+    cited = {key for _, text in _citing_files() for key in re.findall(CITATION, text)}
+    orphans = sorted(set(_refs()) - cited)
+    assert not orphans, "\n".join(
+        [
+            "these bibliography entries are cited by nothing:",
+            *(f"  [{key}]" for key in orphans),
+            "  cite the work where it is used, or remove the entry from docs/refs.json",
+            "  and run `make references`",
+        ]
+    )
 
 
 def test_generated_bibliography_matches_source() -> None:
