@@ -5,6 +5,13 @@ to choose, and neither [saitou1987] nor the Q formulation in [studier1988] says 
 records what `damicore_tree_builder` does, because the choice changes the tree a run reports
 from the same matrix, so recording "Saitou and Nei 1987" alone does not identify that tree.
 
+Both works were read against this code on 2026-11-07, which settles two things this record
+had been asserting without them. The Q reformulation credited to [studier1988] here is its
+formula (1), `Sij = (N - 2)Dij - Ri - Rj` with `Ri` the row sum, which is what the module
+computes. And the gap is real in both: [saitou1987] selects on the smallest `Sij` and
+[studier1988] step B says "Pick a pair i, j for which Sij is the smallest" — singular, with
+nothing said about which pair when two are equally small.
+
 ## Ties are not an edge case here
 
 With four clusters left, `Q(i,j)` and `Q(k,l)` for complementary pairs are algebraically
@@ -40,7 +47,10 @@ running the same tie through three permutations of the input and requiring the s
 The band and this ordering are both this project's. The opening of this record says
 [saitou1987] states no tie rule, and nothing here walks that back: what is claimed is that
 resolving a tie by a fixed, label-derived order is a choice the method leaves open, not a
-departure from it.
+departure from it. Reading both works confirmed the opening rather than changing it; what
+it did change is one sentence in `neighbor_joining`, where the reduction had been described
+as the published average. It is [studier1988]'s formula (3), which that paper flags as
+deliberately not [saitou1987]'s average.
 
 ## What the band buys, and what it costs
 

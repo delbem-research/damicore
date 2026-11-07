@@ -23,16 +23,28 @@ carries anything else, a date included, matches neither and fails the release.
   left open. An entry nothing cites asserts a lineage the code does not claim, which is the
   same defect inverted.
 - `neighbor_joining` states its basis, and `UNDECLARED` is empty. It leaves the exemption
-  list by declaring [saitou1987] and [studier1988] and marking both unread: free to read at
-  the publisher, obtainable by no automated route here. The arithmetic they describe is
-  pinned regardless — Neighbor Joining is exact on an additive matrix, so the five-taxon
-  fixture fails on any change to the Q criterion, the split or the reduction — but
-  equivalence is not attribution, and the marks say so.
-- Four attributions were read against the code on 2026-11-07 and now carry their delta
-  sentence: [gronlund2017], [song2020] and [wang2011] in `natural_breaks`, and [sanches2011]
-  on `docs/method/index.md`, which states what this implementation takes from the DAMICORE
-  paper and what it leaves out — the derived "DNA" representation, the consensus across two
-  representations, and the hardware-merge purpose downstream of the clustering.
+  list by declaring [saitou1987] and [studier1988], both now read against the code. The
+  arithmetic was pinned either way — Neighbor Joining is exact on an additive matrix, so
+  the five-taxon fixture fails on any change to the Q criterion, the split or the
+  reduction — but equivalence is not attribution, and the reading is what says which paper
+  states which formula.
+- The reduction `0.5 * (D[i][k] + D[j][k] - D[i][j])` is [studier1988]'s, not
+  [saitou1987]'s, and the module had described it as "the published average". It is not an
+  average: [saitou1987]'s equation (5) averages the two rows of the joined pair, and
+  [studier1988] states the implemented formula as its (3), flagging the difference in the
+  paper — "[Formula (3) is not the one given by Saitou and Nei, but it is the correct one
+  if D is treelike and i and j are neighbors.]". Its formula (1) is the Q criterion, which
+  is the credit ADR 0017 had carried unchecked, and its (4a)/(4b) are the branch-length
+  split in the row-sum form the code writes. Neither paper states a tie rule, which is the
+  premise ADR 0017 rests on and is now checked rather than assumed. The condition that
+  came with the formulas is recorded where it bites: the corrected proof holds for a
+  treelike `D`, and nothing here establishes that an NCD matrix is one.
+- Six attributions were read against the code on 2026-11-07 and now carry their delta
+  sentence: [gronlund2017], [song2020] and [wang2011] in `natural_breaks`, [saitou1987] and
+  [studier1988] in `neighbor_joining`, and [sanches2011] on `docs/method/index.md`, which
+  states what this implementation takes from the DAMICORE paper and what it leaves out —
+  the derived "DNA" representation, the consensus across two representations, and the
+  hardware-merge purpose downstream of the clustering.
 - `tests/architecture/test_citations.py` asserts that every module in `CRITICAL_MODULES`
   states the basis of what it computes, except those named in a declared exemption list.
   The list starts with the modules that do not yet declare, so the gate is green from the
@@ -150,10 +162,13 @@ carries anything else, a date included, matches neither and fails the release.
   `tree_graph` and the six normalizer modules cite the records that decide what they
   compute. `ncd.py`, `fastgreedy.py`, `tree_graph.py` and the six had no module docstring
   at all; these are their first.
-- `compressor`, `newick`, `natural_breaks` and `neighbor_joining` stay exempt, and the
-  reason is the point of the number: the first two need a decision record that does not
-  exist yet, and the last two rest on published work nobody has read against the code. A
-  list that said zero here would be saying something false.
+- `compressor`, `newick`, `natural_breaks` and `neighbor_joining` were exempt at that
+  point, and the reason was the point of the number: the first two needed a decision record
+  that did not exist, and the last two rested on published work nobody had read against the
+  code. A list that said zero then would have been saying something false. All four are
+  resolved later in this cycle — `newick` left the census, `compressor` and the rest state
+  a basis, and the two Neighbor Joining works were read — so the list is empty now, which
+  is a different claim from the one it would have been making then.
 
 - `manifest.json` carries a `method` block naming the rule in force at each stage --
   `canonical-json-lines/v1`, `ncd-max/v1`, `neighbor-joining-q/v1`,
