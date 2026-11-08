@@ -1,27 +1,41 @@
 """Deterministic Neighbor Joining over a distance matrix.
 
 Each round joins the pair with the smallest Q score, gives the joined pair its two branch
-lengths, and replaces it with one cluster whose distance to every remaining node is the
-published average. The split is written as one length plus its complement,
-``right = D(i,j) - left``, which is the symmetric published form rearranged; the reduction
-is ``0.5 * (D[i][k] + D[j][k] - D[i][j])``.
+lengths, and replaces it with one cluster whose distance to every remaining node is
+``0.5 * (D[i][k] + D[j][k] - D[i][j])``. That reduction is the one [studier1988] states and
+is deliberately *not* the average [saitou1987] gives. The split is written as one length
+plus its complement, ``right = D(i,j) - left``, which is [studier1988]'s symmetric pair of
+branch lengths rearranged.
 
 Both formulas are pinned numerically rather than by prose: Neighbor Joining is exact on an
 additive matrix, so the five-taxon fixture in ``tests/test_neighbor_joining.py`` fails on
 any change to the Q criterion, the split or the reduction. What is *not* pinned there is
-which published work states each in which form, and that is a reading rather than a test.
+which published work states each in which form; that is a reading rather than a test, and
+the References below are its result.
 
 References
 ----------
 .. [saitou1987] The neighbor-joining method: a new method for reconstructing phylogenetic
-   trees. The method this module implements -- pair selection, the branch-length split,
-   and the reduction that replaces a joined pair with one cluster.
-   Not read: free at the publisher, reachable by no automated route here; the delta is owed.
-.. [studier1988] A note on the neighbor-joining algorithm of Saitou and Nei. [adr-0017]
-   credits it with the Q reformulation computed below,
-   ``(r - 2) * D[i][j] - row_sum(i) - row_sum(j)``; that credit itself has never been
-   checked against the work.
-   Not read: same access as [saitou1987]; the credit above is unchecked against the work.
+   trees. The method and its principle: pairs are chosen so as to "minimize the total
+   branch length at each stage of clustering of OTUs starting with a starlike tree".
+   Pair selection and the branch-length split are
+   this module's, the split in the equivalent form its equation (6a) states with the mean
+   distance from each joined OTU to the rest, where this module uses row sums. What this
+   module does *not* take from it is its reduction, equation (5), which averages the two
+   rows of the joined pair, ``D((1-2),j) = (D(1,j) + D(2,j)) / 2``. That is not the formula
+   computed below.
+   Read: 2026-11-07, primary.
+.. [studier1988] A note on the neighbor-joining algorithm of Saitou and Nei. Three of the
+   four formulas below are stated there in the implemented form: its formula (1),
+   ``Sij = (N - 2)Dij - Ri - Rj`` with ``Ri`` the row sum, is the Q criterion; its formula
+   (3) is the reduction, and the paper marks the difference from [saitou1987] deliberately
+   -- "[Formula (3) is not the one given by Saitou and Nei, but it is the correct one if D
+   is treelike and i and j are neighbors.]"; and its (4a) and (4b) are the two branch
+   lengths written with row sums, of which this module computes (4a) and writes (4b) as
+   the complement. What this module does not take is the condition those formulas are
+   correct under: the paper's corrected proof assumes a treelike ``D``, and nothing here
+   establishes or checks that an NCD matrix is treelike.
+   Read: 2026-11-07, primary.
 .. [adr-0017] Which pair joins when two Q scores tie, and the relative band that makes the
    tie visible in float64. Neither work above states a tie rule, so this one is this
    project's and changes the tree a run reports from the same matrix.

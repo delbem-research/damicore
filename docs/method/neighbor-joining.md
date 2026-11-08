@@ -57,18 +57,34 @@ rows cannot. [adr-0017] records the rule, the band and what each buys, and
 
 ## What the method comes from
 
-The method is [saitou1987]. The `Q` criterion in the form implemented here — the
-`(r - 2) * D[i][j] - row_sum(i) - row_sum(j)` above — is the reformulation of [studier1988].
+The method is [saitou1987]: pairs are chosen so as to "minimize the total branch length at
+each stage of clustering of OTUs starting with a starlike tree". The `Q` criterion in the
+form implemented here — the `(r - 2) * D[i][j] - row_sum(i) - row_sum(j)` above — is the
+reformulation of [studier1988], its formula (1).
 
-Neither attribution has been read against this code, and the `References` section of
-`damicore_tree_builder.neighbor_joining` says so in each entry: both works are free to read
-at the publisher and neither is obtainable here. What *is* established without them is the
-arithmetic. Neighbor Joining is exact on an additive matrix, so the five-taxon fixture in
+Both works were read against this code on 2026-11-07, and the reading moved one of the
+three formulas above from one paper to the other. The reduction
+`D[new][k] = 0.5 * (D[i][k] + D[j][k] - D[i][j])` is not [saitou1987]'s. That paper's
+equation (5) averages the two rows of the joined pair,
+`D((1-2),j) = (D(1,j) + D(2,j)) / 2`, and [studier1988] states the formula used here as its
+(3), with the difference marked in the paper itself: "[Formula (3) is not the one given by
+Saitou and Nei, but it is the correct one if D is treelike and i and j are neighbors.]"
+The branch-length split is in both: [saitou1987]'s equation (6a) writes it with the mean
+distance from each joined OTU to the rest, [studier1988]'s (4a) and (4b) write the same
+quantity with row sums, which is the form implemented — `len(i)` is (4a) and `len(j)` is
+(4b) as the complement.
+
+What the two papers do not settle is the tie, and what the tests do not settle is the
+attribution. Neighbor Joining is exact on an additive matrix, so the five-taxon fixture in
 `test_additive_matrix_yields_the_expected_topology_and_branch_lengths` and the independent
 path-sum check beside it fail on any change to the `Q` criterion, to the branch-length
-split or to the reduction. Equivalence is not attribution: those tests cannot say which
-work states which formula, which is why the marks stay unread until a copy arrives
-(issue #112).
+split or to the reduction — but equivalence is not attribution, and which work states
+which formula is the reading recorded above, not something those tests can hold.
+
+One condition travels with the formulas and is not met here. [studier1988] gives the
+corrected proof that the true tree is recovered *if `D` is treelike*; an NCD matrix is not
+known to be, and nothing in this implementation establishes or checks it. What the pipeline
+produces is the tree the formulas yield for the matrix it was given.
 
 ## What this implementation does not do
 
