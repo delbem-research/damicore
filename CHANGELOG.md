@@ -9,6 +9,27 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- `docs/roadmap.md` states what this library does not implement yet, in the structure the
+  issue tree carries: one group per pipeline layer, the sequence by milestone, and the five
+  rules every item is held to. The plan lived only in GitHub issues, so a reader of the
+  repository could see what the library does and not what it is missing, which is the half
+  that decides whether it fits a problem.
+- `docs/method/evidence.md` is where the roadmap's claims come from: an audit of 82 documents
+  of published DAMICORE work read against the 0.3 source tree, with the method, the three
+  limitations, the capability counts and the scale profile. The two most attested
+  capabilities in the corpus -- automatic cluster labeling and cluster validation -- are the
+  two the library does not have, and that is the sentence the whole roadmap rests on.
+- `docs/method/evidence-corpus.csv` is the per-document data those counts are computed from:
+  one row per document with its role, the object count it reports, and one column per
+  capability. The table on the page is the file's column sums, so a reader disagrees with a
+  number by recomputing it. The corpus is not cited by key and is not in `docs/refs.json`:
+  that file records the works this implementation rests on, fetched and cited by the unit
+  that implements each, which is a different set under a different rule (ADR 0015).
+- `docs/internals/decisions.md` lists every decision record with what it decides in one line.
+  It was a bare table of contents, and `AGENTS.md`'s precedence rule -- records rank above
+  the implementation -- is not applicable by a reader who has to open sixteen files to find
+  which record governs the thing in front of them.
+
 - Every attribution to a published work declares whether anybody read that work against
   this code: `Read: YYYY-MM-DD, primary.`, the same with `secondary.`, or `Not read:
   <why not>.` with a reason that may not be empty.

@@ -72,6 +72,10 @@ The five public distributions are `damicore`, `damicore-normalizer`,
 Stage packages do not import one another. `synthetic-data` is workspace-only
 and is never published.
 
+What the library does not implement yet, and the audited evidence behind that list, are
+[docs/roadmap.md](docs/roadmap.md) and
+[docs/method/evidence.md](docs/method/evidence.md).
+
 For Colab, process and checkpoint on local `/content`, then use `result.save`
 to copy completed artifacts to a mounted Drive destination. DAMICORE never
 imports `google.colab`, accesses the network, or uploads data.

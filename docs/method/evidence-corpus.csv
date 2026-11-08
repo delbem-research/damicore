@@ -1,0 +1,83 @@
+year,first_author,title,role,n_objects,compressors_beyond_deflate,window_overflow,incremental_ncd,pluggable_metric,multiple_representations,discretization_encoding,binary_frontend,consensus_resampling,alternative_tree_builders,alternative_community_detection,k_selection,labeling,validation_stability,out_of_sample,scale_beyond_1000,visualization
+2011,Sanches,Identifying Merge-Beneficial Software Kernels for,application,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2012,Carvalho,Método de análise para a coordenação dos,application,,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1
+2013,Mansour,Identifying Groups of Preventive Controls for a,application,12,0,1,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+2013,Martins,Design Space Exploration Based on Multiobjective,application,,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0
+2014,Mansour,Determine Groups of Preventive Controls for a Set,method_contribution,12,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,1
+2014,Martins,A Clustering-Based Approach for Exploring,method_contribution,52,0,0,0,0,0,1,0,0,0,1,1,0,0,0,0,0
+2014,Moro,Caracterização de Alunos em Ambientes de Ensino,application,,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1
+2014,Silva,Application-oriented cache memory configuration,application,50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2015,Gaspar-Cunha,Evolutionary Multi-Criterion Optimization,method_contribution,107,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,1
+2015,Soares,Novelty Detection based on NCD for Navigation,application,,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2016,Andrade,Improving the credibility of unreliable,application,288,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1
+2016,Caetano,Classificação de estudantes através de árvores de,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2016,Cesar,Estudo e extensão da metodologia DAMICORE para,method_contribution,200,1,1,0,1,0,1,0,0,0,0,0,1,1,0,1,0
+2016,Gomes,Detecção de Ilhamento de Geradores Síncronos,application,,0,1,0,1,0,0,0,0,0,0,0,0,1,0,0,1
+2016,Moretti,Análise de grandezas cinemáticas e dinâmicas,application,,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0
+2016,Ojiako,Assessment of Post-Harvest Losses and Fungal,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2016,Silva,Um método de otimização da relação desempenho,application,50,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0
+2016,Sumoyama,Classificador de kernels para mapeamento em,application,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2017,Pinto,Caracterização do perfil de consumo de recursos (2),application,80,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0
+2017,Pinto,Caracterização do perfil de consumo de recursos,application,80,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0
+2017,Pinto,Caracterização do perfil de utilização de,method_contribution,,1,0,0,0,0,0,0,1,1,0,0,0,1,1,0,1
+2017,Sfreddo,A Framework to Automatically Generate,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2018,Araujo,Automatic Cluster Labeling Based on Phylogram,method_contribution,846,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,0
+2018,Araújo,Rotulação Automática de Clusters Baseados em,method_contribution,846,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0
+2018,Gati,Mineração de dados não estruturados sobre eventos,application,,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0
+2018,Gomes,Islanding detection of synchronous distributed,application,,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0
+2018,Lima,Análise das Provas do Enade Agrupadas por Tema Um,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2018,Pinto,Caracterização do perfil de carga a partir de,application,80,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0
+2018,Pinto,Characterization of runtime resource usage from,application,,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0
+2018,Reche,Data Mining-Based Method to Reduce Multiple,application,1613,0,0,1,0,0,0,0,1,0,0,0,0,0,0,1,0
+2018,Reche,Metodologia Baseada em Mineração de Dados para,application,,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1
+2018,Silva,Análise de Sentimentos de Conteúdos Textuais de,application,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2018,Sousa,Computação em Nuvem no Contexto das Smart Grids,method_contribution,510,1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,1
+2018,Torres,UTILIZANDO ÁRVORES FILOGENÉTICAS PARA A,application,1114,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0
+2018,Tsutsumi,Preliminary study of Data Mining analysis of,application,80,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0
+2019,Araujo,Modelo de Classificação Fuzzy baseado em,adjacent_method,,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0
+2019,Becton,"Characterization of Xylaria sp., the causal agent",context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2019,Cabral,Análise de Séries Numéricas Utilizando,method_contribution,,1,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0
+2019,Feitosa,Similaridade de Imagens pela Análise da,application,,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2019,Ferreira,DETECÇÃO DE ILHAMENTO A PARTIR DA INJEÇÃO DE,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2019,Guimarães,Técnicas de Visão Computacional a Partir da,method_contribution,,1,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0
+2019,Lopes,Classificação de tráfego de ataques em redes de,application,5530,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1
+2019,Loureiro,A New Process Using Magnetic Nanoparticles to,application,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1
+2019,Quiroga,Impacto da geração distribuída sobre o sistema de,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2019,Silva,RECONHECIMENTO DE PADROES POR COMPRESSAO APLICADO,method_contribution,,1,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0
+2019,Sousa,Cloud computing in the smart grid context an,application,,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0
+2020,Chatterjee,Bagged tree based anti-islanding scheme for,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2020,Gholi Zadeh Kharrat,Feature sensitivity criterion-based sampling,application,8755,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0
+2020,Imperes Filho,Group Labeling Methodology Using Distance-based,review,,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0
+2020,Silveira,ESTUDO DE TÉCNICAS ANTI-ILHAMENTO ATIVAS E,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2020,Thasnimol,The Paradigm Revolution in the Distribution Grid,review,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2021,Hussain,A Comprehensive Review of Intelligent Islanding,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2021,Moro,Os Desafios para Minerar Dados Educacionais de,application,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1
+2021,Tresso,Reducing multiple estimation for fault location,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2021,Wilt,Herramienta de geolocalización para limitar el,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2022,Braga,Avaliação do uso de agrupamento de dados de,application,,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0
+2022,Durães,Avaliação do uso de perfis de desempenho,application,,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0
+2022,Gaspar-Cunha,Artificial intelligence in single screw polymer,application,,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0
+2022,Moda,An Approach Based on DAMICORE Clustering,application,6,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2022,Montes,Software testing with performance profiles (2),application,450,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0
+2022,Montes,Software testing with performance profiles,application,450,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0
+2022,Perina,Lina a fast design optimisation tool for,method_contribution,,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0
+2023,Albuquerque,Estudo do efeito das condições de processamento,application,13,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2023,Correia,Code Specialization for Targeting FPGAs via,application,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1
+2023,Gaspar-Cunha,Evolutionary Multi-Objective Optimization of,application,,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0
+2023,Gaspar-Cunha,Many-Objectives Optimization A Machine Learning,application,,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0
+2023,Grilo,Localização de Faltas em Sistemas Radiais de,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2023,Lopes,Estudo de um caso de uso dos algoritmos de,application,,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0
+2023,Santos,Metodologia integrada para detecção,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2023,Silva,Method for Inferring the Optimal Number of,adjacent_method,,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0
+2023,Silva,Method for inferring the number of clusters based,adjacent_method,,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0
+2024,Barros de Freitas,Unveiling firmware weaknesses An approach for,method_contribution,133,0,0,1,0,0,0,1,0,0,0,0,0,0,0,1,0
+2024,Bizhanov,Mathematical Modeling of Extrusion Agglomeration,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2024,Chahud,SAUCY SPICE uma nova abordagem eficiente para a,application,6000,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0
+2024,Medeiros,Rotulação Automática de Grupos com Árvores de,adjacent_method,,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0
+2024,Polo Ruiz,Study on unsupervised machine learning applied to,method_contribution,,0,0,0,1,0,0,0,1,1,0,0,0,0,0,0,0
+2024,Rodrigues,Análise de Técnicas de Similaridade Textual em,application,,1,0,0,0,0,0,0,0,1,0,1,0,1,0,0,0
+2024,Santee,BinclustRE a configurable tool for binary,method_contribution,1728,1,0,1,0,0,0,1,0,0,0,0,0,0,0,1,0
+2024,Silva,A Robust Cold-Start Approach Using Phylogram,application,,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0
+2025,Luna-Camacho,Predicting Pressure Profile in Polymer Extrusion,context,,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2025,Rodrigues Filho,Análise de Técnicas de Similaridade Textual no,application,,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0
+,Corrêa,Consciência situacional cibernética no contexto,application,45,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,1
