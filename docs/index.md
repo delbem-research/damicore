@@ -36,6 +36,14 @@ method/normalization
 method/ncd
 method/neighbor-joining
 method/community-detection
+method/evidence
+```
+
+```{toctree}
+:caption: Where this is going
+:maxdepth: 1
+
+roadmap
 ```
 
 ```{toctree}
