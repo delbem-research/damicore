@@ -11,6 +11,8 @@ constraint-dependencies = ["tornado>=6.6"]
 
 [dependency-groups]
 dev = [
+    "pypdf>=5.9,<7",
+    "reportlab>=4.4,<5",
     "bibtexparser>=2,<3",
     "build>=1.2,<2",
     "hypothesis>=6,<7",
