@@ -125,13 +125,14 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
 # One shard's work: its index, its pairs, and the run-wide inputs a worker process needs.
 WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
-# One object's work: its path and the run's settings, for C(x).
-SizeArguments = tuple[str, DistanceConfig]
+# One stream's work: the paths it compresses in order and the run's settings -- one path for
+# C(x), the largest object twice for C(xx).
+SizeArguments = tuple[tuple[str, ...], DistanceConfig]
 
 
 def _size_worker(arguments: SizeArguments) -> int:
-    raw_path, config = arguments
-    return compressed_size((Path(raw_path),), config=config)
+    raw_paths, config = arguments
+    return compressed_size(tuple(Path(path) for path in raw_paths), config=config)
 
 
 def _worker(arguments: WorkerArguments) -> WorkerResult:
@@ -325,7 +326,7 @@ def _load_or_compute_sizes(
                 code="checkpoint_mismatch_error",
             )
         return list(checkpoint.sizes)
-    arguments: list[SizeArguments] = [(str(path), settings) for path in paths]
+    arguments: list[SizeArguments] = [((str(path),), settings) for path in paths]
     # Executor.map submits every argument up front, which is bounded here: one short tuple
     # per object, where a shard's carries every path and size (see _bounded_submit).
     results = (
@@ -462,7 +463,8 @@ def compute_distance_matrix(
     zero-diagonal, and bitwise symmetric before this returns, and it is what
     :func:`damicore_tree_builder.build_tree` consumes together with ``labels.json``. That
     validation pass also measures the matrix range, reported as ``ncd_min``, ``ncd_max``
-    and ``ncd_out_of_range_count`` on the result.
+    and ``ncd_out_of_range_count`` on the result, and the largest object is compressed once
+    more after itself for ``ncd_self_largest``.
 
     Pairs are computed shard by shard straight into the memory map, and each finished shard
     is checkpointed with a digest, so an interrupted run resumes from the shards already
@@ -514,6 +516,14 @@ def compute_distance_matrix(
             paths,
             settings,
             executor,
+        )
+
+        # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
+        # defers it until it is read after the last shard.
+        largest = max(range(len(paths)), key=lambda index: paths[index].stat().st_size)
+        doubled: list[SizeArguments] = [((str(paths[largest]),) * 2, settings)]
+        self_size = (
+            map(_size_worker, doubled) if executor is None else executor.map(_size_worker, doubled)
         )
 
         pair_count = len(paths) * (len(paths) - 1) // 2
@@ -586,6 +596,10 @@ def compute_distance_matrix(
             completed_pairs += len(values)
             if progress is not None:
                 progress(completed_pairs, pair_count, "distance")
+        (doubled_size,) = _typed_results(self_size)
+        ncd_self_largest = normalized_compression_distance(
+            sizes[largest], sizes[largest], doubled_size
+        )
     finally:
         if executor is not None:
             executor.shutdown(cancel_futures=True)
@@ -611,4 +625,5 @@ def compute_distance_matrix(
         ncd_min=ncd_min,
         ncd_max=ncd_max,
         ncd_out_of_range_count=out_of_range,
+        ncd_self_largest=ncd_self_largest,
     )

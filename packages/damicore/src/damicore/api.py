@@ -955,6 +955,7 @@ def run(
                 ncd_min=float(metrics["ncd_min"]),
                 ncd_max=float(metrics["ncd_max"]),
                 ncd_out_of_range_count=int(metrics["ncd_out_of_range_count"]),
+                ncd_self_largest=float(metrics["ncd_self_largest"]),
             )
         else:
             for stale in (run_dir / "tree.json", run_dir / "tree.nwk", run_dir / "tree-work.npy"):
@@ -995,6 +996,7 @@ def run(
                     "ncd_min": distance.ncd_min,
                     "ncd_max": distance.ncd_max,
                     "ncd_out_of_range_count": distance.ncd_out_of_range_count,
+                    "ncd_self_largest": distance.ncd_self_largest,
                 },
             )
 
@@ -1090,6 +1092,7 @@ def run(
             ncd_min=distance.ncd_min,
             ncd_max=distance.ncd_max,
             ncd_out_of_range_count=distance.ncd_out_of_range_count,
+            ncd_self_largest=distance.ncd_self_largest,
             negative_branch_count=tree.negative_branch_count,
             modularity=clustered.modularity,
             timings_seconds=timings,

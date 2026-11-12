@@ -271,3 +271,10 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
             joined = _direct_size(payloads[left], payloads[right], config=config)
             expected = normalized_compression_distance(sizes[left], sizes[right], joined)
             assert float(matrix[left, right]) == expected
+
+    # The first of the longest objects, compressed after itself: C(xx) against C(x).
+    largest = max(range(count), key=lambda index: len(payloads[index]))
+    doubled = _direct_size(payloads[largest], payloads[largest], config=config)
+    assert result.ncd_self_largest == normalized_compression_distance(
+        sizes[largest], sizes[largest], doubled
+    )

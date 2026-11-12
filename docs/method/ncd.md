@@ -84,6 +84,12 @@ it.
 - **No correction for the window or the model memory.** A pair whose concatenation exceeds
   the DEFLATE window, or fills the PPMd model until it restarts, is compressed anyway, and
   the resulting value is reported. Refusing or flagging that case is open work.
+- **Idempotency is measured once, not established.** The largest object is compressed a
+  second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
+  much of it the compressor recognized; the paper's normal compressor gives zero. It is
+  never a gate, and a high value is not by itself a fault: on one independently drawn value
+  per line neither compressor recognizes a repeat of 128 KiB, while PPMd still separates
+  such columns by their distributions [adr-0020].
 - **No `1+e` bound is enforced.** The paper's range is `0 <= r <= 1+e`; the validation pass
   measures the realised range and reports `ncd_min`, `ncd_max` and
   `ncd_out_of_range_count` rather than rejecting a value outside it.

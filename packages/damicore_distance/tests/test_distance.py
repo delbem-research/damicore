@@ -370,8 +370,9 @@ def test_every_compression_runs_on_the_pool_when_there_is_one(
     compute_distance_matrix(
         normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
     )
-    # Three objects and three pairs: every one of the six compressions ran in the pool.
-    assert placements == [True] * 6
+    # Three objects, three pairs and the largest object after itself: every one of the seven
+    # compressions ran in the pool.
+    assert placements == [True] * 7
 
 
 def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:

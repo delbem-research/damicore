@@ -19,10 +19,13 @@ files than the object cap allows.
 
 In that shape the cost is compression, not the object count. Every object is
 compressed once and every pair once more, so the distance stage feeds its
-compressor `n` times the object bytes: 50 columns of 20 MB are 50 GB of
-compressor input. `estimate` reports that figure exactly as
+compressor `n` times the object bytes, plus the largest object twice for
+`ncd_self_largest`: 50 columns of 20 MB are 50 GB of compressor input. `estimate` reports that figure exactly as
 `compression_input_bytes`, which a measured compressor throughput turns into
 time, and `max_pair_bytes`, the longest concatenation the compressor must hold
-for an NCD value to see across a pair. Neither is a gate. The work is split
+for an NCD value to see across a pair. Neither is a gate. After the run,
+`ncd_self_largest` in `report.json` says how much of its largest object the
+compressor recognized when it read it twice, which is where a window or a
+filled model shows at the size the run actually used. The work is split
 into at least 64 shards whatever the object count, so every worker has work
 even when a few large objects make few pairs.

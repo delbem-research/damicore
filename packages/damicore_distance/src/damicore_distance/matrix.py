@@ -29,6 +29,15 @@ class DistanceResult(BaseModel):
     performs over every cell, so reporting the range costs no additional traversal. They
     describe the whole matrix, diagonal included, which is why ``ncd_min`` is ``0.0`` for
     any matrix whose values are all non-negative.
+
+    ``ncd_self_largest`` is NCD(x, x) for the largest object -- the first in manifest order
+    among equals -- which is ``(C(xx) - C(x)) / C(x)``: how much of an object the compressor
+    recognizes when it reads it a second time, the idempotency [cilibrasi2005] requires of a
+    normal compressor. Zero is full recognition. It is measured, never gated, and a high
+    value is not by itself a fault: on one independently drawn value per line neither DEFLATE
+    nor PPMd recognizes a repeat of 128 KiB, while PPMd still separates such columns by
+    their distributions (ADR 0020). What it does show is a compressor that stops recognizing
+    repetition at the size of this run's objects, past a window or a filled model.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -41,6 +50,7 @@ class DistanceResult(BaseModel):
     ncd_min: float = Field(default=0.0, allow_inf_nan=False)
     ncd_max: float = Field(default=0.0, allow_inf_nan=False)
     ncd_out_of_range_count: int = Field(default=0, ge=0)
+    ncd_self_largest: float = Field(allow_inf_nan=False)
 
 
 class DistanceMatrixView:

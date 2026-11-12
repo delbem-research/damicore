@@ -63,6 +63,9 @@ class RunReport(BaseModel):
     ncd_min: float | None = None
     ncd_max: float | None = None
     ncd_out_of_range_count: int = 0
+    # `None` on a report that predates the figure and on one for a run that stopped: a
+    # failure report states no measurement it did not take from a finished stage.
+    ncd_self_largest: float | None = None
     negative_branch_count: int = 0
     modularity: float | None = None
     timings_seconds: dict[str, float] = Field(default_factory=dict)

@@ -132,10 +132,15 @@ def test_failed_stage_is_reported_and_resumed(
     # The diagnostic report states the shard size the run used, not the model's default.
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
     assert report["pairs_per_shard"] == manifest["config"]["pairs_per_shard"] == 1
+    # A failure report carries no measurement it did not take from a finished stage.
+    assert report["ncd_self_largest"] is None
+    recorded = manifest["stages"]["distancing"]["metrics"]["ncd_self_largest"]
 
     monkeypatch.setattr(api, "cluster_tree", original)
     result = run(source, output_dir=output, progress=False, execution=ExecutionConfig(workers=1))
     assert result.report.status == "completed"
+    # The resumed run reuses the distance stage, so the figure comes from its receipt.
+    assert result.report.ncd_self_largest == recorded
     result.close()
 
 

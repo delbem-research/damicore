@@ -9,8 +9,18 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- `DistanceResult.ncd_self_largest` and `report.json`'s `ncd_self_largest` report NCD(x, x)
+  for the largest object, `(C(xx) - C(x)) / C(x)`: how much of an object the compressor
+  recognizes when it reads it again, the idempotency [cilibrasi2005] requires of a normal
+  compressor, which nothing measured before. It costs one more compression of the largest
+  object, run on the pool beside the shards. It is never a gate, and a high value is not by
+  itself a fault -- on one independently drawn value per line no compressor here recognizes
+  a 128 KiB repeat -- but it shows a compressor that stopped recognizing repetition at this
+  run's object size. `RunReport` gains the field, so its specified field list changes; it is
+  `None` on a report written before it and on a failure report.
 - `ResourceEstimate` reports `compression_input_bytes`, the exact bytes the distance stage
-  feeds its compressor (`object_count * normalized_bytes`), and `max_pair_bytes`, the
+  feeds its compressor (`object_count * normalized_bytes`, plus twice the largest object
+  for `ncd_self_largest`), and `max_pair_bytes`, the
   longest concatenation it compresses. Preflight approved a 50 GB distance stage as readily
   as a 5 MB one, and the object, pair and matrix figures it did report cannot tell them
   apart. Both are persisted with the estimate in `manifest.json` and are `None` when read

@@ -31,11 +31,12 @@ class ResourceEstimate(BaseModel):
     over every adopted file for a corpus, since no single file identifies that run.
 
     ``compression_input_bytes`` is the exact number of bytes the distance stage feeds its
-    compressor: every object once for its own size and both objects of every pair, which
-    is ``object_count * normalized_bytes``. Divided by a measured throughput it is the
-    stage's time, and nothing gates on it. ``max_pair_bytes`` is the longest concatenation
-    the compressor is given -- the two largest objects -- which is what a compressor's window
-    or model memory has to hold for an NCD value to see across the pair.
+    compressor: every object once for its own size, both objects of every pair, and the
+    largest object twice for ``ncd_self_largest``, which is ``object_count *
+    normalized_bytes`` plus twice the largest object. Divided by a measured throughput it is
+    the stage's time, and nothing gates on it. ``max_pair_bytes`` is the longest
+    concatenation the compressor is given -- the two largest objects -- which is what a
+    compressor's window or model memory has to hold for an NCD value to see across the pair.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -108,8 +109,9 @@ def preflight(
     objects = len(scan.objects)
     pairs = objects * (objects - 1) // 2
     matrix_bytes = objects * objects * 8
+    object_sizes = [item.size_bytes for item in scan.objects]
     # Every source yields at least two objects, so the two largest always form a pair.
-    max_pair_bytes = sum(heapq.nlargest(2, (item.size_bytes for item in scan.objects)))
+    max_pair_bytes = sum(heapq.nlargest(2, object_sizes))
     pairs_per_shard = execution.effective_pairs_per_shard(pairs)
     checkpoint_bytes = math.ceil(pairs / pairs_per_shard) * 256
     label_bytes = sum(len(item.label.encode("utf-8")) for item in scan.objects)
@@ -156,7 +158,9 @@ def preflight(
         tree_workspace_bytes=matrix_bytes,
         normalized_bytes=scan.total_bytes,
         max_serialized_chunk_bytes=scan.max_serialized_chunk_bytes,
-        compression_input_bytes=objects * scan.total_bytes,
+        # Each object once for C(x), both of every pair for C(xy), and the largest twice for
+        # the self-distance the stage reports.
+        compression_input_bytes=objects * scan.total_bytes + 2 * max(object_sizes),
         max_pair_bytes=max_pair_bytes,
         estimated_working_memory_bytes=working_memory,
         estimated_final_metadata_bytes=metadata_bytes,

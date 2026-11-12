@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+import pyppmd
 import pytest
 
 from damicore import (
@@ -320,6 +321,29 @@ def test_the_manifest_records_the_compressor_settings_in_force_and_only_those(
     ).close()
     config = json.loads((output / "manifest.json").read_text(encoding="utf-8"))["config"]
     assert {name: config[name] for name in recorded} == recorded
+
+
+def test_the_report_states_how_far_the_largest_object_is_from_itself(tmp_path: Path) -> None:
+    """Computed here from the object bytes through pyppmd's one-shot entry point, so the
+    figure is checked against the codec rather than against the stage that reports it."""
+    output = tmp_path / "run"
+    result = run(
+        _csv(tmp_path),
+        output_dir=output,
+        keep_normalized=True,
+        progress=False,
+        execution=ExecutionConfig(workers=1),
+    )
+    result.close()
+    objects = sorted((output / "normalization" / "objects").iterdir())
+    largest = max(objects, key=lambda path: path.stat().st_size).read_bytes()
+
+    def size(payload: bytes) -> int:
+        return len(pyppmd.compress(payload, max_order=6, mem_size=67_108_864, variant="I"))
+
+    expected = (size(largest + largest) - size(largest)) / size(largest)
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["ncd_self_largest"] == result.report.ncd_self_largest == expected
 
 
 def test_ppmd_settings_are_part_of_the_run_identity(tmp_path: Path) -> None:
