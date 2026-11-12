@@ -23,6 +23,7 @@ one line per record, saying what it settles rather than what it is about.
 | [0017](../decisions/0017-the-neighbor-joining-tie-rule.md) | Q scores within a relative band are one tie, broken in lexicographic label order; neither published source states a tie rule |
 | [0018](../decisions/0018-method-provenance-in-the-manifest.md) | The manifest records which named rule was in force at each stage, separately from the parameters `config_hash` already covers |
 | [0019](../decisions/0019-an-attribution-declares-whether-it-was-read.md) | Every attribution to a published work declares whether anybody read it against this code, and the gate checks shape, never truth |
+| [0020](../decisions/0020-ppmd-is-the-default-compressor.md) | PPMd variant I with restart is the default compressor, its order and memory are configuration, and `pyppmd` is a required dependency |
 
 ```{toctree}
 :maxdepth: 1
@@ -43,4 +44,5 @@ one line per record, saying what it settles rather than what it is about.
 /decisions/0017-the-neighbor-joining-tie-rule
 /decisions/0018-method-provenance-in-the-manifest
 /decisions/0019-an-attribution-declares-whether-it-was-read
+/decisions/0020-ppmd-is-the-default-compressor
 ```
