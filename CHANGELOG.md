@@ -376,6 +376,10 @@ carries anything else, a date included, matches neither and fails the release.
   bounds is refused because the codec would clamp it silently. The `pyppmd` version joins
   the checkpoint identity, so a checkpoint from another codec build is refused. See ADR
   0020.
+- Preflight charges every compressor's stream memory once per worker, from
+  `DistanceConfig.stream_memory_bytes`, rather than PPMd's model alone. DEFLATE's state, 256
+  KiB at the settings `zlib` and `gzip` use, was never charged, so a `zlib` or `gzip`
+  estimate rises by 256 KiB per worker. See ADR 0021.
 - **`damicore.run`, `damicore.estimate` and both CLI commands use PPMd by default.**
   `compressor` defaults to `"ppmd"`, and `ppmd_order` and `ppmd_memory_bytes` join
   `compression_level`, which now defaults to `None`, meaning the compressor's own default.

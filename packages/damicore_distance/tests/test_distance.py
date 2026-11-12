@@ -421,6 +421,23 @@ def test_a_setting_for_another_compressor_is_refused_rather_than_ignored(
         DistanceConfig.model_validate({"compressor": compressor, setting: value})
 
 
+@pytest.mark.parametrize(
+    ("settings", "charged"),
+    [
+        ({"compressor": "zlib"}, 262_144),
+        ({"compressor": "gzip"}, 262_144),
+        ({"ppmd_memory_bytes": 1_048_576}, 1_048_576),
+    ],
+)
+def test_every_compressor_states_the_memory_one_stream_holds(
+    settings: dict[str, object], charged: int
+) -> None:
+    """Preflight charges this once per worker, so it is stated for every compressor rather
+    than for the one whose model happens to be large. DEFLATE's is the state zlib's header
+    gives for a 15-bit window at memory level 8; PPMd's is the model it was configured with."""
+    assert DistanceConfig.model_validate(settings).stream_memory_bytes == charged
+
+
 def test_the_codec_build_is_part_of_the_checkpoint_identity() -> None:
     """A checkpoint holds compressed sizes, which belong to the codec that measured them."""
     assert distance_api._runtime_fingerprint()["pyppmd"] == version("pyppmd")

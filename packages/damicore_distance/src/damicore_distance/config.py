@@ -67,6 +67,20 @@ class DistanceConfig(BaseModel):
         return {name: getattr(self, name) for name in sorted(_SETTINGS[self.compressor])}
 
     @property
+    def stream_memory_bytes(self) -> int:
+        """The memory one compressor stream can hold, which every worker holds one of.
+
+        Stated, not measured per run: a stream fills to it on incompressible data. ADR 0021
+        records the measurements each figure is checked against.
+        """
+        match self.compressor:
+            case "zlib" | "gzip":
+                # zlib.h: (1 << (windowBits + 2)) + (1 << (memLevel + 9)) at 15 and 8.
+                return 262_144
+            case "ppmd":
+                return self.ppmd_memory_bytes
+
+    @property
     def effective_workers(self) -> int:
         if isinstance(self.workers, int):
             return self.workers

@@ -362,17 +362,20 @@ def test_ppmd_settings_are_part_of_the_run_identity(tmp_path: Path) -> None:
     assert hashes[0] != hashes[1]
 
 
-def test_preflight_charges_the_ppmd_model_once_per_worker(tmp_path: Path) -> None:
-    """The model can fill to its configured size on incompressible data, and every worker
-    holds one, so the projection charges the configured size per worker -- and the default
-    fits the default limit at the four workers "auto" resolves to at most."""
+def test_preflight_charges_each_compressor_stream_once_per_worker(tmp_path: Path) -> None:
+    """A stream can fill to its stated size on incompressible data, and every worker holds
+    one, so the projection charges that size per worker -- the PPMd model as configured,
+    DEFLATE's 256 KiB state -- and the default fits the default limit at the four workers
+    "auto" resolves to at most."""
     source = _csv(tmp_path)
     workers = ExecutionConfig(workers=4)
     base = estimate(source, ppmd_memory_bytes=1 << 20, execution=workers)
     grown = estimate(source, ppmd_memory_bytes=(1 << 20) + 1_000, execution=workers)
     deflate = estimate(source, compressor="zlib", execution=workers)
     assert grown.estimated_working_memory_bytes - base.estimated_working_memory_bytes == 4_000
-    assert base.estimated_working_memory_bytes - deflate.estimated_working_memory_bytes == 4 << 20
+    assert base.estimated_working_memory_bytes - deflate.estimated_working_memory_bytes == 4 * (
+        (1 << 20) - 262_144
+    )
     assert estimate(source, execution=workers).within_limits
 
 

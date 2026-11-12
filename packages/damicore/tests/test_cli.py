@@ -38,8 +38,9 @@ def test_cli_passes_the_compressor_settings_to_estimate_and_run(
     deflate = ["estimate", str(source), "--workers", "2", "--json", "--compressor", "zlib"]
     estimated = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
     assert main(deflate) == 0
+    # Two workers, each charged its stream: the 1 MiB model against DEFLATE's 256 KiB state.
     assert estimated - json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"] == (
-        2 * 1_048_576
+        2 * (1_048_576 - 262_144)
     )
     output = tmp_path / "run"
     run_arguments = ["run", str(source), "--workers", "1", "--no-progress", *settings]
