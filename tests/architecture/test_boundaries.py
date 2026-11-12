@@ -183,6 +183,7 @@ def test_public_exports_are_exact() -> None:
     ]
     assert damicore_distance.__all__ == [
         "compute_distance_matrix",
+        "codec_fingerprint",
         "DistanceConfig",
         "DistanceResult",
         "DistanceMatrixView",

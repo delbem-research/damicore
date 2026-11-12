@@ -6,6 +6,8 @@
 
 ```{eval-rst}
 .. autofunction:: damicore_distance.compute_distance_matrix
+
+.. autofunction:: damicore_distance.codec_fingerprint
 ```
 
 ## Models

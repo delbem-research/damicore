@@ -10,12 +10,10 @@ import platform
 import struct
 import tempfile
 import time
-import zlib
 from collections import deque
 from collections.abc import Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from importlib.metadata import version
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
@@ -30,7 +28,7 @@ from damicore_distance.artifacts import (
     LabelsArtifact,
     NormalizationManifest,
 )
-from damicore_distance.compressor import compressed_size
+from damicore_distance.compressor import codec_fingerprint, compressed_size
 from damicore_distance.config import DistanceConfig
 from damicore_distance.errors import DistanceError
 from damicore_distance.matrix import DistanceResult
@@ -271,9 +269,7 @@ def _runtime_fingerprint() -> dict[str, str]:
     return {
         "python": platform.python_version(),
         "numpy": np.__version__,
-        "zlib_build": zlib.ZLIB_VERSION,
-        "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
-        "pyppmd": version("pyppmd"),
+        **codec_fingerprint(),
     }
 
 

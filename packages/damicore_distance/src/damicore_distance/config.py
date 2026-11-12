@@ -19,6 +19,8 @@ _SETTINGS: dict[str, frozenset[str]] = {
     "zlib": frozenset({"compression_level"}),
     "gzip": frozenset({"compression_level"}),
     "ppmd": frozenset({"ppmd_order", "ppmd_memory_bytes"}),
+    "bzip2": frozenset({"bzip2_block_size_100k"}),
+    "lzma": frozenset({"lzma_dictionary_bytes"}),
 }
 
 
@@ -27,17 +29,20 @@ class DistanceConfig(BaseModel):
 
     ``compressor`` and its settings change every NCD value. ``compression_level`` applies
     to ``"zlib"`` and ``"gzip"``; ``ppmd_order`` and ``ppmd_memory_bytes`` to ``"ppmd"``,
-    PPMd variant I with model restart, whose bounds are the codec's own -- outside them the
-    codec clamps without saying so. See ADR 0020 for the default and ``docs/method/ncd.md``
+    PPMd variant I with model restart; ``bzip2_block_size_100k`` to ``"bzip2"``; and
+    ``lzma_dictionary_bytes`` to ``"lzma"``, raw LZMA2 at preset 6. Each bound is the codec's
+    own. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA, and ``docs/method/ncd.md``
     for what each compressor computes.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    compressor: Literal["zlib", "gzip", "ppmd"] = "ppmd"
+    compressor: Literal["zlib", "gzip", "ppmd", "bzip2", "lzma"] = "ppmd"
     compression_level: int = Field(default=6, ge=0, le=9)
     ppmd_order: int = Field(default=6, ge=2, le=64)
     ppmd_memory_bytes: int = Field(default=67_108_864, ge=2_048, le=4_294_967_259)
+    bzip2_block_size_100k: int = Field(default=9, ge=1, le=9)
+    lzma_dictionary_bytes: int = Field(default=8_388_608, ge=4_096, le=1_610_612_736)
     compression_chunk_bytes: int = Field(default=4_194_304, gt=0)
     workers: int | Literal["auto"] = "auto"
     pairs_per_shard: int | Literal["auto"] = "auto"
@@ -79,6 +84,12 @@ class DistanceConfig(BaseModel):
                 return 262_144
             case "ppmd":
                 return self.ppmd_memory_bytes
+            case "bzip2":
+                # The measured peak at the largest block, 9.5 MiB, charged at every block size.
+                return 10_485_760
+            case "lzma":
+                # Above every measured peak from a 4 KiB to a 64 MiB dictionary at preset 6.
+                return 12 * self.lzma_dictionary_bytes + 4_194_304
 
     @property
     def effective_workers(self) -> int:

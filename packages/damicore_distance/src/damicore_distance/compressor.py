@@ -6,7 +6,9 @@ a pair is compressed as a concatenation that is never written to disk. For ``zli
 ``zlib.MAX_WBITS`` for ``zlib``, 31 for ``gzip``. For ``ppmd`` it is a ``pyppmd``
 ``Ppmd8Encoder``: PPMd variant I, which restarts its model from scratch when the configured
 memory fills, at the configured order. Those are the compressor, order and restoration of
-the original DAMICORE implementation [adr-0020].
+the original DAMICORE implementation [adr-0020]. For ``bzip2`` it is a ``bz2.BZ2Compressor``
+at the configured block size, and for ``lzma`` an ``lzma.LZMACompressor`` writing raw
+LZMA2, with no container, at preset 6 and the configured dictionary [adr-0021].
 
 References
 ----------
@@ -31,8 +33,12 @@ References
 
 from __future__ import annotations
 
+import bz2
+import lzma
 import zlib
 from collections.abc import Callable, Iterable
+from functools import cache
+from importlib.metadata import version
 from pathlib import Path
 
 import pyppmd
@@ -68,6 +74,42 @@ def _stream(config: DistanceConfig) -> tuple[Callable[[bytes], bytes], Callable[
                     code="compression_error",
                 ) from exc
             return model.encode, model.flush
+        case "bzip2":
+            block = bz2.BZ2Compressor(config.bzip2_block_size_100k)
+            return block.compress, block.flush
+        case "lzma":
+            dictionary = lzma.LZMACompressor(
+                lzma.FORMAT_RAW, filters=[_lzma2(config.lzma_dictionary_bytes)]
+            )
+            return dictionary.compress, dictionary.flush
+
+
+def _lzma2(dictionary_bytes: int) -> dict[str, int]:
+    return {"id": lzma.FILTER_LZMA2, "preset": 6, "dict_size": dictionary_bytes}
+
+
+# Small enough that a probe costs a few milliseconds; long enough to exercise matching.
+_PROBE = b"".join(b"damicore %d\n" % index for index in range(2_000))
+
+
+@cache
+def codec_fingerprint() -> dict[str, str]:
+    """Name every codec this stage can measure with, as a result's identity needs it.
+
+    zlib and pyppmd report their versions. libbz2 and liblzma come from the system and
+    report none, so each is named by the size it gives a fixed payload: an encoder that
+    compresses differently changes that size, and a checkpoint or a run recorded under the
+    other one is refused rather than resumed [adr-0021].
+    """
+    return {
+        "zlib_build": zlib.ZLIB_VERSION,
+        "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        "pyppmd": version("pyppmd"),
+        "libbz2_probe": str(len(bz2.compress(_PROBE, 1))),
+        "liblzma_probe": str(
+            len(lzma.compress(_PROBE, format=lzma.FORMAT_RAW, filters=[_lzma2(65_536)]))
+        ),
+    }
 
 
 def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:

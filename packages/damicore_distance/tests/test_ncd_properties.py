@@ -9,8 +9,10 @@ for every pair.
 
 from __future__ import annotations
 
+import bz2
 import hashlib
 import json
+import lzma
 import random
 import zlib
 from pathlib import Path
@@ -32,14 +34,16 @@ pytestmark = pytest.mark.unit
 # exercised below and to give the deflate window something to match on.
 PAYLOAD = st.binary(max_size=96)
 CHUNK_BYTES = st.integers(min_value=1, max_value=48)
-Compressor = Literal["zlib", "gzip", "ppmd"]
-COMPRESSOR: st.SearchStrategy[Compressor] = st.sampled_from(["zlib", "gzip", "ppmd"])
+Compressor = Literal["zlib", "gzip", "ppmd", "bzip2", "lzma"]
+COMPRESSOR: st.SearchStrategy[Compressor] = st.sampled_from(
+    ["zlib", "gzip", "ppmd", "bzip2", "lzma"]
+)
 LEVEL = st.integers(min_value=0, max_value=9)
 
 
 def _config(compressor: Compressor, level: int, chunk_bytes: int) -> DistanceConfig:
     """The configuration a caller would write: a level only for the compressors that have one."""
-    if compressor == "ppmd":
+    if compressor not in ("zlib", "gzip"):
         return DistanceConfig(compressor=compressor, compression_chunk_bytes=chunk_bytes)
     return DistanceConfig(
         compressor=compressor, compression_level=level, compression_chunk_bytes=chunk_bytes
@@ -51,9 +55,15 @@ def _direct_size(*payloads: bytes, config: DistanceConfig) -> int:
 
     Deliberately shares nothing with the implementation except the codec itself: no file
     handles and no chunking, so a defect in either would show up as a size disagreement.
-    PPMd goes through ``pyppmd.compress``, the library's one-shot entry point, rather than
-    the streaming encoder the implementation drives.
+    PPMd, bzip2 and LZMA go through each library's one-shot entry point rather than the
+    streaming encoder the implementation drives.
     """
+    joined = b"".join(payloads)
+    if config.compressor == "bzip2":
+        return len(bz2.compress(joined, config.bzip2_block_size_100k))
+    if config.compressor == "lzma":
+        lzma2 = {"id": lzma.FILTER_LZMA2, "preset": 6, "dict_size": config.lzma_dictionary_bytes}
+        return len(lzma.compress(joined, format=lzma.FORMAT_RAW, filters=[lzma2]))
     if config.compressor == "ppmd":
         return len(
             pyppmd.compress(
@@ -198,6 +208,44 @@ def _column(vocabulary_seed: int, draw_seed: int, size: int) -> bytes:
         lines.append(json.dumps(draws.choice(vocabulary)) + "\n")
         written += len(lines[-1])
     return "".join(lines).encode()[:size]
+
+
+def _mutated(payload: bytes, rate: float) -> bytes:
+    draws = random.Random(3)
+    mutated = bytearray(payload)
+    for index in draws.sample(range(len(mutated)), int(len(mutated) * rate)):
+        mutated[index] = draws.randint(97, 122)
+    return bytes(mutated)
+
+
+def _copy_separation(directory: Path, compressor: Compressor, size: int) -> float:
+    """Distance to an unrelated column minus distance to the same column with 1 % changed."""
+    column = _column(1, 10, size)
+    payloads = [column, _mutated(column, 0.01), _column(2, 12, size)]
+    manifest_path = _normalization_manifest(directory / f"{compressor}-{size}", payloads)
+    result = compute_distance_matrix(
+        manifest_path,
+        directory / f"{compressor}-{size}-run",
+        config=DistanceConfig(compressor=compressor, workers=1),
+    )
+    matrix = np.load(result.matrix_path, allow_pickle=False)
+    return float(matrix[0, 2]) - float(matrix[0, 1])
+
+
+def test_lzma_finds_a_copy_at_any_size_its_dictionary_holds(tmp_path: Path) -> None:
+    """Why LZMA is offered (ADR 0021): a column and its 1 % mutated copy at 128 KiB are past
+    DEFLATE's window, and its default 8 MiB dictionary holds the pair. Measured: 0.906 under
+    LZMA, 0.019 under zlib."""
+    lzma_separation = _copy_separation(tmp_path, "lzma", 131_072)
+    assert lzma_separation > 0.8
+    assert lzma_separation > 20 * _copy_separation(tmp_path, "zlib", 131_072)
+
+
+def test_bzip2_finds_a_copy_within_its_block_and_not_past_it(tmp_path: Path) -> None:
+    """The 900 kB block is bzip2's window: a pair of 128 KiB columns fits it, a pair of
+    1 MiB columns spans blocks that share nothing. Measured: 0.590 and 0.070."""
+    assert _copy_separation(tmp_path, "bzip2", 131_072) > 0.3
+    assert _copy_separation(tmp_path, "bzip2", 1_048_576) < 0.1
 
 
 def test_past_the_deflate_window_ppmd_still_separates_columns_by_distribution(

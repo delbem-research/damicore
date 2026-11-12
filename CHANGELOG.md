@@ -9,6 +9,17 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- `damicore-distance` measures with two more compressors, both from the standard library, so
+  no dependency is added. `compressor="lzma"` is raw LZMA2 at preset 6 with
+  `lzma_dictionary_bytes` (default 8 MiB), and it is the only compressor here that finds
+  shared content past 32 KiB: a column against its 1 % mutated copy separated by 0.906 at
+  every size up to 4 MiB, where PPMd separated by 0.090 to 0.298. `compressor="bzip2"` uses
+  `bzip2_block_size_100k` (default 9) and sees both a copy and a distribution, but only
+  within its 900 kB block. PPMd stays the default. Each setting is refused outside its
+  codec's bounds or for another compressor, each stream's memory is charged per worker
+  (10 MiB for bzip2, 12 times the dictionary plus 4 MiB for LZMA), and `codec_fingerprint()`
+  names libbz2 and liblzma by the size each gives a fixed payload, since neither reports a
+  version; it joins the checkpoint identity. See ADR 0021.
 - `DistanceResult.ncd_self_largest` and `report.json`'s `ncd_self_largest` report NCD(x, x)
   for the largest object, `(C(xx) - C(x)) / C(x)`: how much of an object the compressor
   recognizes when it reads it again, the idempotency [cilibrasi2005] requires of a normal

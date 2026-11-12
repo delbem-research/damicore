@@ -18,6 +18,7 @@ from damicore_distance import (
     DistanceConfig,
     DistanceError,
     DistanceMatrixView,
+    codec_fingerprint,
     compute_distance_matrix,
 )
 from damicore_distance.ncd import normalized_compression_distance
@@ -387,23 +388,30 @@ def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> 
 
 
 @pytest.mark.parametrize(
-    ("setting", "refused", "accepted"),
+    ("compressor", "setting", "refused", "accepted"),
     [
-        ("ppmd_order", 1, 2),
-        ("ppmd_order", 65, 64),
-        ("ppmd_memory_bytes", 2_047, 2_048),
-        ("ppmd_memory_bytes", 4_294_967_260, 4_294_967_259),
+        ("ppmd", "ppmd_order", 1, 2),
+        ("ppmd", "ppmd_order", 65, 64),
+        ("ppmd", "ppmd_memory_bytes", 2_047, 2_048),
+        ("ppmd", "ppmd_memory_bytes", 4_294_967_260, 4_294_967_259),
+        ("bzip2", "bzip2_block_size_100k", 0, 1),
+        ("bzip2", "bzip2_block_size_100k", 10, 9),
+        ("lzma", "lzma_dictionary_bytes", 4_095, 4_096),
+        ("lzma", "lzma_dictionary_bytes", 1_610_612_737, 1_610_612_736),
     ],
 )
-def test_a_ppmd_setting_the_codec_would_clamp_is_refused(
-    setting: str, refused: int, accepted: int
+def test_a_setting_outside_its_codec_bounds_is_refused_by_name(
+    compressor: str, setting: str, refused: int, accepted: int
 ) -> None:
-    """pyppmd clamps these without reporting it, so two configurations would compute one
-    result under two configuration hashes; the bounds are the codec's own, and the value just
-    inside each one is accepted."""
-    assert getattr(DistanceConfig.model_validate({setting: accepted}), setting) == accepted
+    """The bounds are each codec's own. pyppmd clamps outside them without reporting it, so
+    two configurations would compute one result under two configuration hashes; libbz2 and
+    liblzma raise, but only when the first stream opens, deep in a worker. Refused here, the
+    error names the setting before any work, and the value just inside each bound is
+    accepted."""
+    accepted_config = DistanceConfig.model_validate({"compressor": compressor, setting: accepted})
+    assert getattr(accepted_config, setting) == accepted
     with pytest.raises(ValueError, match=setting):
-        DistanceConfig.model_validate({setting: refused})
+        DistanceConfig.model_validate({"compressor": compressor, setting: refused})
 
 
 @pytest.mark.parametrize(
@@ -412,6 +420,11 @@ def test_a_ppmd_setting_the_codec_would_clamp_is_refused(
         ("ppmd", "compression_level", 9),
         ("zlib", "ppmd_order", 8),
         ("gzip", "ppmd_memory_bytes", 10_485_760),
+        ("ppmd", "bzip2_block_size_100k", 9),
+        ("zlib", "lzma_dictionary_bytes", 4_096),
+        ("lzma", "compression_level", 6),
+        ("bzip2", "ppmd_order", 6),
+        ("bzip2", "lzma_dictionary_bytes", 4_096),
     ],
 )
 def test_a_setting_for_another_compressor_is_refused_rather_than_ignored(
@@ -427,6 +440,10 @@ def test_a_setting_for_another_compressor_is_refused_rather_than_ignored(
         ({"compressor": "zlib"}, 262_144),
         ({"compressor": "gzip"}, 262_144),
         ({"ppmd_memory_bytes": 1_048_576}, 1_048_576),
+        ({"compressor": "bzip2"}, 10_485_760),
+        ({"compressor": "bzip2", "bzip2_block_size_100k": 1}, 10_485_760),
+        ({"compressor": "lzma"}, 12 * 8_388_608 + 4_194_304),
+        ({"compressor": "lzma", "lzma_dictionary_bytes": 1_048_576}, 12 * 1_048_576 + 4_194_304),
     ],
 )
 def test_every_compressor_states_the_memory_one_stream_holds(
@@ -440,7 +457,28 @@ def test_every_compressor_states_the_memory_one_stream_holds(
 
 def test_the_codec_build_is_part_of_the_checkpoint_identity() -> None:
     """A checkpoint holds compressed sizes, which belong to the codec that measured them."""
-    assert distance_api._runtime_fingerprint()["pyppmd"] == version("pyppmd")
+    codecs = codec_fingerprint()
+    assert codecs["pyppmd"] == version("pyppmd")
+    assert distance_api._runtime_fingerprint().items() >= codecs.items()
+
+
+@pytest.mark.parametrize(("module", "key"), [("bz2", "libbz2_probe"), ("lzma", "liblzma_probe")])
+def test_a_system_codec_that_encodes_differently_changes_the_fingerprint(
+    monkeypatch: pytest.MonkeyPatch, module: str, key: str
+) -> None:
+    """libbz2 and liblzma come from the system and expose no version, so each is named by
+    the size it gives a fixed payload: an encoder that compresses differently must show."""
+    before = codec_fingerprint()[key]
+    codec_fingerprint.cache_clear()
+
+    def another_encoder(*_args: object, **_kwargs: object) -> bytes:
+        return b"another encoder"
+
+    monkeypatch.setattr(f"{module}.compress", another_encoder)
+    try:
+        assert codec_fingerprint()[key] != before
+    finally:
+        codec_fingerprint.cache_clear()
 
 
 def test_a_ppmd_model_that_cannot_be_allocated_is_a_compression_error(

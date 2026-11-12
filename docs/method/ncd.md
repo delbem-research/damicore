@@ -30,6 +30,17 @@ own; a setting for another compressor is refused, not ignored.
   `wbits = zlib.MAX_WBITS` and `wbits = 31`, and `compression_level` (0 to 9, default 6).
   Both see a 32 KiB window: past it, the first object of a pair is out of view while the
   second is compressed, and the distance nears 1 whatever the objects are.
+- `compressor="bzip2"` is `bz2.BZ2Compressor` with `bzip2_block_size_100k` (1 to 9,
+  default 9, a 900 kB block). The block is its window: a pair spanning two blocks shares
+  nothing between them.
+- `compressor="lzma"` is raw LZMA2, with no container, at preset 6, with
+  `lzma_dictionary_bytes` (4096 to 1610612736, default 8388608). The dictionary is its
+  window, and it is the compressor that finds a copy of an object past 32 KiB; it is also
+  the slowest, at 1.7 to 3.4 MB/s against PPMd's 15.
+
+Which one measures what, at which size, is the table in [adr-0021]: LZMA finds shared
+content at any size its dictionary holds, PPMd keeps a shared distribution across large
+objects, and bzip2 sees both only within its block.
 
 The `Literal` is what keeps the choice total: a name outside it must fail to type-check
 rather than quietly compress as something else, because every NCD value is a function of
@@ -82,8 +93,9 @@ it.
   distributivity for the configured compressor on the data at hand. The paper's guarantees
   are conditional on them; this code does not establish the condition.
 - **No correction for the window or the model memory.** A pair whose concatenation exceeds
-  the DEFLATE window, or fills the PPMd model until it restarts, is compressed anyway, and
-  the resulting value is reported. Refusing or flagging that case is open work.
+  the DEFLATE window, the bzip2 block or the LZMA dictionary, or fills the PPMd model until it
+  restarts, is compressed anyway, and the resulting value is reported. Refusing or flagging
+  that case is open work.
 - **Idempotency is measured once, not established.** The largest object is compressed a
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is
@@ -98,7 +110,7 @@ it.
 
 | | |
 |---|---|
-| Available | `ppmd` through `pyppmd`, and `zlib` and `gzip` through `zlib.compressobj`, exact (every pair computed) |
+| Available | `ppmd` through `pyppmd`; `zlib` and `gzip` through `zlib.compressobj`; `bzip2` and `lzma` through the standard library; exact (every pair computed) |
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
 | Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a PPMd model that cannot be allocated, raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
@@ -129,3 +141,5 @@ it.
   Not read: cited for the algorithm the dependency implements, not for a claim made here.
 - [adr-0020] — why PPMd variant I with restart is the default, and the comparison with
   `zlib` and with the original DAMICORE implementation on the same objects.
+- [adr-0021] — why bzip2 and LZMA are offered, what each measures at which size, and the
+  memory each stream is charged.
