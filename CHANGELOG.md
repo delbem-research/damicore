@@ -242,6 +242,11 @@ carries anything else, a date included, matches neither and fails the release.
   and `report.json`, the failure report included, record the resolved size, and preflight
   projects checkpoint and memory cost from it. A default run therefore hashes to a new run directory, and a 0.3 run directory is
   recomputed rather than reused; an explicit integer behaves exactly as before.
+- The compressed size of every object, `C(x)`, was computed serially in the coordinating
+  process before the worker pool existed, which is the fraction `workers / (N + workers - 1)`
+  of the stage -- about a third for ten objects on four workers. One pool now serves the
+  sizes and the shards, and a failure in either reaches the caller with the same typed codes.
+  With both fixes, the 16-object run above takes 2.6 s on four workers, from 6.2 s.
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
   rules with that version. 0.3.0 shipped and 0.4.0 is in this changelog, so the file
   governed two releases it did not name. The qualifier is removed rather than bumped,

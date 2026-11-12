@@ -326,6 +326,55 @@ def test_the_default_shard_size_gives_a_small_run_one_shard_per_pair(tmp_path: P
     assert checkpoint["shard_count"] == 3
 
 
+def test_every_compression_runs_on_the_pool_when_there_is_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C(x) is one compression per object, and run serially in the coordinator it is the
+    fraction workers / (N + workers - 1) of the wall time: about a third for ten objects on
+    four workers. The pool is replaced at the process boundary by one that runs its work in
+    this process and marks it, so every compression can say where it ran."""
+    normalized = _normalized(tmp_path)
+    in_pool = False
+    placements: list[bool] = []
+
+    class MarkingExecutor:
+        def __init__(self, **_options: object) -> None:
+            pass
+
+        def _call(self, function: Callable[[Any], Any], argument: object) -> Any:
+            nonlocal in_pool
+            in_pool = True
+            try:
+                return function(argument)
+            finally:
+                in_pool = False
+
+        def submit(self, function: Callable[[Any], Any], argument: object) -> Future[Any]:
+            future: Future[Any] = Future()
+            future.set_result(self._call(function, argument))
+            return future
+
+        def map(self, function: Callable[[Any], Any], arguments: list[object]) -> Iterator[Any]:
+            return iter([self._call(function, argument) for argument in arguments])
+
+        def shutdown(self, **_options: object) -> None:
+            pass
+
+    original = distance_api.compressed_size
+
+    def placed(*args: Any, **kwargs: Any) -> int:
+        placements.append(in_pool)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(distance_api, "ProcessPoolExecutor", MarkingExecutor)
+    monkeypatch.setattr(distance_api, "compressed_size", placed)
+    compute_distance_matrix(
+        normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
+    )
+    # Three objects and three pairs: every one of the six compressions ran in the pool.
+    assert placements == [True] * 6
+
+
 def test_an_unreadable_object_is_reported_as_a_compression_error(tmp_path: Path) -> None:
     from damicore_distance.compressor import compressed_size
 
