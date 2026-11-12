@@ -50,6 +50,7 @@ exclude = ["Makefile", "pyrightconfig.json", "tests"]
 # modules stay first party. Held equal to the other members by tests/architecture.
 [tool.ruff]
 line-length = 100
+target-version = "py311"
 exclude = [".venv", "dist", "__pycache__"]
 
 [tool.ruff.lint]

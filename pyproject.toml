@@ -41,6 +41,7 @@ damicore-clusterizer = { workspace = true }
 # the package sections by tests/architecture/test_boundaries.py.
 [tool.ruff]
 line-length = 100
+target-version = "py311"
 exclude = [".venv", "dist", "__pycache__"]
 
 # PGH and TID close two rules this file states in prose and nothing else checked: a

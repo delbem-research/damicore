@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
@@ -11,7 +12,6 @@ import damicore_distance
 import damicore_normalizer
 import damicore_tree_builder
 import pytest
-import tomllib
 from damicore.api import VERSION
 
 pytestmark = pytest.mark.contract
