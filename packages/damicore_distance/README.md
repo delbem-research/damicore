@@ -26,9 +26,12 @@ if __name__ == "__main__":
 ```
 
 The default compressor is PPMd variant I, at model order 6 with 64 MiB of model
-memory (`ppmd_order`, `ppmd_memory_bytes`); `compressor="zlib"` or `"gzip"` selects
-DEFLATE, whose 32 KiB window makes objects larger than that look unrelated, with
-`compression_level`. Every NCD value is a function of these settings.
+memory (`ppmd_order`, `ppmd_memory_bytes`), which keeps a shared distribution across
+large objects. `compressor="lzma"` (raw LZMA2, `lzma_dictionary_bytes`, default 8 MiB)
+finds shared content at any size its dictionary holds; `compressor="bzip2"`
+(`bzip2_block_size_100k`) sees both within its 900 kB block; `"zlib"` or `"gzip"`
+select DEFLATE, whose 32 KiB window makes objects larger than that look unrelated,
+with `compression_level`. Every NCD value is a function of these settings.
 
 The manifest is produced by the sibling `damicore-normalizer` distribution; the
 call writes `distance.npy` and `labels.json`, the inputs the sibling

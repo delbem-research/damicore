@@ -28,7 +28,7 @@ value:
 |---|---|---|
 | the exact bytes of an object | this project | [adr-0001] |
 | how a spreadsheet cell becomes text | this project | [adr-0010] |
-| which compressor, and its window or model | configuration, PPMd variant I by default ([adr-0020]) | [`ncd.md`](ncd.md) |
+| which compressor, and its window or model | configuration, PPMd variant I by default ([adr-0020], [adr-0021]) | [`ncd.md`](ncd.md) |
 | which pair joins when two Q scores tie | this project | [adr-0017] |
 | how a branch length becomes an edge weight | this project | [adr-0016] |
 | how many communities to cut the dendrogram into | igraph, or an explicit count | [`community-detection.md`](community-detection.md) |

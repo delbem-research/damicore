@@ -51,7 +51,7 @@ The whole tree hangs from the epic,
 | Item | Milestone | What it adds |
 |---|---|---|
 | [#59](https://github.com/delbem-research/damicore/issues/59) | 0.4 | refuse or flag objects larger than the compressor window |
-| [#60](https://github.com/delbem-research/damicore/issues/60) | 0.4 | add bzip2 and LZMA compressors (standard library, no new dependency) |
+| [#60](https://github.com/delbem-research/damicore/issues/60) | 0.4 | add bzip2 and LZMA compressors (standard library, no new dependency; ADR 0021) |
 | [#61](https://github.com/delbem-research/damicore/issues/61) | 0.5 | add PPMd (pyppmd) as the default compressor and a required dependency (ADR 0020) |
 | [#62](https://github.com/delbem-research/damicore/issues/62) | 0.5 | interleaved pairing for objects larger than the compressor window |
 | [#63](https://github.com/delbem-research/damicore/issues/63) | 0.5 | incremental NCD — extend an existing run with new objects |
