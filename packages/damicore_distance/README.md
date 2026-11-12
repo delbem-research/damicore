@@ -21,9 +21,14 @@ if __name__ == "__main__":
     result = compute_distance_matrix(
         "normalization/manifest.json",
         "run",
-        config=DistanceConfig(compressor="zlib", workers="auto"),
+        config=DistanceConfig(workers="auto"),
     )
 ```
+
+The default compressor is PPMd variant I, at model order 6 with 64 MiB of model
+memory (`ppmd_order`, `ppmd_memory_bytes`); `compressor="zlib"` or `"gzip"` selects
+DEFLATE, whose 32 KiB window makes objects larger than that look unrelated, with
+`compression_level`. Every NCD value is a function of these settings.
 
 The manifest is produced by the sibling `damicore-normalizer` distribution; the
 call writes `distance.npy` and `labels.json`, the inputs the sibling

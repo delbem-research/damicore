@@ -351,6 +351,21 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Changed
 
+- **`damicore-distance` measures with PPMd by default, and its NCD values change.**
+  `DistanceConfig.compressor` gains `"ppmd"`, PPMd variant I with model restart through
+  `pyppmd`, and it is the default; `ppmd_order` (2 to 64, default 6) and
+  `ppmd_memory_bytes` (2048 to 4294967259, default 64 MiB) set it. DEFLATE sees 32 KiB, so
+  past that `zlib` and `gzip` report every pair nearly unrelated: on 128 KiB columns drawn
+  from two vocabularies the distance across them exceeded the distance within one by 0.028
+  under `zlib` and by 0.238 under PPMd. The original DAMICORE implementation already
+  defaulted to PPMd variant I at order 6, and against it the matrices rank with Spearman
+  0.78 to 0.93 under PPMd and 0.49 to 0.65 under `zlib`. `pyppmd>=1.3.1,<1.4` is a new
+  runtime dependency, not an extra, because a default cannot be optional. A setting for a
+  compressor it does not apply to -- `compression_level` with PPMd, a `ppmd_*` setting with
+  `zlib` or `gzip` -- is refused rather than ignored, and a PPMd setting outside the codec's
+  bounds is refused because the codec would clamp it silently. The `pyppmd` version joins
+  the checkpoint identity, so a checkpoint from another codec build is refused. See ADR
+  0020.
 - Every distribution's `Documentation` URL now points at the published site,
   `https://delbem-research.github.io/damicore/`, rather than at one Markdown file in the
   repository. The README links it too.

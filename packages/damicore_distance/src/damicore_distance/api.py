@@ -15,9 +15,10 @@ from collections import deque
 from collections.abc import Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from importlib.metadata import version
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -122,34 +123,25 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
 
 
 # One shard's work: its index, its pairs, and the run-wide inputs a worker process needs.
-WorkerArguments = tuple[
-    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
-]
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
-# One object's work: its path and the compressor settings, for C(x).
-SizeArguments = tuple[str, Literal["zlib", "gzip"], int, int]
+# One object's work: its path and the run's settings, for C(x).
+SizeArguments = tuple[str, DistanceConfig]
 
 
 def _size_worker(arguments: SizeArguments) -> int:
-    raw_path, compressor, level, chunk_bytes = arguments
-    return compressed_size(
-        (Path(raw_path),), compressor=compressor, level=level, chunk_bytes=chunk_bytes
-    )
+    raw_path, config = arguments
+    return compressed_size((Path(raw_path),), config=config)
 
 
 def _worker(arguments: WorkerArguments) -> WorkerResult:
-    shard_index, pairs, raw_paths, sizes, compressor, level, chunk_bytes = arguments
+    shard_index, pairs, raw_paths, sizes, config = arguments
     paths = [Path(path) for path in raw_paths]
     left: list[int] = []
     right: list[int] = []
     values: list[float] = []
     for i, j in pairs:
-        cxy = compressed_size(
-            (paths[i], paths[j]),
-            compressor=compressor,
-            level=level,
-            chunk_bytes=chunk_bytes,
-        )
+        cxy = compressed_size((paths[i], paths[j]), config=config)
         left.append(i)
         right.append(j)
         values.append(normalized_compression_distance(sizes[i], sizes[j], cxy))
@@ -280,6 +272,7 @@ def _runtime_fingerprint() -> dict[str, str]:
         "numpy": np.__version__,
         "zlib_build": zlib.ZLIB_VERSION,
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        "pyppmd": version("pyppmd"),
     }
 
 
@@ -332,15 +325,7 @@ def _load_or_compute_sizes(
                 code="checkpoint_mismatch_error",
             )
         return list(checkpoint.sizes)
-    arguments: list[SizeArguments] = [
-        (
-            str(path),
-            settings.compressor,
-            settings.compression_level,
-            settings.compression_chunk_bytes,
-        )
-        for path in paths
-    ]
+    arguments: list[SizeArguments] = [(str(path), settings) for path in paths]
     # Executor.map submits every argument up front, which is bounded here: one short tuple
     # per object, where a shard's carries every path and size (see _bounded_submit).
     results = (
@@ -555,18 +540,8 @@ def compute_distance_matrix(
                     )
                 completed_pairs += len(shard)
         raw_paths = [str(path) for path in paths]
-        # Annotated rather than inferred: a tuple display widens the compressor literal to str,
-        # which would put the widening back that the parameter type exists to prevent.
         arguments: Iterator[WorkerArguments] = (
-            (
-                index,
-                shard,
-                raw_paths,
-                sizes,
-                settings.compressor,
-                settings.compression_level,
-                settings.compression_chunk_bytes,
-            )
+            (index, shard, raw_paths, sizes, settings)
             for index, shard in iter_pair_shards(len(paths), pairs_per_shard)
             if index not in completed_shards
         )

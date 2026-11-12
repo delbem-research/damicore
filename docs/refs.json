@@ -149,6 +149,18 @@
     "source": "crossref",
     "fetched": "2026-11-01"
   },
+  "shkarin2003": {
+    "doi": "10.1109/DCC.2002.999958",
+    "title": "PPM: one step to practicality",
+    "authors": [
+      "Shkarin, D."
+    ],
+    "year": 2003,
+    "venue": "Proceedings DCC 2002. Data Compression Conference",
+    "type": "inproceedings",
+    "source": "crossref",
+    "fetched": "2026-11-12"
+  },
   "song2020": {
     "doi": "10.1093/bioinformatics/btaa613",
     "title": "Efficient weighted univariate clustering maps outstanding dysregulated genomic zones in human cancers",

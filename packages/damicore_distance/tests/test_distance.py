@@ -5,8 +5,9 @@ import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from importlib.metadata import version
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -24,9 +25,7 @@ from damicore_distance.ncd import normalized_compression_distance
 pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
-WorkerArguments = tuple[
-    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
-]
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 
 
@@ -375,11 +374,78 @@ def test_every_compression_runs_on_the_pool_when_there_is_one(
     assert placements == [True] * 6
 
 
+def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:
+    """ADR 0020: the original implementation's compressor and order, with a model large
+    enough to keep measuring past the objects where 10 MB restarts."""
+    config = DistanceConfig()
+    assert (config.compressor, config.ppmd_order, config.ppmd_memory_bytes) == (
+        "ppmd",
+        6,
+        67_108_864,
+    )
+
+
+@pytest.mark.parametrize(
+    ("setting", "refused", "accepted"),
+    [
+        ("ppmd_order", 1, 2),
+        ("ppmd_order", 65, 64),
+        ("ppmd_memory_bytes", 2_047, 2_048),
+        ("ppmd_memory_bytes", 4_294_967_260, 4_294_967_259),
+    ],
+)
+def test_a_ppmd_setting_the_codec_would_clamp_is_refused(
+    setting: str, refused: int, accepted: int
+) -> None:
+    """pyppmd clamps these without reporting it, so two configurations would compute one
+    result under two configuration hashes; the bounds are the codec's own, and the value just
+    inside each one is accepted."""
+    assert getattr(DistanceConfig.model_validate({setting: accepted}), setting) == accepted
+    with pytest.raises(ValueError, match=setting):
+        DistanceConfig.model_validate({setting: refused})
+
+
+@pytest.mark.parametrize(
+    ("compressor", "setting", "value"),
+    [
+        ("ppmd", "compression_level", 9),
+        ("zlib", "ppmd_order", 8),
+        ("gzip", "ppmd_memory_bytes", 10_485_760),
+    ],
+)
+def test_a_setting_for_another_compressor_is_refused_rather_than_ignored(
+    compressor: str, setting: str, value: int
+) -> None:
+    with pytest.raises(ValueError, match=f"{setting} does not apply to {compressor}"):
+        DistanceConfig.model_validate({"compressor": compressor, setting: value})
+
+
+def test_the_codec_build_is_part_of_the_checkpoint_identity() -> None:
+    """A checkpoint holds compressed sizes, which belong to the codec that measured them."""
+    assert distance_api._runtime_fingerprint()["pyppmd"] == version("pyppmd")
+
+
+def test_a_ppmd_model_that_cannot_be_allocated_is_a_compression_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from damicore_distance import compressor
+
+    def unallocatable(*_args: object) -> object:
+        raise MemoryError
+
+    path = tmp_path / "object.jsonl"
+    path.write_bytes(b"payload")
+    monkeypatch.setattr(compressor.pyppmd, "Ppmd8Encoder", unallocatable)
+    with pytest.raises(DistanceError, match="ppmd_memory_bytes") as raised:
+        compressor.compressed_size((path,), config=DistanceConfig())
+    assert raised.value.code == "compression_error"
+
+
 def test_an_unreadable_object_is_reported_as_a_compression_error(tmp_path: Path) -> None:
     from damicore_distance.compressor import compressed_size
 
     with pytest.raises(DistanceError, match="Could not compress") as raised:
-        compressed_size((tmp_path / "missing.jsonl",), compressor="zlib", level=6, chunk_bytes=1024)
+        compressed_size((tmp_path / "missing.jsonl",), config=DistanceConfig())
     assert raised.value.code == "compression_error"
 
 
@@ -726,7 +792,7 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
     no_paths: list[str] = []
     no_sizes: list[int] = []
     shards: list[distance_api.WorkerArguments] = [
-        (index, no_pairs, no_paths, no_sizes, "zlib", 6, 1024) for index in range(total)
+        (index, no_pairs, no_paths, no_sizes, DistanceConfig()) for index in range(total)
     ]
     arguments: Iterator[distance_api.WorkerArguments] = iter(shards)
     results = distance_api._bounded_submit(

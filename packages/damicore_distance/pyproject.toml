@@ -24,6 +24,7 @@ keywords = ["damicore", "ncd", "compression-distance", "compression", "distance-
 dependencies = [
     "numpy>=1.26,<3",
     "pydantic>=2.10,<3",
+    "pyppmd>=1.3.1,<1.4",
 ]
 
 # DistanceMatrixView.head() and .to_pandas() are the only pandas users in this package, and

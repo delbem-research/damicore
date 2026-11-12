@@ -449,7 +449,7 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
             "pandas>=2.2,<4",
             "pydantic>=2.10,<3",
         },
-        "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
+        "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3", "pyppmd>=1.3.1,<1.4"},
         "damicore_tree_builder": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
         "damicore_clusterizer": {"igraph>=1.0,<1.1", "pydantic>=2.10,<3"},
         "damicore": {

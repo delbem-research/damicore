@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import zlib
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
+import pyppmd
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -30,19 +32,40 @@ pytestmark = pytest.mark.unit
 # exercised below and to give the deflate window something to match on.
 PAYLOAD = st.binary(max_size=96)
 CHUNK_BYTES = st.integers(min_value=1, max_value=48)
-COMPRESSOR: st.SearchStrategy[Literal["zlib", "gzip"]] = st.sampled_from(["zlib", "gzip"])
+Compressor = Literal["zlib", "gzip", "ppmd"]
+COMPRESSOR: st.SearchStrategy[Compressor] = st.sampled_from(["zlib", "gzip", "ppmd"])
 LEVEL = st.integers(min_value=0, max_value=9)
 
 
-def _direct_size(*payloads: bytes, compressor: Literal["zlib", "gzip"], level: int) -> int:
+def _config(compressor: Compressor, level: int, chunk_bytes: int) -> DistanceConfig:
+    """The configuration a caller would write: a level only for the compressors that have one."""
+    if compressor == "ppmd":
+        return DistanceConfig(compressor=compressor, compression_chunk_bytes=chunk_bytes)
+    return DistanceConfig(
+        compressor=compressor, compression_level=level, compression_chunk_bytes=chunk_bytes
+    )
+
+
+def _direct_size(*payloads: bytes, config: DistanceConfig) -> int:
     """Compress payloads in one pass, in memory, as the reference for ``compressed_size``.
 
-    Deliberately shares nothing with the implementation except zlib itself: no file handles
-    and no chunking, so a defect in either would show up as a size disagreement.
+    Deliberately shares nothing with the implementation except the codec itself: no file
+    handles and no chunking, so a defect in either would show up as a size disagreement.
+    PPMd goes through ``pyppmd.compress``, the library's one-shot entry point, rather than
+    the streaming encoder the implementation drives.
     """
+    if config.compressor == "ppmd":
+        return len(
+            pyppmd.compress(
+                b"".join(payloads),
+                max_order=config.ppmd_order,
+                mem_size=config.ppmd_memory_bytes,
+                variant="I",
+            )
+        )
     stream = zlib.compressobj(
-        level=level,
-        wbits=zlib.MAX_WBITS if compressor == "zlib" else 31,
+        level=config.compression_level,
+        wbits=zlib.MAX_WBITS if config.compressor == "zlib" else 31,
     )
     total = 0
     for payload in payloads:
@@ -106,14 +129,13 @@ def test_chunked_compression_matches_a_direct_single_shot_stream(
     tmp_path_factory: pytest.TempPathFactory,
     payload: bytes,
     chunk_bytes: int,
-    compressor: Literal["zlib", "gzip"],
+    compressor: Compressor,
     level: int,
 ) -> None:
     directory = tmp_path_factory.mktemp("chunked")
     path = _object_file(directory, "object.jsonl", payload)
-    assert compressed_size(
-        (path,), compressor=compressor, level=level, chunk_bytes=chunk_bytes
-    ) == _direct_size(payload, compressor=compressor, level=level)
+    config = _config(compressor, level, chunk_bytes)
+    assert compressed_size((path,), config=config) == _direct_size(payload, config=config)
 
 
 @given(payload=PAYLOAD, chunk_bytes=CHUNK_BYTES, level=LEVEL)
@@ -128,9 +150,8 @@ def test_zlib_sizes_match_the_one_shot_module_function(
     compressor, ``zlib.compress`` must produce a stream of exactly the same length."""
     directory = tmp_path_factory.mktemp("one-shot")
     path = _object_file(directory, "object.jsonl", payload)
-    assert compressed_size((path,), compressor="zlib", level=level, chunk_bytes=chunk_bytes) == len(
-        zlib.compress(payload, level)
-    )
+    config = _config("zlib", level, chunk_bytes)
+    assert compressed_size((path,), config=config) == len(zlib.compress(payload, level))
 
 
 @given(left=PAYLOAD, right=PAYLOAD, chunk_bytes=CHUNK_BYTES, compressor=COMPRESSOR)
@@ -140,23 +161,68 @@ def test_pair_compression_equals_compressing_the_joined_bytes(
     left: bytes,
     right: bytes,
     chunk_bytes: int,
-    compressor: Literal["zlib", "gzip"],
+    compressor: Compressor,
 ) -> None:
     """C(xy) feeds x then y through one compressor instance and must equal compressing the
     concatenation, which the implementation never materializes."""
     directory = tmp_path_factory.mktemp("pair")
     left_path = _object_file(directory, "left.jsonl", left)
     right_path = _object_file(directory, "right.jsonl", right)
-    joined = _direct_size(left + right, compressor=compressor, level=6)
-    assert (
-        compressed_size(
-            (left_path, right_path),
-            compressor=compressor,
-            level=6,
-            chunk_bytes=chunk_bytes,
-        )
-        == joined
+    config = _config(compressor, 6, chunk_bytes)
+    assert compressed_size((left_path, right_path), config=config) == _direct_size(
+        left + right, config=config
     )
+
+
+def test_the_default_compressor_reproduces_a_known_size(tmp_path: Path) -> None:
+    """A size computed once with pyppmd 1.3.1, so a codec build that encodes differently --
+    another platform, another patch release -- fails here instead of shifting every NCD."""
+    payload = b"".join(b"damicore %d\n" % index for index in range(5_000))
+    path = _object_file(tmp_path, "object.jsonl", payload)
+    assert len(payload) == 68_890
+    assert compressed_size((path,), config=DistanceConfig()) == 5_801
+
+
+def _column(vocabulary_seed: int, draw_seed: int, size: int) -> bytes:
+    """A column as the normalizer writes it: one JSON value per line, drawn independently
+    from a vocabulary, so two columns share a distribution and never a run of content."""
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    shape = random.Random(vocabulary_seed)
+    vocabulary = [
+        "".join(shape.choice(letters) for _ in range(shape.randint(4, 9))) for _ in range(200)
+    ]
+    draws = random.Random(draw_seed)
+    lines: list[str] = []
+    written = 0
+    while written < size:
+        lines.append(json.dumps(draws.choice(vocabulary)) + "\n")
+        written += len(lines[-1])
+    return "".join(lines).encode()[:size]
+
+
+def test_past_the_deflate_window_ppmd_still_separates_columns_by_distribution(
+    tmp_path: Path,
+) -> None:
+    """The defect the default exists to fix. Two columns drawn from one vocabulary and a
+    third from another, 128 KiB each: DEFLATE sees 32 KiB, so the pair it compresses holds
+    the first column out of view of the second and every distance nears 1. PPMd keeps the
+    statistics of what it has read, which is what such columns share. Measured: separation
+    0.028 under zlib and 0.238 under PPMd; the bounds below sit well inside both."""
+    size = 131_072
+    payloads = [_column(1, 10, size), _column(1, 11, size), _column(2, 12, size)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+
+    def separation(compressor: Literal["zlib", "ppmd"]) -> float:
+        result = compute_distance_matrix(
+            manifest_path,
+            tmp_path / compressor,
+            config=DistanceConfig(compressor=compressor, workers=1),
+        )
+        matrix = np.load(result.matrix_path, allow_pickle=False)
+        return float(matrix[0, 2]) - float(matrix[0, 1])
+
+    assert separation("ppmd") > 0.15
+    assert separation("ppmd") > 4 * separation("zlib")
 
 
 @given(
@@ -198,9 +264,10 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
     assert np.array_equal(matrix, matrix.T)  # pyright: ignore[reportUnknownMemberType]
     assert [float(matrix[index, index]) for index in range(count)] == [0.0] * count
 
-    sizes = [_direct_size(payload, compressor="zlib", level=6) for payload in payloads]
+    config = DistanceConfig()
+    sizes = [_direct_size(payload, config=config) for payload in payloads]
     for left in range(count):
         for right in range(left + 1, count):
-            joined = _direct_size(payloads[left], payloads[right], compressor="zlib", level=6)
+            joined = _direct_size(payloads[left], payloads[right], config=config)
             expected = normalized_compression_distance(sizes[left], sizes[right], joined)
             assert float(matrix[left, right]) == expected
