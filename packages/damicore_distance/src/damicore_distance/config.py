@@ -62,6 +62,11 @@ class DistanceConfig(BaseModel):
         return self
 
     @property
+    def compressor_settings(self) -> dict[str, int]:
+        """The settings ``compressor`` reads, by name, with the values in force."""
+        return {name: getattr(self, name) for name in sorted(_SETTINGS[self.compressor])}
+
+    @property
     def effective_workers(self) -> int:
         if isinstance(self.workers, int):
             return self.workers

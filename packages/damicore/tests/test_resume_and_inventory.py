@@ -155,6 +155,7 @@ def test_a_directory_holding_another_configuration_is_refused(tmp_path: Path) ->
     first = run(
         source,
         output_dir=output,
+        compressor="zlib",
         compression_level=6,
         progress=False,
         execution=_single_worker(),
@@ -164,6 +165,7 @@ def test_a_directory_holding_another_configuration_is_refused(tmp_path: Path) ->
         run(
             source,
             output_dir=output,
+            compressor="zlib",
             compression_level=9,
             progress=False,
             execution=_single_worker(),
@@ -290,6 +292,7 @@ def test_normalization_bytes_differing_from_preflight_stop_the_run(
         object_source: ObjectSource,
         save_diagnostics: bool,
         execution: ExecutionConfig,
+        distance: DistanceConfig,
         disk_target: Path,
     ) -> ResourceEstimate:
         preview = real_preflight(
@@ -297,6 +300,7 @@ def test_normalization_bytes_differing_from_preflight_stop_the_run(
             object_source=object_source,
             save_diagnostics=save_diagnostics,
             execution=execution,
+            distance=distance,
             disk_target=disk_target,
         )
         return preview.model_copy(update={"normalized_bytes": preview.normalized_bytes + 1})
@@ -592,6 +596,19 @@ def test_a_manifest_written_before_provenance_still_loads(tmp_path: Path) -> Non
     loaded = RunManifest.model_validate_json(json.dumps(manifest))
     assert loaded.method is None
     assert loaded.schema_version == 2
+
+
+def test_a_manifest_written_before_ppmd_still_loads(tmp_path: Path) -> None:
+    """A 0.3 run used DEFLATE and recorded a level and no PPMd settings; the two settings
+    are additive, so that manifest reads back with them absent."""
+    manifest = _completed_manifest(tmp_path)
+    manifest["config"].update({"compressor": "zlib", "compression_level": 6})
+    del manifest["config"]["ppmd_order"]
+    del manifest["config"]["ppmd_memory_bytes"]
+    loaded = RunManifest.model_validate_json(json.dumps(manifest))
+    assert (loaded.config.compressor, loaded.config.compression_level) == ("zlib", 6)
+    assert loaded.config.ppmd_order is None
+    assert loaded.config.ppmd_memory_bytes is None
 
 
 def test_a_manifest_written_before_the_compression_estimate_still_loads(tmp_path: Path) -> None:

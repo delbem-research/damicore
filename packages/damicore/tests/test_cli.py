@@ -29,6 +29,28 @@ def test_cli_estimate_json_has_clean_stdout(
     assert json.loads(captured.out)["object_count"] == 2
 
 
+def test_cli_passes_the_compressor_settings_to_estimate_and_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = _csv(tmp_path)
+    settings = ["--compressor", "ppmd", "--ppmd-order", "8", "--ppmd-memory-bytes", "1048576"]
+    assert main(["estimate", str(source), "--workers", "2", "--json", *settings]) == 0
+    deflate = ["estimate", str(source), "--workers", "2", "--json", "--compressor", "zlib"]
+    estimated = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
+    assert main(deflate) == 0
+    assert estimated - json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"] == (
+        2 * 1_048_576
+    )
+    output = tmp_path / "run"
+    run_arguments = ["run", str(source), "--workers", "1", "--no-progress", *settings]
+    assert main([*run_arguments, "--output-dir", str(output)]) == 0
+    config = json.loads((output / "manifest.json").read_text(encoding="utf-8"))["config"]
+    assert (config["ppmd_order"], config["ppmd_memory_bytes"]) == (8, 1_048_576)
+    capsys.readouterr()
+    assert main(["run", str(source), "--compression-level", "9", "--no-progress"]) == 2
+    assert "compression_level does not apply to ppmd" in capsys.readouterr().err
+
+
 def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "run"

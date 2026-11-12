@@ -110,6 +110,33 @@ def _parser() -> argparse.ArgumentParser:
             type=int,
             help="worker processes for the distance stage; omit to choose automatically",
         )
+        # The compressor decides the distances and, through the PPMd model each worker
+        # holds, the memory a run needs, so estimate takes it as well as run.
+        command.add_argument(
+            "--compressor",
+            choices=("ppmd", "zlib", "gzip"),
+            default="ppmd",
+            help="compressor backing the NCD measurement; zlib and gzip see a 32 KiB window "
+            "(default: ppmd)",
+        )
+        command.add_argument(
+            "--compression-level",
+            type=int,
+            help="zlib or gzip level from 0 to 9; changes the distances, so it identifies a "
+            "run (default: 6)",
+        )
+        command.add_argument(
+            "--ppmd-order",
+            type=int,
+            help="PPMd model order from 2 to 64; changes the distances (default: 6)",
+        )
+        command.add_argument(
+            "--ppmd-memory-bytes",
+            type=int,
+            help="PPMd model memory per worker, from 2048 to 4294967259 bytes; changes the "
+            "distances and is charged once per worker against the memory limit "
+            "(default: 67108864)",
+        )
         command.add_argument(
             "--max-objects",
             type=int,
@@ -157,19 +184,6 @@ def _parser() -> argparse.ArgumentParser:
         help="write the estimate to stdout as one JSON document instead of to stderr",
     )
     run_parser = commands.choices["run"]
-    run_parser.add_argument(
-        "--compressor",
-        choices=("zlib", "gzip"),
-        default="zlib",
-        help="compressor backing the NCD measurement (default: zlib)",
-    )
-    run_parser.add_argument(
-        "--compression-level",
-        type=int,
-        default=6,
-        help="compression level from 0 to 9; changes the distances, so it identifies a run "
-        "(default: 6)",
-    )
     run_parser.add_argument(
         "--clusters",
         type=int,
@@ -229,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
     include_hidden: bool | None = arguments.include_hidden
     keep_normalized: bool = arguments.keep_normalized
     save_diagnostics: bool = arguments.save_diagnostics
+    compressor: str = arguments.compressor
+    compression_level: int | None = arguments.compression_level
+    ppmd_order: int | None = arguments.ppmd_order
+    ppmd_memory_bytes: int | None = arguments.ppmd_memory_bytes
     result: DamicoreResult | None = None
     try:
         # ResourceLimits and ExecutionConfig own the bounds behind these flags, so building
@@ -248,6 +266,10 @@ def main(argv: list[str] | None = None) -> int:
                 sheet=sheet,
                 recursive=recursive,
                 include_hidden=include_hidden,
+                compressor=compressor,
+                compression_level=compression_level,
+                ppmd_order=ppmd_order,
+                ppmd_memory_bytes=ppmd_memory_bytes,
                 keep_normalized=keep_normalized,
                 save_diagnostics=save_diagnostics,
                 execution=execution,
@@ -262,8 +284,6 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
         else:
-            compressor: str = arguments.compressor
-            compression_level: int = arguments.compression_level
             num_clusters: int | None = arguments.clusters
             output_dir: str | None = arguments.output_dir
             result = run(
@@ -280,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
                 execution=execution,
                 compressor=compressor,
                 compression_level=compression_level,
+                ppmd_order=ppmd_order,
+                ppmd_memory_bytes=ppmd_memory_bytes,
                 num_clusters=num_clusters,
                 output_dir=output_dir,
                 progress=not arguments.no_progress,

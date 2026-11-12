@@ -31,6 +31,7 @@ RESUME_FINGERPRINT_KEYS = (
     "igraph",
     "zlib_build",
     "zlib_runtime",
+    "pyppmd",
 )
 
 
@@ -58,6 +59,7 @@ def runtime_fingerprint() -> dict[str, str]:
         "tqdm": version("tqdm"),
         "zlib_build": zlib.ZLIB_VERSION,
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        "pyppmd": version("pyppmd"),
         **versions,
     }
 

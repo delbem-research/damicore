@@ -366,6 +366,20 @@ carries anything else, a date included, matches neither and fails the release.
   bounds is refused because the codec would clamp it silently. The `pyppmd` version joins
   the checkpoint identity, so a checkpoint from another codec build is refused. See ADR
   0020.
+- **`damicore.run`, `damicore.estimate` and both CLI commands use PPMd by default.**
+  `compressor` defaults to `"ppmd"`, and `ppmd_order` and `ppmd_memory_bytes` join
+  `compression_level`, which now defaults to `None`, meaning the compressor's own default.
+  `run(compression_level=9)` with no compressor is therefore refused, since PPMd has no
+  level; pass `compressor="zlib"` with it. `estimate` takes the same four arguments,
+  because preflight now charges the PPMd model once per worker against
+  `max_working_memory_bytes` -- four workers at the default fit the default limit -- and
+  `--compressor`, `--compression-level`, `--ppmd-order` and `--ppmd-memory-bytes` apply to
+  `damicore estimate` as well as `damicore run`. The manifest records each compressor's
+  settings only where it reads them and `None` elsewhere; the two PPMd fields are additive,
+  so a 0.3 manifest still loads. Every default run hashes to a new run directory, and the
+  `pyppmd` version joins the resume fingerprint, so an incomplete run from an earlier build
+  is not resumed. `DistanceConfig.compressor_settings` is the one statement of which
+  settings a compressor reads, and the orchestrator records and charges from it.
 - Every distribution's `Documentation` URL now points at the published site,
   `https://delbem-research.github.io/damicore/`, rather than at one Markdown file in the
   repository. The README links it too.

@@ -92,6 +92,10 @@ def test_resume_fingerprint_projects_only_the_compat_subset() -> None:
     incompatible = {**full, "numpy": "0.0.0"}
     assert resume_fingerprint(incompatible) != resume_fingerprint(full)
 
+    # The codec that measured the checkpointed sizes, like zlib, is part of resumability.
+    another_codec = {**full, "pyppmd": "0.0.0"}
+    assert resume_fingerprint(another_codec) != resume_fingerprint(full)
+
 
 def test_incomplete_run_resumes_despite_environment_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

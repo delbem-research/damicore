@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
+from damicore_distance import DistanceConfig
 from damicore_normalizer import NormalizationConfig, NormalizerError
 from damicore_normalizer.api import scan_source
 from damicore_normalizer.config import ObjectSource
@@ -78,6 +79,7 @@ def preflight(
     object_source: ObjectSource,
     save_diagnostics: bool,
     execution: ExecutionConfig,
+    distance: DistanceConfig,
     disk_target: Path,
 ) -> ResourceEstimate:
     """Project a run's exact cost by performing the run's own traversal without writing.
@@ -119,9 +121,14 @@ def preflight(
         scan.total_bytes + 2 * matrix_bytes + checkpoint_bytes + metadata_bytes + diagnostic_bytes
     )
     required_disk = math.ceil(artifact_bytes * execution.limits.required_free_disk_factor)
+    # Every worker holds one PPMd model, which fills to its configured size on incompressible
+    # data, so that size is charged rather than any multiple of the object bytes. DEFLATE's
+    # state, near 256 KiB (ADR 0005), has never been charged.
+    model_bytes = distance.compressor_settings.get("ppmd_memory_bytes", 0)
     working_memory = max(
         6 * scan.max_serialized_chunk_bytes,
-        execution.effective_workers * 2 * execution.compression_chunk_bytes + pairs_per_shard * 24,
+        execution.effective_workers * (2 * execution.compression_chunk_bytes + model_bytes)
+        + pairs_per_shard * 24,
     )
     existing = disk_target
     while not existing.exists() and existing != existing.parent:

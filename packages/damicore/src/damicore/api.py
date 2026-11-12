@@ -130,12 +130,50 @@ def _validated_split(split: str) -> Literal["columns", "rows"]:
     raise ConfigurationError("split must be exactly 'columns' or 'rows'")
 
 
-def _validated_compressor(compressor: str) -> Literal["zlib", "gzip"]:
+def _validated_compressor(compressor: str) -> Literal["ppmd", "zlib", "gzip"]:
+    if compressor == "ppmd":
+        return "ppmd"
     if compressor == "zlib":
         return "zlib"
     if compressor == "gzip":
         return "gzip"
-    raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
+    raise ConfigurationError("compressor must be exactly 'ppmd', 'zlib' or 'gzip'")
+
+
+def _distance_config(
+    compressor: str,
+    *,
+    compression_level: int | None,
+    ppmd_order: int | None,
+    ppmd_memory_bytes: int | None,
+    execution: ExecutionConfig,
+    save_diagnostics: bool,
+) -> DistanceConfig:
+    # Only the settings the caller wrote are passed on, so the stage config both defaults
+    # the rest and refuses one written for a compressor that does not read it.
+    written = {
+        name: value
+        for name, value in (
+            ("compression_level", compression_level),
+            ("ppmd_order", ppmd_order),
+            ("ppmd_memory_bytes", ppmd_memory_bytes),
+        )
+        if value is not None
+    }
+    try:
+        return DistanceConfig.model_validate(
+            {
+                "compressor": _validated_compressor(compressor),
+                "compression_chunk_bytes": execution.compression_chunk_bytes,
+                "workers": execution.effective_workers,
+                "pairs_per_shard": execution.pairs_per_shard,
+                "resume": execution.resume,
+                "save_diagnostics": save_diagnostics,
+                **written,
+            }
+        )
+    except ValidationError as exc:
+        raise ConfigurationError(str(exc)) from exc
 
 
 # Which arguments belong to which source, derived from the models that define them rather
@@ -218,6 +256,10 @@ def estimate(
     sheet: str | None = None,
     recursive: bool | None = None,
     include_hidden: bool | None = None,
+    compressor: str = "ppmd",
+    compression_level: int | None = None,
+    ppmd_order: int | None = None,
+    ppmd_memory_bytes: int | None = None,
     keep_normalized: bool = False,
     save_diagnostics: bool = False,
     execution: ExecutionConfig | None = None,
@@ -241,6 +283,10 @@ def estimate(
         Exactly ``"columns"`` or ``"rows"``, defaulting to ``"columns"``. It decides what one
         object is for a dataset, and therefore the object count that every resource gate is
         quadratic or cubic in. It does not apply to ``"files"``, where each file is an object.
+    compressor, compression_level, ppmd_order, ppmd_memory_bytes
+        As for :func:`run`, and validated the same way. The compressor decides the memory
+        every worker holds -- a PPMd model of ``ppmd_memory_bytes`` -- which the
+        working-memory projection charges once per worker.
     keep_normalized
         Accepted for parity with :func:`run` and deliberately ignored: object bytes exist on
         disk while a run is in progress either way, so they are always counted.
@@ -278,12 +324,21 @@ def estimate(
         include_hidden=include_hidden,
     )
     _normalization_config(object_source, settings)
+    distance_config = _distance_config(
+        compressor,
+        compression_level=compression_level,
+        ppmd_order=ppmd_order,
+        ppmd_memory_bytes=ppmd_memory_bytes,
+        execution=settings,
+        save_diagnostics=save_diagnostics,
+    )
     del keep_normalized
     return preflight(
         source,
         object_source=object_source,
         save_diagnostics=save_diagnostics,
         execution=settings,
+        distance=distance_config,
         disk_target=Path.cwd() / "damicore-results",
     )
 
@@ -291,8 +346,7 @@ def estimate(
 def _config_payload(
     *,
     object_source: ObjectSource,
-    compressor: str,
-    compression_level: int,
+    distance: DistanceConfig,
     num_clusters: int | None,
     keep_normalized: bool,
     save_diagnostics: bool,
@@ -312,8 +366,12 @@ def _config_payload(
         "sheet": described.get("sheet"),
         "recursive": described.get("recursive"),
         "include_hidden": described.get("include_hidden"),
-        "compressor": compressor,
-        "compression_level": compression_level,
+        # A setting the compressor does not read is recorded as None, so it neither enters
+        # the hash nor reads as a choice that had an effect.
+        "compressor": distance.compressor,
+        "compression_level": distance.compressor_settings.get("compression_level"),
+        "ppmd_order": distance.compressor_settings.get("ppmd_order"),
+        "ppmd_memory_bytes": distance.compressor_settings.get("ppmd_memory_bytes"),
         "num_clusters": num_clusters,
         "keep_normalized": keep_normalized,
         "save_diagnostics": save_diagnostics,
@@ -565,8 +623,10 @@ def run(
     sheet: str | None = None,
     recursive: bool | None = None,
     include_hidden: bool | None = None,
-    compressor: str = "zlib",
-    compression_level: int = 6,
+    compressor: str = "ppmd",
+    compression_level: int | None = None,
+    ppmd_order: int | None = None,
+    ppmd_memory_bytes: int | None = None,
     num_clusters: int | None = None,
     output_dir: str | Path | None = None,
     keep_normalized: bool = False,
@@ -612,8 +672,19 @@ def run(
         How a ``"files"`` source is enumerated. Both are recorded in the manifest, so a corpus
         can be reconstructed from the run rather than from the command that produced it.
     compressor
-        Exactly ``"zlib"`` or ``"gzip"``. NCD values are compressor-dependent, so changing it
-        changes the run identity and the results, not merely their cost.
+        Exactly ``"ppmd"``, the default, ``"zlib"`` or ``"gzip"``. NCD values are
+        compressor-dependent, so changing it changes the run identity and the results, not
+        merely their cost. ``"ppmd"`` is PPMd variant I, the original DAMICORE compressor;
+        ``"zlib"`` and ``"gzip"`` see a 32 KiB window, past which objects look unrelated
+        whatever they are. See ADR 0020.
+    compression_level, ppmd_order, ppmd_memory_bytes
+        The settings of the chosen compressor: ``compression_level`` (0 to 9, default 6) for
+        ``"zlib"`` and ``"gzip"``; ``ppmd_order`` (2 to 64, default 6) and
+        ``ppmd_memory_bytes`` (2048 to 4294967259, default 67108864) for ``"ppmd"``. ``None``
+        uses the default. A setting for a compressor that does not read it is a
+        ``ConfigurationError``, never ignored, and every setting in force enters the run
+        identity. Each worker holds one PPMd model, and preflight charges its full size per
+        worker against ``max_working_memory_bytes``.
     num_clusters
         ``None`` lets FastGreedy choose the cut. Otherwise the upper bound is the object count
         this source produces, which is only known after preflight, so an oversized value is
@@ -685,18 +756,16 @@ def run(
         recursive=recursive,
         include_hidden=include_hidden,
     )
-    checked_compressor = _validated_compressor(compressor)
     normalization_config = _normalization_config(object_source, settings)
+    distance_config = _distance_config(
+        compressor,
+        compression_level=compression_level,
+        ppmd_order=ppmd_order,
+        ppmd_memory_bytes=ppmd_memory_bytes,
+        execution=settings,
+        save_diagnostics=save_diagnostics,
+    )
     try:
-        distance_config = DistanceConfig(
-            compressor=checked_compressor,
-            compression_level=compression_level,
-            compression_chunk_bytes=settings.compression_chunk_bytes,
-            workers=settings.effective_workers,
-            pairs_per_shard=settings.pairs_per_shard,
-            resume=settings.resume,
-            save_diagnostics=save_diagnostics,
-        )
         cluster_config = ClusterConfig(num_clusters=num_clusters)
         tree_config = TreeBuildConfig()
     except ValidationError as exc:
@@ -710,6 +779,7 @@ def run(
         object_source=object_source,
         save_diagnostics=save_diagnostics,
         execution=settings,
+        distance=distance_config,
         disk_target=target_hint,
     )
     logger.info(
@@ -732,8 +802,7 @@ def run(
     pairs_per_shard = settings.effective_pairs_per_shard(preview.pair_count)
     config = _config_payload(
         object_source=object_source,
-        compressor=compressor,
-        compression_level=compression_level,
+        distance=distance_config,
         num_clusters=num_clusters,
         keep_normalized=keep_normalized,
         save_diagnostics=save_diagnostics,

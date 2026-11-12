@@ -263,9 +263,9 @@ def test_save_rejects_a_tampered_inventory(tmp_path: Path, tamper: str, discrimi
     result.close()
 
 
-@pytest.mark.parametrize("compressor", ["zlib", "gzip"])
-def test_both_compressors_complete_a_run(tmp_path: Path, compressor: str) -> None:
-    """gzip is a documented public option that no test had ever executed."""
+@pytest.mark.parametrize("compressor", ["ppmd", "zlib", "gzip"])
+def test_every_compressor_completes_a_run(tmp_path: Path, compressor: str) -> None:
+    """Each documented compressor is executed end to end, not only the default."""
     result = run(
         _csv(tmp_path),
         output_dir=tmp_path / compressor,
@@ -278,6 +278,78 @@ def test_both_compressors_complete_a_run(tmp_path: Path, compressor: str) -> Non
         assert result.distance_matrix.shape[0] == len(result.membership)
     finally:
         result.close()
+
+
+@pytest.mark.parametrize(
+    ("chosen", "recorded"),
+    [
+        pytest.param(
+            {},
+            {
+                "compressor": "ppmd",
+                "compression_level": None,
+                "ppmd_order": 6,
+                "ppmd_memory_bytes": 67_108_864,
+            },
+            id="default",
+        ),
+        pytest.param(
+            {"compressor": "zlib"},
+            {
+                "compressor": "zlib",
+                "compression_level": 6,
+                "ppmd_order": None,
+                "ppmd_memory_bytes": None,
+            },
+            id="zlib",
+        ),
+    ],
+)
+def test_the_manifest_records_the_compressor_settings_in_force_and_only_those(
+    tmp_path: Path, chosen: dict[str, str], recorded: dict[str, object]
+) -> None:
+    """A setting the compressor does not read is recorded as `None`, so it neither enters
+    the configuration hash nor suggests a choice that had no effect."""
+    output = tmp_path / "run"
+    run(
+        _csv(tmp_path),
+        output_dir=output,
+        progress=False,
+        execution=ExecutionConfig(workers=1),
+        **chosen,  # pyright: ignore[reportArgumentType]
+    ).close()
+    config = json.loads((output / "manifest.json").read_text(encoding="utf-8"))["config"]
+    assert {name: config[name] for name in recorded} == recorded
+
+
+def test_ppmd_settings_are_part_of_the_run_identity(tmp_path: Path) -> None:
+    source = _csv(tmp_path)
+    hashes: list[str] = []
+    for order in (6, 8):
+        output = tmp_path / f"order-{order}"
+        run(
+            source,
+            output_dir=output,
+            ppmd_order=order,
+            progress=False,
+            execution=ExecutionConfig(workers=1),
+        ).close()
+        hashes.append(json.loads((output / "manifest.json").read_text())["config_hash"])
+    assert hashes[0] != hashes[1]
+
+
+def test_preflight_charges_the_ppmd_model_once_per_worker(tmp_path: Path) -> None:
+    """The model can fill to its configured size on incompressible data, and every worker
+    holds one, so the projection charges the configured size per worker -- and the default
+    fits the default limit at the four workers "auto" resolves to at most."""
+    source = _csv(tmp_path)
+    workers = ExecutionConfig(workers=4)
+    base = estimate(source, ppmd_memory_bytes=1 << 20, execution=workers)
+    grown = estimate(source, ppmd_memory_bytes=(1 << 20) + 1_000, execution=workers)
+    deflate = estimate(source, compressor="zlib", execution=workers)
+    assert grown.estimated_working_memory_bytes - base.estimated_working_memory_bytes == 4_000
+    assert base.estimated_working_memory_bytes - deflate.estimated_working_memory_bytes == 4 << 20
+    assert estimate(source, execution=workers).within_limits
 
 
 def test_diagnostics_are_written_when_requested(tmp_path: Path) -> None:
@@ -325,7 +397,18 @@ def test_an_unexpected_failure_names_its_cause_in_the_report(
 @pytest.mark.parametrize(
     ("kwargs", "discriminator"),
     [
-        pytest.param({"compressor": "bz2"}, "zlib' or 'gzip", id="unknown-compressor"),
+        pytest.param({"compressor": "bz2"}, "'ppmd', 'zlib' or 'gzip'", id="unknown-compressor"),
+        pytest.param(
+            {"compression_level": 9},
+            "compression_level does not apply to ppmd",
+            id="level-for-ppmd",
+        ),
+        pytest.param(
+            {"compressor": "zlib", "ppmd_order": 8},
+            "ppmd_order does not apply to zlib",
+            id="ppmd-setting-for-zlib",
+        ),
+        pytest.param({"ppmd_memory_bytes": 1}, "ppmd_memory_bytes", id="ppmd-memory-clamped"),
         pytest.param({"num_clusters": 0}, "num_clusters", id="cluster-count-below-one"),
         pytest.param({"split": "diagonal"}, "split", id="unknown-split"),
     ],

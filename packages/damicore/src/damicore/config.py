@@ -14,7 +14,8 @@ class ResourceLimits(BaseModel):
     cubic in the object count, so a limit lifted without that check buys a run that does not
     finish. Two gates are less visible than the object, pair, and matrix caps.
     ``max_working_memory_bytes`` bounds the peak RAM the distance stage is projected to need
-    from the largest serialized chunk, the worker count, and the shard size.
+    from the largest serialized chunk, the worker count, the shard size, and the PPMd model
+    each worker holds, charged at its configured size.
     ``required_free_disk_factor`` is the headroom multiplier applied to the projected artifact
     bytes; the free-disk check it produces is enforced no matter how the limits are set.
     """

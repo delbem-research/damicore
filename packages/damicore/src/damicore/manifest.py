@@ -76,8 +76,12 @@ class RunConfig(BaseModel):
     sheet: str | None
     recursive: bool | None
     include_hidden: bool | None
-    compressor: Literal["zlib", "gzip"]
-    compression_level: int = Field(ge=0, le=9)
+    compressor: Literal["ppmd", "zlib", "gzip"]
+    # Each compressor's settings are recorded only where it reads them, `None` elsewhere. The
+    # PPMd pair defaults to `None` because a run written before PPMd records neither.
+    compression_level: int | None = Field(ge=0, le=9)
+    ppmd_order: int | None = Field(default=None, ge=2, le=64)
+    ppmd_memory_bytes: int | None = Field(default=None, ge=2_048, le=4_294_967_259)
     num_clusters: int | None = Field(default=None, ge=1)
     keep_normalized: bool
     save_diagnostics: bool
