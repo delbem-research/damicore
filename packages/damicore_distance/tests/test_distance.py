@@ -310,7 +310,7 @@ def test_auto_shard_size_spreads_pairs_over_enough_shards_to_feed_every_worker(
 
 def test_an_explicit_shard_size_is_used_as_given_and_must_be_positive() -> None:
     assert DistanceConfig(pairs_per_shard=7).effective_pairs_per_shard(1_000) == 7
-    with pytest.raises(ValueError, match="greater than 0"):
+    with pytest.raises(ValueError, match="pairs_per_shard must be at least one"):
         DistanceConfig(pairs_per_shard=0)
 
 

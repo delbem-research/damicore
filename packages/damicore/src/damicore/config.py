@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated, Literal
+from typing import Literal
 
 from damicore_distance import DistanceConfig
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class ResourceLimits(BaseModel):
@@ -44,17 +44,17 @@ class ExecutionConfig(BaseModel):
     workers: int | Literal["auto"] = "auto"
     csv_chunk_rows: int = Field(default=50_000, gt=0)
     compression_chunk_bytes: int = Field(default=4_194_304, gt=0)
-    pairs_per_shard: Annotated[int, Field(gt=0)] | Literal["auto"] = "auto"
+    pairs_per_shard: int | Literal["auto"] = "auto"
     resume: bool = True
     reuse_completed: bool = True
     pandas_materialization_limit_bytes: int = Field(default=268_435_456, gt=0)
     limits: ResourceLimits = Field(default_factory=ResourceLimits)
 
-    @field_validator("workers")
+    @field_validator("workers", "pairs_per_shard")
     @classmethod
-    def _validate_workers(cls, value: int | str) -> int | str:
+    def _validate_positive_or_auto(cls, value: int | str, info: ValidationInfo) -> int | str:
         if isinstance(value, int) and value < 1:
-            raise ValueError("workers must be at least one")
+            raise ValueError(f"{info.field_name} must be at least one")
         return value
 
     @property
