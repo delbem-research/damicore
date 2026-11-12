@@ -94,7 +94,8 @@ def preflight(
     objects = len(scan.objects)
     pairs = objects * (objects - 1) // 2
     matrix_bytes = objects * objects * 8
-    checkpoint_bytes = math.ceil(pairs / execution.pairs_per_shard) * 256
+    pairs_per_shard = execution.effective_pairs_per_shard(pairs)
+    checkpoint_bytes = math.ceil(pairs / pairs_per_shard) * 256
     label_bytes = sum(len(item.label.encode("utf-8")) for item in scan.objects)
     metadata_bytes = 1_048_576 + objects * 4_096 + 8 * label_bytes
     diagnostic_bytes = (
@@ -106,8 +107,7 @@ def preflight(
     required_disk = math.ceil(artifact_bytes * execution.limits.required_free_disk_factor)
     working_memory = max(
         6 * scan.max_serialized_chunk_bytes,
-        execution.effective_workers * 2 * execution.compression_chunk_bytes
-        + execution.pairs_per_shard * 24,
+        execution.effective_workers * 2 * execution.compression_chunk_bytes + pairs_per_shard * 24,
     )
     existing = disk_target
     while not existing.exists() and existing != existing.parent:

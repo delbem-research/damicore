@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import Annotated, Literal
 
+from damicore_distance import DistanceConfig
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -34,7 +35,8 @@ class ExecutionConfig(BaseModel):
     exact and deterministic under any of them. They do change run identity -- every field
     except ``resume`` and ``reuse_completed`` enters the configuration hash that names the
     default output directory, so ``workers="auto"`` resolving differently on another machine
-    produces a different run rather than resuming the existing one.
+    produces a different run rather than resuming the existing one. ``pairs_per_shard="auto"``
+    resolves from the pair count alone, so it names the same run on every machine.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -42,7 +44,7 @@ class ExecutionConfig(BaseModel):
     workers: int | Literal["auto"] = "auto"
     csv_chunk_rows: int = Field(default=50_000, gt=0)
     compression_chunk_bytes: int = Field(default=4_194_304, gt=0)
-    pairs_per_shard: int = Field(default=10_000, gt=0)
+    pairs_per_shard: Annotated[int, Field(gt=0)] | Literal["auto"] = "auto"
     resume: bool = True
     reuse_completed: bool = True
     pandas_materialization_limit_bytes: int = Field(default=268_435_456, gt=0)
@@ -60,3 +62,11 @@ class ExecutionConfig(BaseModel):
         if isinstance(self.workers, int):
             return self.workers
         return min(4, max(1, (os.cpu_count() or 1) - 1))
+
+    def effective_pairs_per_shard(self, pair_count: int) -> int:
+        # The distance stage owns the rule, and it is the stage that lays the shards out:
+        # resolving through it keeps what preflight projects and the manifest records equal
+        # to what the stage runs.
+        return DistanceConfig(pairs_per_shard=self.pairs_per_shard).effective_pairs_per_shard(
+            pair_count
+        )

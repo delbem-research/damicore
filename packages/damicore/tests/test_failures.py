@@ -129,6 +129,9 @@ def test_failed_stage_is_reported_and_resumed(
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed"
     assert report["failed_stage"] == "clusterizing"
+    # The diagnostic report states the shard size the run used, not the model's default.
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert report["pairs_per_shard"] == manifest["config"]["pairs_per_shard"] == 1
 
     monkeypatch.setattr(api, "cluster_tree", original)
     result = run(source, output_dir=output, progress=False, execution=ExecutionConfig(workers=1))

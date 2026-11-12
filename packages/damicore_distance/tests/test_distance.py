@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
@@ -293,6 +294,36 @@ def test_workers_below_one_is_rejected_and_auto_resolves_to_a_positive_count() -
         DistanceConfig(workers=0)
     assert DistanceConfig(workers="auto").effective_workers >= 1
     assert DistanceConfig(workers=3).effective_workers == 3
+
+
+@pytest.mark.parametrize("pair_count", [1, 2, 63, 64, 127, 128, 6_399, 640_000, 10**8])
+def test_auto_shard_size_spreads_pairs_over_enough_shards_to_feed_every_worker(
+    pair_count: int,
+) -> None:
+    """One shard occupies one worker, so a run of few, large objects -- few pairs -- must still
+    split into many shards. The cap keeps a shard's result payload and its checkpoint cost
+    bounded at the other end."""
+    size = DistanceConfig().effective_pairs_per_shard(pair_count)
+    assert 1 <= size <= 10_000
+    assert math.ceil(pair_count / size) >= min(pair_count, 64)
+
+
+def test_an_explicit_shard_size_is_used_as_given_and_must_be_positive() -> None:
+    assert DistanceConfig(pairs_per_shard=7).effective_pairs_per_shard(1_000) == 7
+    with pytest.raises(ValueError, match="greater than 0"):
+        DistanceConfig(pairs_per_shard=0)
+
+
+def test_the_default_shard_size_gives_a_small_run_one_shard_per_pair(tmp_path: Path) -> None:
+    normalized = _normalized(tmp_path)
+    compute_distance_matrix(
+        normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=1)
+    )
+    checkpoint = json.loads(
+        (tmp_path / "out" / "checkpoints" / "distance-shards.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["pair_count"] == 3
+    assert checkpoint["shard_count"] == 3
 
 
 def test_an_unreadable_object_is_reported_as_a_compression_error(tmp_path: Path) -> None:

@@ -503,7 +503,8 @@ def compute_distance_matrix(
     )
 
     pair_count = len(paths) * (len(paths) - 1) // 2
-    shard_count = math.ceil(pair_count / settings.pairs_per_shard)
+    pairs_per_shard = settings.effective_pairs_per_shard(pair_count)
+    shard_count = math.ceil(pair_count / pairs_per_shard)
     matrix_path = destination / "distance.npy"
     matrix = _open_matrix(matrix_path, len(paths), resume=settings.resume)
     shard_checkpoint = checkpoints / "distance-shards.json"
@@ -515,7 +516,7 @@ def compute_distance_matrix(
         resume=settings.resume,
     )
     completed_pairs = 0
-    for index, shard in iter_pair_shards(len(paths), settings.pairs_per_shard):
+    for index, shard in iter_pair_shards(len(paths), pairs_per_shard):
         if index in completed_shards:
             _validate_completed_shard(matrix, shard)
             if _shard_digest(matrix, shard) != completed_shards[index]:
@@ -537,7 +538,7 @@ def compute_distance_matrix(
             settings.compression_level,
             settings.compression_chunk_bytes,
         )
-        for index, shard in iter_pair_shards(len(paths), settings.pairs_per_shard)
+        for index, shard in iter_pair_shards(len(paths), pairs_per_shard)
         if index not in completed_shards
     )
     if progress is not None:

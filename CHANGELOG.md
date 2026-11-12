@@ -230,6 +230,18 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Fixed
 
+- The distance stage ran on one worker whatever `workers` said whenever a run had at most
+  10,000 pairs -- 141 objects or fewer -- because the default `pairs_per_shard=10000` made
+  the whole run one shard, and one shard occupies one worker. A checkpoint then covered all
+  of the run or none of it. Few, large objects is the shape of large-data runs, so this hit
+  them hardest: 16 objects of 0.8 MB took 6.2 s on four workers against 5.5 s on one.
+  `pairs_per_shard` now defaults to `"auto"` in both `DistanceConfig` and `ExecutionConfig`,
+  resolved by `DistanceConfig.effective_pairs_per_shard` to at least 64 shards, or one per
+  pair below that, and never more than 10,000 pairs per shard. It depends on the pair count
+  alone, so it never changes a run's identity from one machine to another. The manifest
+  and `report.json`, the failure report included, record the resolved size, and preflight
+  projects checkpoint and memory cost from it. A default run therefore hashes to a new run directory, and a 0.3 run directory is
+  recomputed rather than reused; an explicit integer behaves exactly as before.
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
   rules with that version. 0.3.0 shipped and 0.4.0 is in this changelog, so the file
   governed two releases it did not name. The qualifier is removed rather than bumped,

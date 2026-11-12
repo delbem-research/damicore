@@ -25,8 +25,8 @@ rather than quietly compress as something else, because every NCD value is a fun
 this window.
 
 Defaults, from `DistanceConfig`: `compressor="zlib"`, `compression_level=6`,
-`compression_chunk_bytes=4194304`, `pairs_per_shard=10000`, `workers="auto"`,
-`resume=True`.
+`compression_chunk_bytes=4194304`, `pairs_per_shard="auto"`, `workers="auto"`,
+`resume=True`. Neither execution setting changes an NCD value.
 
 ## What the definition comes from
 

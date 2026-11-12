@@ -60,6 +60,25 @@ def test_complete_pipeline_reuse_save_and_load(tmp_path: Path, split: str) -> No
     reused.close()
 
 
+def test_the_default_shard_size_is_resolved_from_the_pair_count_and_recorded(
+    tmp_path: Path,
+) -> None:
+    """The run records the shard size the distance stage actually used, not the "auto" it
+    was asked for, so the configuration hash names the layout of its checkpoints."""
+    output = tmp_path / "run"
+    result = run(
+        _csv(tmp_path), output_dir=output, progress=False, execution=ExecutionConfig(workers=1)
+    )
+    result.close()
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    shards = json.loads(
+        (output / "checkpoints" / "distance-shards.json").read_text(encoding="utf-8")
+    )
+    assert manifest["config"]["pairs_per_shard"] == 1
+    assert result.report.pairs_per_shard == 1
+    assert shards["shard_count"] == shards["pair_count"] == 3
+
+
 def test_limits_materialization_and_corruption(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     limited = estimate(

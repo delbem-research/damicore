@@ -297,6 +297,7 @@ def _config_payload(
     keep_normalized: bool,
     save_diagnostics: bool,
     execution: ExecutionConfig,
+    pairs_per_shard: int,
 ) -> dict[str, object]:
     # Flattened from the source model rather than restated: the union owns which settings
     # exist for which kind, and a setting that does not apply records `None` instead of a
@@ -319,7 +320,7 @@ def _config_payload(
         "workers": execution.effective_workers,
         "csv_chunk_rows": execution.csv_chunk_rows,
         "compression_chunk_bytes": execution.compression_chunk_bytes,
-        "pairs_per_shard": execution.pairs_per_shard,
+        "pairs_per_shard": pairs_per_shard,
         "pandas_materialization_limit_bytes": execution.pandas_materialization_limit_bytes,
         "limits": execution.limits.model_dump(mode="json"),
     }
@@ -421,6 +422,7 @@ def _write_failure(
     error: BaseException,
     *,
     interrupted: bool,
+    pairs_per_shard: int,
 ) -> None:
     status = "interrupted" if interrupted else "failed"
     code = getattr(error, "code", type(error).__name__)
@@ -435,6 +437,7 @@ def _write_failure(
         object_count=preview.object_count,
         pair_count=preview.pair_count,
         effective_workers=preview.effective_workers,
+        pairs_per_shard=pairs_per_shard,
         matrix_bytes=preview.matrix_bytes,
         required_free_disk_bytes=preview.required_free_disk_bytes,
         peak_rss_bytes=_peak_rss(),
@@ -726,6 +729,7 @@ def run(
             f"num_clusters must be between 1 and the {preview.object_count} objects this "
             f"{source_kind} source produces; got {num_clusters}"
         )
+    pairs_per_shard = settings.effective_pairs_per_shard(preview.pair_count)
     config = _config_payload(
         object_source=object_source,
         compressor=compressor,
@@ -734,6 +738,7 @@ def run(
         keep_normalized=keep_normalized,
         save_diagnostics=save_diagnostics,
         execution=settings,
+        pairs_per_shard=pairs_per_shard,
     )
     config_hash, run_id = _identity(preview.input_sha256, config)
     run_dir = (
@@ -1009,7 +1014,7 @@ def run(
             effective_workers=settings.effective_workers,
             csv_chunk_rows=settings.csv_chunk_rows,
             compression_chunk_bytes=settings.compression_chunk_bytes,
-            pairs_per_shard=settings.pairs_per_shard,
+            pairs_per_shard=pairs_per_shard,
             matrix_bytes=preview.matrix_bytes,
             required_free_disk_bytes=preview.required_free_disk_bytes,
             peak_rss_bytes=_peak_rss(),
@@ -1047,15 +1052,30 @@ def run(
             current_stage,
             exc,
             interrupted=True,
+            pairs_per_shard=pairs_per_shard,
         )
         raise
     except DamicoreError as exc:
         logger.error("run_failed", extra={"run_id": run_id, "stage": current_stage})
-        _write_failure(journal, preview, current_stage, exc, interrupted=False)
+        _write_failure(
+            journal,
+            preview,
+            current_stage,
+            exc,
+            interrupted=False,
+            pairs_per_shard=pairs_per_shard,
+        )
         raise
     except (NormalizerError, DistanceError, TreeBuilderError, ClusterizerError) as exc:
         translated = _translated_stage_error(exc, current_stage)
-        _write_failure(journal, preview, current_stage, translated, interrupted=False)
+        _write_failure(
+            journal,
+            preview,
+            current_stage,
+            translated,
+            interrupted=False,
+            pairs_per_shard=pairs_per_shard,
+        )
         logger.error("stage_failed", extra={"run_id": run_id, "stage": current_stage})
         raise translated from exc
     except Exception as exc:
@@ -1064,7 +1084,14 @@ def run(
         translated = DamicoreError(
             f"Pipeline failed during {current_stage}: {type(exc).__name__}: {exc}"
         )
-        _write_failure(journal, preview, current_stage, translated, interrupted=False)
+        _write_failure(
+            journal,
+            preview,
+            current_stage,
+            translated,
+            interrupted=False,
+            pairs_per_shard=pairs_per_shard,
+        )
         raise translated from exc
 
 
