@@ -16,3 +16,13 @@ The supported large-input shape is many input bytes but a moderate object
 count, typically columns. Splitting a large file into rows can create millions
 of objects and is deliberately rejected, and so is a directory holding more
 files than the object cap allows.
+
+In that shape the cost is compression, not the object count. Every object is
+compressed once and every pair once more, so the distance stage feeds its
+compressor `n` times the object bytes: 50 columns of 20 MB are 50 GB of
+compressor input. `estimate` reports that figure exactly as
+`compression_input_bytes`, which a measured compressor throughput turns into
+time, and `max_pair_bytes`, the longest concatenation the compressor must hold
+for an NCD value to see across a pair. Neither is a gate. The work is split
+into at least 64 shards whatever the object count, so every worker has work
+even when a few large objects make few pairs.

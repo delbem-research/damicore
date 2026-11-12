@@ -592,3 +592,16 @@ def test_a_manifest_written_before_provenance_still_loads(tmp_path: Path) -> Non
     loaded = RunManifest.model_validate_json(json.dumps(manifest))
     assert loaded.method is None
     assert loaded.schema_version == 2
+
+
+def test_a_manifest_written_before_the_compression_estimate_still_loads(tmp_path: Path) -> None:
+    """The estimate is persisted, so its two compression figures are additive like `method`:
+    a 0.3 run never measured them, and `None` says so instead of inventing a value."""
+    manifest = _completed_manifest(tmp_path)
+    assert manifest["estimate"]["compression_input_bytes"] > 0
+    assert manifest["estimate"]["max_pair_bytes"] > 0
+    del manifest["estimate"]["compression_input_bytes"]
+    del manifest["estimate"]["max_pair_bytes"]
+    loaded = RunManifest.model_validate_json(json.dumps(manifest))
+    assert loaded.estimate.compression_input_bytes is None
+    assert loaded.estimate.max_pair_bytes is None

@@ -9,6 +9,12 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Added
 
+- `ResourceEstimate` reports `compression_input_bytes`, the exact bytes the distance stage
+  feeds its compressor (`object_count * normalized_bytes`), and `max_pair_bytes`, the
+  longest concatenation it compresses. Preflight approved a 50 GB distance stage as readily
+  as a 5 MB one, and the object, pair and matrix figures it did report cannot tell them
+  apart. Both are persisted with the estimate in `manifest.json` and are `None` when read
+  from a run that predates them; neither is a gate.
 - `docs/roadmap.md` states what this library does not implement yet, in the structure the
   issue tree carries: one group per pipeline layer, the sequence by milestone, and the five
   rules every item is held to. The plan lived only in GitHub issues, so a reader of the

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import math
 import shutil
 from collections.abc import Sequence
@@ -27,6 +28,13 @@ class ResourceEstimate(BaseModel):
 
     ``input_sha256`` identifies the whole input: one file's digest for a dataset, and a digest
     over every adopted file for a corpus, since no single file identifies that run.
+
+    ``compression_input_bytes`` is the exact number of bytes the distance stage feeds its
+    compressor: every object once for its own size and both objects of every pair, which
+    is ``object_count * normalized_bytes``. Divided by a measured throughput it is the
+    stage's time, and nothing gates on it. ``max_pair_bytes`` is the longest concatenation
+    the compressor is given -- the two largest objects -- which is what a compressor's window
+    or model memory has to hold for an NCD value to see across the pair.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -45,6 +53,10 @@ class ResourceEstimate(BaseModel):
     tree_workspace_bytes: int = Field(ge=0)
     normalized_bytes: int = Field(ge=0)
     max_serialized_chunk_bytes: int = Field(ge=0)
+    # Absent from an estimate persisted before they were measured, which `None` states
+    # rather than a value nobody computed; every estimate this release makes sets both.
+    compression_input_bytes: int | None = Field(default=None, ge=0)
+    max_pair_bytes: int | None = Field(default=None, ge=0)
     estimated_working_memory_bytes: int = Field(ge=0)
     estimated_final_metadata_bytes: int = Field(ge=0)
     estimated_diagnostic_bytes: int = Field(ge=0)
@@ -94,6 +106,8 @@ def preflight(
     objects = len(scan.objects)
     pairs = objects * (objects - 1) // 2
     matrix_bytes = objects * objects * 8
+    # Every source yields at least two objects, so the two largest always form a pair.
+    max_pair_bytes = sum(heapq.nlargest(2, (item.size_bytes for item in scan.objects)))
     pairs_per_shard = execution.effective_pairs_per_shard(pairs)
     checkpoint_bytes = math.ceil(pairs / pairs_per_shard) * 256
     label_bytes = sum(len(item.label.encode("utf-8")) for item in scan.objects)
@@ -135,6 +149,8 @@ def preflight(
         tree_workspace_bytes=matrix_bytes,
         normalized_bytes=scan.total_bytes,
         max_serialized_chunk_bytes=scan.max_serialized_chunk_bytes,
+        compression_input_bytes=objects * scan.total_bytes,
+        max_pair_bytes=max_pair_bytes,
         estimated_working_memory_bytes=working_memory,
         estimated_final_metadata_bytes=metadata_bytes,
         estimated_diagnostic_bytes=diagnostic_bytes,
