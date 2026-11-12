@@ -603,12 +603,19 @@ def test_a_manifest_written_before_ppmd_still_loads(tmp_path: Path) -> None:
     are additive, so that manifest reads back with them absent."""
     manifest = _completed_manifest(tmp_path)
     manifest["config"].update({"compressor": "zlib", "compression_level": 6})
-    del manifest["config"]["ppmd_order"]
-    del manifest["config"]["ppmd_memory_bytes"]
+    for setting in (
+        "ppmd_order",
+        "ppmd_memory_bytes",
+        "bzip2_block_size_100k",
+        "lzma_dictionary_bytes",
+    ):
+        del manifest["config"][setting]
     loaded = RunManifest.model_validate_json(json.dumps(manifest))
     assert (loaded.config.compressor, loaded.config.compression_level) == ("zlib", 6)
     assert loaded.config.ppmd_order is None
     assert loaded.config.ppmd_memory_bytes is None
+    assert loaded.config.bzip2_block_size_100k is None
+    assert loaded.config.lzma_dictionary_bytes is None
 
 
 def test_a_manifest_written_before_the_compression_estimate_still_loads(tmp_path: Path) -> None:

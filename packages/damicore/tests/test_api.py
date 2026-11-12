@@ -264,7 +264,7 @@ def test_save_rejects_a_tampered_inventory(tmp_path: Path, tamper: str, discrimi
     result.close()
 
 
-@pytest.mark.parametrize("compressor", ["ppmd", "zlib", "gzip"])
+@pytest.mark.parametrize("compressor", ["ppmd", "zlib", "gzip", "bzip2", "lzma"])
 def test_every_compressor_completes_a_run(tmp_path: Path, compressor: str) -> None:
     """Each documented compressor is executed end to end, not only the default."""
     result = run(
@@ -291,6 +291,8 @@ def test_every_compressor_completes_a_run(tmp_path: Path, compressor: str) -> No
                 "compression_level": None,
                 "ppmd_order": 6,
                 "ppmd_memory_bytes": 67_108_864,
+                "bzip2_block_size_100k": None,
+                "lzma_dictionary_bytes": None,
             },
             id="default",
         ),
@@ -301,8 +303,34 @@ def test_every_compressor_completes_a_run(tmp_path: Path, compressor: str) -> No
                 "compression_level": 6,
                 "ppmd_order": None,
                 "ppmd_memory_bytes": None,
+                "bzip2_block_size_100k": None,
+                "lzma_dictionary_bytes": None,
             },
             id="zlib",
+        ),
+        pytest.param(
+            {"compressor": "bzip2"},
+            {
+                "compressor": "bzip2",
+                "compression_level": None,
+                "ppmd_order": None,
+                "ppmd_memory_bytes": None,
+                "bzip2_block_size_100k": 9,
+                "lzma_dictionary_bytes": None,
+            },
+            id="bzip2",
+        ),
+        pytest.param(
+            {"compressor": "lzma"},
+            {
+                "compressor": "lzma",
+                "compression_level": None,
+                "ppmd_order": None,
+                "ppmd_memory_bytes": None,
+                "bzip2_block_size_100k": None,
+                "lzma_dictionary_bytes": 8_388_608,
+            },
+            id="lzma",
         ),
     ],
 )
@@ -424,7 +452,16 @@ def test_an_unexpected_failure_names_its_cause_in_the_report(
 @pytest.mark.parametrize(
     ("kwargs", "discriminator"),
     [
-        pytest.param({"compressor": "bz2"}, "'ppmd', 'zlib' or 'gzip'", id="unknown-compressor"),
+        pytest.param(
+            {"compressor": "bz2"},
+            "'ppmd', 'zlib', 'gzip', 'bzip2' or 'lzma'",
+            id="unknown-compressor",
+        ),
+        pytest.param(
+            {"lzma_dictionary_bytes": 4_096},
+            "lzma_dictionary_bytes does not apply to ppmd",
+            id="lzma-setting-for-ppmd",
+        ),
         pytest.param(
             {"compression_level": 9},
             "compression_level does not apply to ppmd",

@@ -114,7 +114,7 @@ def _parser() -> argparse.ArgumentParser:
         # holds, the memory a run needs, so estimate takes it as well as run.
         command.add_argument(
             "--compressor",
-            choices=("ppmd", "zlib", "gzip"),
+            choices=("ppmd", "zlib", "gzip", "bzip2", "lzma"),
             default="ppmd",
             help="compressor backing the NCD measurement; zlib and gzip see a 32 KiB window "
             "(default: ppmd)",
@@ -136,6 +136,19 @@ def _parser() -> argparse.ArgumentParser:
             help="PPMd model memory per worker, from 2048 to 4294967259 bytes; changes the "
             "distances and is charged once per worker against the memory limit "
             "(default: 67108864)",
+        )
+        command.add_argument(
+            "--bzip2-block-size-100k",
+            type=int,
+            help="bzip2 block size from 1 to 9, in units of 100 kB; the block is bzip2's "
+            "window, so it changes the distances (default: 9)",
+        )
+        command.add_argument(
+            "--lzma-dictionary-bytes",
+            type=int,
+            help="LZMA dictionary, from 4096 to 1610612736 bytes; the dictionary is LZMA's "
+            "window, so it changes the distances, and each worker is charged about 12 times "
+            "it against the memory limit (default: 8388608)",
         )
         command.add_argument(
             "--max-objects",
@@ -247,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
     compression_level: int | None = arguments.compression_level
     ppmd_order: int | None = arguments.ppmd_order
     ppmd_memory_bytes: int | None = arguments.ppmd_memory_bytes
+    bzip2_block_size_100k: int | None = arguments.bzip2_block_size_100k
+    lzma_dictionary_bytes: int | None = arguments.lzma_dictionary_bytes
     result: DamicoreResult | None = None
     try:
         # ResourceLimits and ExecutionConfig own the bounds behind these flags, so building
@@ -270,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
                 compression_level=compression_level,
                 ppmd_order=ppmd_order,
                 ppmd_memory_bytes=ppmd_memory_bytes,
+                bzip2_block_size_100k=bzip2_block_size_100k,
+                lzma_dictionary_bytes=lzma_dictionary_bytes,
                 keep_normalized=keep_normalized,
                 save_diagnostics=save_diagnostics,
                 execution=execution,
@@ -302,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
                 compression_level=compression_level,
                 ppmd_order=ppmd_order,
                 ppmd_memory_bytes=ppmd_memory_bytes,
+                bzip2_block_size_100k=bzip2_block_size_100k,
+                lzma_dictionary_bytes=lzma_dictionary_bytes,
                 num_clusters=num_clusters,
                 output_dir=output_dir,
                 progress=not arguments.no_progress,

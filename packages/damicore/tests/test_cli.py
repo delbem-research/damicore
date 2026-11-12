@@ -50,6 +50,17 @@ def test_cli_passes_the_compressor_settings_to_estimate_and_run(
     capsys.readouterr()
     assert main(["run", str(source), "--compression-level", "9", "--no-progress"]) == 2
     assert "compression_level does not apply to ppmd" in capsys.readouterr().err
+    lzma = ["--compressor", "lzma", "--lzma-dictionary-bytes", "1048576"]
+    assert main(["estimate", str(source), "--workers", "2", "--json", *lzma]) == 0
+    lzma_estimate = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
+    assert main(deflate) == 0
+    deflate_estimate = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
+    assert lzma_estimate - deflate_estimate == 2 * (12 * 1_048_576 + 4_194_304 - 262_144)
+    bzip2 = ["--compressor", "bzip2", "--bzip2-block-size-100k", "3"]
+    bzip2_output = tmp_path / "bzip2"
+    assert main([*run_arguments[:5], *bzip2, "--output-dir", str(bzip2_output)]) == 0
+    config = json.loads((bzip2_output / "manifest.json").read_text(encoding="utf-8"))["config"]
+    assert (config["compressor"], config["bzip2_block_size_100k"]) == ("bzip2", 3)
 
 
 def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

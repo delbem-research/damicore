@@ -20,6 +20,12 @@ carries anything else, a date included, matches neither and fails the release.
   (10 MiB for bzip2, 12 times the dictionary plus 4 MiB for LZMA), and `codec_fingerprint()`
   names libbz2 and liblzma by the size each gives a fixed payload, since neither reports a
   version; it joins the checkpoint identity. See ADR 0021.
+- `damicore.run`, `damicore.estimate` and both CLI commands take `compressor="bzip2"` and
+  `"lzma"`, with `bzip2_block_size_100k` and `lzma_dictionary_bytes` (`--bzip2-block-size-100k`,
+  `--lzma-dictionary-bytes`). The manifest records them only for the compressor that reads
+  them and `None` elsewhere; both fields are additive, so earlier manifests still load. The
+  runtime record and the resume fingerprint take `codec_fingerprint()` whole, so a completed
+  or incomplete run written under another libbz2 or liblzma is not reused or resumed.
 - `DistanceResult.ncd_self_largest` and `report.json`'s `ncd_self_largest` report NCD(x, x)
   for the largest object, `(C(xx) - C(x)) / C(x)`: how much of an object the compressor
   recognizes when it reads it again, the idempotency [cilibrasi2005] requires of a normal

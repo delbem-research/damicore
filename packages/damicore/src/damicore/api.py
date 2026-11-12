@@ -130,14 +130,18 @@ def _validated_split(split: str) -> Literal["columns", "rows"]:
     raise ConfigurationError("split must be exactly 'columns' or 'rows'")
 
 
-def _validated_compressor(compressor: str) -> Literal["ppmd", "zlib", "gzip"]:
+def _validated_compressor(compressor: str) -> Literal["ppmd", "zlib", "gzip", "bzip2", "lzma"]:
     if compressor == "ppmd":
         return "ppmd"
     if compressor == "zlib":
         return "zlib"
     if compressor == "gzip":
         return "gzip"
-    raise ConfigurationError("compressor must be exactly 'ppmd', 'zlib' or 'gzip'")
+    if compressor == "bzip2":
+        return "bzip2"
+    if compressor == "lzma":
+        return "lzma"
+    raise ConfigurationError("compressor must be exactly 'ppmd', 'zlib', 'gzip', 'bzip2' or 'lzma'")
 
 
 def _distance_config(
@@ -146,6 +150,8 @@ def _distance_config(
     compression_level: int | None,
     ppmd_order: int | None,
     ppmd_memory_bytes: int | None,
+    bzip2_block_size_100k: int | None,
+    lzma_dictionary_bytes: int | None,
     execution: ExecutionConfig,
     save_diagnostics: bool,
 ) -> DistanceConfig:
@@ -157,6 +163,8 @@ def _distance_config(
             ("compression_level", compression_level),
             ("ppmd_order", ppmd_order),
             ("ppmd_memory_bytes", ppmd_memory_bytes),
+            ("bzip2_block_size_100k", bzip2_block_size_100k),
+            ("lzma_dictionary_bytes", lzma_dictionary_bytes),
         )
         if value is not None
     }
@@ -260,6 +268,8 @@ def estimate(
     compression_level: int | None = None,
     ppmd_order: int | None = None,
     ppmd_memory_bytes: int | None = None,
+    bzip2_block_size_100k: int | None = None,
+    lzma_dictionary_bytes: int | None = None,
     keep_normalized: bool = False,
     save_diagnostics: bool = False,
     execution: ExecutionConfig | None = None,
@@ -285,8 +295,10 @@ def estimate(
         quadratic or cubic in. It does not apply to ``"files"``, where each file is an object.
     compressor, compression_level, ppmd_order, ppmd_memory_bytes
         As for :func:`run`, and validated the same way. The compressor decides the memory
-        every worker holds -- a PPMd model of ``ppmd_memory_bytes`` -- which the
-        working-memory projection charges once per worker.
+        every worker's stream holds, which the working-memory projection charges once per
+        worker.
+    bzip2_block_size_100k, lzma_dictionary_bytes
+        As for :func:`run`, and validated the same way.
     keep_normalized
         Accepted for parity with :func:`run` and deliberately ignored: object bytes exist on
         disk while a run is in progress either way, so they are always counted.
@@ -329,6 +341,8 @@ def estimate(
         compression_level=compression_level,
         ppmd_order=ppmd_order,
         ppmd_memory_bytes=ppmd_memory_bytes,
+        bzip2_block_size_100k=bzip2_block_size_100k,
+        lzma_dictionary_bytes=lzma_dictionary_bytes,
         execution=settings,
         save_diagnostics=save_diagnostics,
     )
@@ -372,6 +386,8 @@ def _config_payload(
         "compression_level": distance.compressor_settings.get("compression_level"),
         "ppmd_order": distance.compressor_settings.get("ppmd_order"),
         "ppmd_memory_bytes": distance.compressor_settings.get("ppmd_memory_bytes"),
+        "bzip2_block_size_100k": distance.compressor_settings.get("bzip2_block_size_100k"),
+        "lzma_dictionary_bytes": distance.compressor_settings.get("lzma_dictionary_bytes"),
         "num_clusters": num_clusters,
         "keep_normalized": keep_normalized,
         "save_diagnostics": save_diagnostics,
@@ -627,6 +643,8 @@ def run(
     compression_level: int | None = None,
     ppmd_order: int | None = None,
     ppmd_memory_bytes: int | None = None,
+    bzip2_block_size_100k: int | None = None,
+    lzma_dictionary_bytes: int | None = None,
     num_clusters: int | None = None,
     output_dir: str | Path | None = None,
     keep_normalized: bool = False,
@@ -672,19 +690,23 @@ def run(
         How a ``"files"`` source is enumerated. Both are recorded in the manifest, so a corpus
         can be reconstructed from the run rather than from the command that produced it.
     compressor
-        Exactly ``"ppmd"``, the default, ``"zlib"`` or ``"gzip"``. NCD values are
-        compressor-dependent, so changing it changes the run identity and the results, not
-        merely their cost. ``"ppmd"`` is PPMd variant I, the original DAMICORE compressor;
-        ``"zlib"`` and ``"gzip"`` see a 32 KiB window, past which objects look unrelated
-        whatever they are. See ADR 0020.
-    compression_level, ppmd_order, ppmd_memory_bytes
+        Exactly ``"ppmd"``, the default, ``"zlib"``, ``"gzip"``, ``"bzip2"`` or ``"lzma"``.
+        NCD values are compressor-dependent, so changing it changes the run identity and the
+        results, not merely their cost. ``"ppmd"`` is PPMd variant I, the original DAMICORE
+        compressor, and keeps a shared distribution across large objects; ``"lzma"`` finds
+        shared content at any size its dictionary holds; ``"bzip2"`` sees both within its
+        900 kB block; ``"zlib"`` and ``"gzip"`` see a 32 KiB window, past which objects look
+        unrelated whatever they are. See ADRs 0020 and 0021.
+    compression_level, ppmd_order, ppmd_memory_bytes, bzip2_block_size_100k, lzma_dictionary_bytes
         The settings of the chosen compressor: ``compression_level`` (0 to 9, default 6) for
         ``"zlib"`` and ``"gzip"``; ``ppmd_order`` (2 to 64, default 6) and
-        ``ppmd_memory_bytes`` (2048 to 4294967259, default 67108864) for ``"ppmd"``. ``None``
-        uses the default. A setting for a compressor that does not read it is a
+        ``ppmd_memory_bytes`` (2048 to 4294967259, default 67108864) for ``"ppmd"``;
+        ``bzip2_block_size_100k`` (1 to 9, default 9) for ``"bzip2"``; and
+        ``lzma_dictionary_bytes`` (4096 to 1610612736, default 8388608) for ``"lzma"``.
+        ``None`` uses the default. A setting for a compressor that does not read it is a
         ``ConfigurationError``, never ignored, and every setting in force enters the run
-        identity. Each worker holds one PPMd model, and preflight charges its full size per
-        worker against ``max_working_memory_bytes``.
+        identity. Each worker holds one compressor stream, and preflight charges its stated
+        memory per worker against ``max_working_memory_bytes``.
     num_clusters
         ``None`` lets FastGreedy choose the cut. Otherwise the upper bound is the object count
         this source produces, which is only known after preflight, so an oversized value is
@@ -762,6 +784,8 @@ def run(
         compression_level=compression_level,
         ppmd_order=ppmd_order,
         ppmd_memory_bytes=ppmd_memory_bytes,
+        bzip2_block_size_100k=bzip2_block_size_100k,
+        lzma_dictionary_bytes=lzma_dictionary_bytes,
         execution=settings,
         save_diagnostics=save_diagnostics,
     )
