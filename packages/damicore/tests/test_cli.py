@@ -9,9 +9,10 @@ from typing import Any, cast, get_args
 
 import pytest
 from damicore_distance import DistanceConfig
+from damicore_normalizer import DelimitedSource
 
-from damicore import DamicoreResult, estimate, run
-from damicore.api import _distance_config
+from damicore import DamicoreResult, ExecutionConfig, estimate, run
+from damicore.api import _COMPRESSOR_SETTINGS, _config_payload, _distance_config
 from damicore.cli import _parser, main
 from damicore.manifest import RunConfig
 
@@ -254,3 +255,46 @@ def test_every_compressor_setting_is_reachable_on_every_surface() -> None:
         flags = {action.dest: action for action in command._actions}
         assert not fields - set(flags), (name, sorted(fields - set(flags)))
         assert set(flags["compressor"].choices) == tags, name
+
+
+def test_every_compressor_setting_written_is_the_one_recorded() -> None:
+    """Each setting a caller writes reaches the manifest under its own name.
+
+    The test above proves each setting has a keyword; this one proves the keyword is
+    threaded. A setting mapped onto another field, or dropped from the payload, records
+    `None` or another setting's value and leaves the configuration hash blind to it, so two
+    runs differing only in that setting share one run directory. Each is written at its
+    lower bound, where no default sits, so a value that never arrived cannot pass for one
+    that did.
+    """
+    models = get_args(DistanceConfig.model_fields["compressor"].annotation)
+    tags = {tag for model in models for tag in get_args(model.model_fields["name"].annotation)}
+    assert set(_COMPRESSOR_SETTINGS) == tags
+    fields = {field for model in models for field in model.model_fields} - {"name"}
+    execution = ExecutionConfig(workers=1)
+    checked = 0
+    for model in models:
+        for tag in get_args(model.model_fields["name"].annotation):
+            for field, info in model.model_fields.items():
+                if field == "name":
+                    continue
+                lowest = next(item.ge for item in info.metadata if hasattr(item, "ge"))
+                assert lowest != info.default, (tag, field)
+                written = dict.fromkeys(fields, None) | {field: lowest}
+                distance = _distance_config(
+                    tag, **written, execution=execution, save_diagnostics=False
+                )
+                payload = _config_payload(
+                    object_source=DelimitedSource(),
+                    distance=distance,
+                    num_clusters=None,
+                    keep_normalized=False,
+                    save_diagnostics=False,
+                    execution=execution,
+                    pairs_per_shard=1,
+                )
+                recorded = RunConfig.model_validate_json(json.dumps(payload))
+                assert (recorded.compressor, getattr(recorded, field)) == (tag, lowest)
+                checked += 1
+    # Guards the discovery: zlib and gzip share one setting, so six of five fields.
+    assert checked >= 6, checked
