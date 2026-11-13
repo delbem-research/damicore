@@ -462,23 +462,28 @@ def test_the_codec_build_is_part_of_the_checkpoint_identity() -> None:
     assert distance_api._runtime_fingerprint().items() >= codecs.items()
 
 
+def test_a_fingerprint_a_caller_changes_is_not_the_one_the_next_caller_gets() -> None:
+    """The fingerprint names a result's codecs; one caller editing its copy must not rename
+    the codecs every later checkpoint and run is identified by."""
+    first = codec_fingerprint()
+    first["pyppmd"] = "changed by a caller"
+    assert codec_fingerprint()["pyppmd"] == version("pyppmd")
+
+
 @pytest.mark.parametrize(("module", "key"), [("bz2", "libbz2_probe"), ("lzma", "liblzma_probe")])
 def test_a_system_codec_that_encodes_differently_changes_the_fingerprint(
     monkeypatch: pytest.MonkeyPatch, module: str, key: str
 ) -> None:
     """libbz2 and liblzma come from the system and expose no version, so each is named by
-    the size it gives a fixed payload: an encoder that compresses differently must show."""
+    the size it gives a fixed payload: an encoder that compresses that payload differently
+    must show."""
     before = codec_fingerprint()[key]
-    codec_fingerprint.cache_clear()
 
     def another_encoder(*_args: object, **_kwargs: object) -> bytes:
         return b"another encoder"
 
     monkeypatch.setattr(f"{module}.compress", another_encoder)
-    try:
-        assert codec_fingerprint()[key] != before
-    finally:
-        codec_fingerprint.cache_clear()
+    assert codec_fingerprint()[key] != before
 
 
 @pytest.mark.parametrize(

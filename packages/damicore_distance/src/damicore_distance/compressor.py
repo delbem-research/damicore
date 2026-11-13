@@ -37,7 +37,6 @@ import bz2
 import lzma
 import zlib
 from collections.abc import Callable, Iterable
-from functools import cache
 from importlib.metadata import version
 from pathlib import Path
 
@@ -86,7 +85,6 @@ def _lzma2(dictionary_bytes: int) -> dict[str, int]:
 _PROBE = b"".join(b"damicore %d\n" % index for index in range(2_000))
 
 
-@cache
 def codec_fingerprint() -> dict[str, str]:
     """Name every codec this stage can measure with, as a result's identity needs it.
 
