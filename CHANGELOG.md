@@ -387,7 +387,8 @@ carries anything else, a date included, matches neither and fails the release.
   `DistanceConfig(compressor="zlib", compression_level=9)` is now
   `DistanceConfig(compressor=DeflateCompressor(compression_level=9))`, the former
   `config.compressor` string is `config.compressor.name`, and `config.compression_level` is
-  `config.compressor.compression_level`. DEFLATE sees 32 KiB, so
+  `config.compressor.compression_level`. A name alone is refused, and the error names the
+  model to write in its place. DEFLATE sees 32 KiB, so
   past that `zlib` and `gzip` report every pair nearly unrelated: on 128 KiB columns drawn
   from two vocabularies the distance across them exceeded the distance within one by 0.028
   under `zlib` and by 0.238 under PPMd. The original DAMICORE implementation already

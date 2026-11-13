@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
@@ -101,7 +101,7 @@ class LzmaCompressor(BaseModel):
 # Each compressor is its own model, so a setting it does not read is not a field to write:
 # refused by name, never ignored, and never part of a result's identity.
 Compressor = Annotated[
-    DeflateCompressor | PpmdCompressor | Bzip2Compressor | LzmaCompressor,
+    PpmdCompressor | DeflateCompressor | Bzip2Compressor | LzmaCompressor,
     Field(discriminator="name"),
 ]
 
@@ -122,6 +122,26 @@ class DistanceConfig(BaseModel):
     pairs_per_shard: int | Literal["auto"] = "auto"
     resume: bool = True
     save_diagnostics: bool = False
+
+    @field_validator("compressor", mode="before")
+    @classmethod
+    def _a_model_not_a_name(cls, value: object) -> object:
+        # 0.3 took the compressor by name. A name is refused rather than read as that
+        # compressor at its defaults, which no type checker could see; the error says what
+        # to write, which the union's own "not a dictionary" would not.
+        if not isinstance(value, str):
+            return value
+        models = get_args(get_args(Compressor)[0])
+        for model in models:
+            tags = get_args(model.model_fields["name"].annotation)
+            if value in tags:
+                written = f"name={value!r}" if len(tags) > 1 else ""
+                raise ValueError(
+                    f"compressor takes a settings model, not a name: write "
+                    f"{model.__name__}({written})"
+                )
+        *others, last = (f"{model.__name__}()" for model in models)
+        raise ValueError(f"compressor takes a settings model: {', '.join(others)} or {last}")
 
     @field_validator("workers", "pairs_per_shard")
     @classmethod

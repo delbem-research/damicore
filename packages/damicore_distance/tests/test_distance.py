@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import re
 import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
@@ -447,6 +448,25 @@ def test_a_setting_for_another_compressor_cannot_be_written(
     assert [(error["type"], error["loc"]) for error in raised.value.errors()] == [
         ("extra_forbidden", ("compressor", compressor, setting))
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "hint"),
+    [
+        ("zlib", "DeflateCompressor(name='zlib')"),
+        ("gzip", "DeflateCompressor(name='gzip')"),
+        ("ppmd", "PpmdCompressor()"),
+        ("lzma", "LzmaCompressor()"),
+        ("rar", "PpmdCompressor(), DeflateCompressor(), Bzip2Compressor() or LzmaCompressor()"),
+    ],
+)
+def test_a_compressor_given_by_name_is_refused_with_the_model_to_write(
+    name: str, hint: str
+) -> None:
+    """0.3 took the compressor by name. That call now fails, and the error says what to
+    write instead rather than that a string is not a dictionary."""
+    with pytest.raises(ValidationError, match=re.escape(hint)):
+        DistanceConfig.model_validate({"compressor": name})
 
 
 def test_a_compressor_outside_the_union_is_refused_by_its_tag() -> None:
