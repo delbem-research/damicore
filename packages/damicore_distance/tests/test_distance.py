@@ -481,20 +481,33 @@ def test_a_system_codec_that_encodes_differently_changes_the_fingerprint(
         codec_fingerprint.cache_clear()
 
 
-def test_a_ppmd_model_that_cannot_be_allocated_is_a_compression_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("compressor", "factory"),
+    [
+        ("ppmd", "pyppmd.Ppmd8Encoder"),
+        ("zlib", "zlib.compressobj"),
+        ("bzip2", "bz2.BZ2Compressor"),
+        ("lzma", "lzma.LZMACompressor"),
+    ],
+)
+def test_a_stream_that_cannot_be_allocated_is_a_compression_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compressor: str, factory: str
 ) -> None:
-    from damicore_distance import compressor
+    """Every compressor's stream can fail to allocate -- an LZMA dictionary is charged up to
+    about 18 GiB -- and each failure is the compressor's, with the figure that caused it."""
+    from damicore_distance.compressor import compressed_size
 
-    def unallocatable(*_args: object) -> object:
+    def unallocatable(*_args: object, **_kwargs: object) -> object:
         raise MemoryError
 
     path = tmp_path / "object.jsonl"
     path.write_bytes(b"payload")
-    monkeypatch.setattr(compressor.pyppmd, "Ppmd8Encoder", unallocatable)
-    with pytest.raises(DistanceError, match="ppmd_memory_bytes") as raised:
-        compressor.compressed_size((path,), config=DistanceConfig())
+    config = DistanceConfig.model_validate({"compressor": compressor})
+    monkeypatch.setattr(factory, unallocatable)
+    with pytest.raises(DistanceError, match=f"{compressor} stream") as raised:
+        compressed_size((path,), config=config)
     assert raised.value.code == "compression_error"
+    assert str(config.stream_memory_bytes) in str(raised.value)
 
 
 def test_an_unreadable_object_is_reported_as_a_compression_error(tmp_path: Path) -> None:

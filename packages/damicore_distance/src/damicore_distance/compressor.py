@@ -62,17 +62,11 @@ def _stream(config: DistanceConfig) -> tuple[Callable[[bytes], bytes], Callable[
             deflate = zlib.compressobj(level=config.compression_level, wbits=wbits)
             return deflate.compress, deflate.flush
         case "ppmd":
-            try:
-                model = pyppmd.Ppmd8Encoder(
-                    config.ppmd_order,
-                    config.ppmd_memory_bytes,
-                    pyppmd.PPMD8_RESTORE_METHOD_RESTART,
-                )
-            except MemoryError as exc:
-                raise DistanceError(
-                    "Could not allocate the PPMd model; lower ppmd_memory_bytes or workers",
-                    code="compression_error",
-                ) from exc
+            model = pyppmd.Ppmd8Encoder(
+                config.ppmd_order,
+                config.ppmd_memory_bytes,
+                pyppmd.PPMD8_RESTORE_METHOD_RESTART,
+            )
             return model.encode, model.flush
         case "bzip2":
             block = bz2.BZ2Compressor(config.bzip2_block_size_100k)
@@ -113,7 +107,14 @@ def codec_fingerprint() -> dict[str, str]:
 
 
 def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:
-    feed, finish = _stream(config)
+    try:
+        feed, finish = _stream(config)
+    except MemoryError as exc:
+        raise DistanceError(
+            f"Could not allocate a {config.compressor} stream of "
+            f"{config.stream_memory_bytes} bytes; lower its settings or the worker count",
+            code="compression_error",
+        ) from exc
     total = 0
     try:
         for path in paths:
