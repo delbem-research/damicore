@@ -9,19 +9,26 @@
 default_install_hook_types: [pre-commit, commit-msg]
 
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Must stay inside the workspace's ruff range, in pyproject.toml. A different major here
-    # runs a different default rule set than `make check`, so the hook and the gate disagree
-    # about the same file and the pre-commit run stops being evidence.
-    rev: v0.17.3
+  # Ruff runs from the workspace, at the version uv.lock resolves, rather than from a hook
+  # repository with its own pin. Two pins for one tool drifted: dependabot moved the hook to
+  # 0.17 while the workspace range stayed below it, the two sorted one import differently,
+  # and the hook rewrote a file `make check` accepts. One version cannot disagree with itself.
+  - repo: local
     hooks:
       # Auto-fix import sorting, unused imports, and other fixable lint rules.
       # --exit-non-zero-on-fix: if files were modified, fail so developer sees
       # the changes, stages them (git add -u), and retries the commit.
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
+        name: ruff
+        language: system
+        entry: uv run --frozen ruff check --fix --exit-non-zero-on-fix
+        types_or: [python, pyi]
       # Auto-format. Same mechanic: modifies files → commit fails → add + retry.
       - id: ruff-format
+        name: ruff format
+        language: system
+        entry: uv run --frozen ruff format
+        types_or: [python, pyi]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
