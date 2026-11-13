@@ -69,13 +69,14 @@ either a failure on the default path or a silent fallback, and this project allo
 
 `compressor="ppmd"` is variant I with restart, `pyppmd.Ppmd8Encoder`. Restoration is fixed
 rather than exposed, because the original never changed it; cut-off, or variant H, would be
-another name in the `Literal`, never a parameter.
+another compressor, never a parameter.
 
 The model order (2 to 64, default 6, the original's) and the model memory (2048 to
 4294967259 bytes, default 64 MiB) change every NCD value, so they are configuration: covered
 by the configuration hash, recorded in the manifest, and validated here, because `pyppmd`
 clamps a value outside those ranges without reporting it and two configurations would give
-one result. A parameter set for a compressor it does not apply to is refused, not ignored.
+one result. A parameter set for a compressor it does not apply to is refused, not ignored
+(ADR 0021 says how).
 The default memory is not the original's 10 MB: the two agree until the model fills, which
 on text happens around a few MiB per object, and past that the larger model keeps measuring
 where the smaller one restarts and saturates. `ppmd_memory_bytes=10_485_760` reproduces the

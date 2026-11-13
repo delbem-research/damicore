@@ -10,11 +10,11 @@ carries anything else, a date included, matches neither and fails the release.
 ### Added
 
 - `damicore-distance` measures with two more compressors, both from the standard library, so
-  no dependency is added. `compressor="lzma"` is raw LZMA2 at preset 6 with
+  no dependency is added. `LzmaCompressor` (`compressor="lzma"`) is raw LZMA2 at preset 6 with
   `lzma_dictionary_bytes` (default 8 MiB), and it is the compressor here that keeps finding
   shared content at any size its dictionary holds: a column against its 1 % mutated copy
   separated by 0.884 to 0.907 at every size from 16 KiB to 4 MiB, where PPMd separated by
-  0.531 falling to 0.090. `compressor="bzip2"` uses `bzip2_block_size_100k` (default 9) and
+  0.531 falling to 0.090. `Bzip2Compressor` (`compressor="bzip2"`) uses `bzip2_block_size_100k` (default 9) and
   sees both a copy and a distribution, but only within its 900 kB block. PPMd stays the default. Each setting is refused outside its
   codec's bounds or for another compressor, each stream's memory is charged per worker
   (10 MiB for bzip2, 12 times the dictionary plus 4 MiB for LZMA), and `codec_fingerprint()`
@@ -379,9 +379,15 @@ carries anything else, a date included, matches neither and fails the release.
 ### Changed
 
 - **`damicore-distance` measures with PPMd by default, and its NCD values change.**
-  `DistanceConfig.compressor` gains `"ppmd"`, PPMd variant I with model restart through
-  `pyppmd`, and it is the default; `ppmd_order` (2 to 64, default 6) and
-  `ppmd_memory_bytes` (2048 to 4294967259, default 64 MiB) set it. DEFLATE sees 32 KiB, so
+  `DistanceConfig.compressor` is now a settings model rather than a name, one per codec:
+  `PpmdCompressor`, the default, PPMd variant I with model restart through `pyppmd`, with
+  `ppmd_order` (2 to 64, default 6) and `ppmd_memory_bytes` (2048 to 4294967259, default 64
+  MiB); `DeflateCompressor`, whose `name` is `"zlib"` or `"gzip"`, with
+  `compression_level`; and `Bzip2Compressor` and `LzmaCompressor`, below. A 0.3
+  `DistanceConfig(compressor="zlib", compression_level=9)` is now
+  `DistanceConfig(compressor=DeflateCompressor(compression_level=9))`, the former
+  `config.compressor` string is `config.compressor.name`, and `config.compression_level` is
+  `config.compressor.compression_level`. DEFLATE sees 32 KiB, so
   past that `zlib` and `gzip` report every pair nearly unrelated: on 128 KiB columns drawn
   from two vocabularies the distance across them exceeded the distance within one by 0.028
   under `zlib` and by 0.238 under PPMd. The original DAMICORE implementation already
@@ -389,12 +395,13 @@ carries anything else, a date included, matches neither and fails the release.
   0.78 to 0.93 under PPMd and 0.49 to 0.65 under `zlib`. `pyppmd>=1.3.1,<1.4` is a new
   runtime dependency, not an extra, because a default cannot be optional. A setting for a
   compressor it does not apply to -- `compression_level` with PPMd, a `ppmd_*` setting with
-  `zlib` or `gzip` -- is refused rather than ignored, and a PPMd setting outside the codec's
+  `zlib` or `gzip` -- is not a field of that compressor's model, so it is refused rather
+  than ignored, and a PPMd setting outside the codec's
   bounds is refused because the codec would clamp it silently. The `pyppmd` version joins
   the checkpoint identity, so a checkpoint from another codec build is refused. See ADR
   0020.
 - Preflight charges every compressor's stream memory once per worker, from
-  `DistanceConfig.stream_memory_bytes`, rather than PPMd's model alone. DEFLATE's state, 256
+  each compressor model's `stream_memory_bytes`, rather than PPMd's model alone. DEFLATE's state, 256
   KiB at the settings `zlib` and `gzip` use, was never charged, so a `zlib` or `gzip`
   estimate rises by 256 KiB per worker. See ADR 0021.
 - **`damicore.run`, `damicore.estimate` and both CLI commands use PPMd by default.**
@@ -409,8 +416,9 @@ carries anything else, a date included, matches neither and fails the release.
   settings only where it reads them and `None` elsewhere; the two PPMd fields are additive,
   so a 0.3 manifest still loads. Every default run hashes to a new run directory, and the
   `pyppmd` version joins the resume fingerprint, so an incomplete run from an earlier build
-  is not resumed. `DistanceConfig.compressor_settings` is the one statement of which
-  settings a compressor reads, and the orchestrator records and charges from it.
+  is not resumed. The compressor models are the one statement of which settings a compressor
+  reads: the orchestrator derives which arguments it accepts for each compressor, what it
+  records and what it charges from them.
 - Every distribution's `Documentation` URL now points at the published site,
   `https://delbem-research.github.io/damicore/`, rather than at one Markdown file in the
   repository. The README links it too.

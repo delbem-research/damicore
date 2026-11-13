@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import numpy as np
 import pandas as pd
@@ -20,10 +20,14 @@ from damicore_clusterizer import (
     cluster_tree,
 )
 from damicore_distance import (
+    Bzip2Compressor,
+    DeflateCompressor,
     DistanceConfig,
     DistanceError,
     DistanceMatrixView,
     DistanceResult,
+    LzmaCompressor,
+    PpmdCompressor,
     compute_distance_matrix,
 )
 from damicore_normalizer import (
@@ -130,18 +134,15 @@ def _validated_split(split: str) -> Literal["columns", "rows"]:
     raise ConfigurationError("split must be exactly 'columns' or 'rows'")
 
 
-def _validated_compressor(compressor: str) -> Literal["ppmd", "zlib", "gzip", "bzip2", "lzma"]:
-    if compressor == "ppmd":
-        return "ppmd"
-    if compressor == "zlib":
-        return "zlib"
-    if compressor == "gzip":
-        return "gzip"
-    if compressor == "bzip2":
-        return "bzip2"
-    if compressor == "lzma":
-        return "lzma"
-    raise ConfigurationError("compressor must be exactly 'ppmd', 'zlib', 'gzip', 'bzip2' or 'lzma'")
+# Which settings each compressor reads, derived from the models that define them, as the
+# source arguments below are. The public signature is flat, so one written for a compressor
+# that does not read it is refused here by name rather than left to the stage, whose error
+# would name a field path the caller never wrote.
+_COMPRESSOR_SETTINGS: dict[str, frozenset[str]] = {
+    tag: frozenset(model.model_fields) - {"name"}
+    for model in (PpmdCompressor, DeflateCompressor, Bzip2Compressor, LzmaCompressor)
+    for tag in get_args(model.model_fields["name"].annotation)
+}
 
 
 def _distance_config(
@@ -155,8 +156,11 @@ def _distance_config(
     execution: ExecutionConfig,
     save_diagnostics: bool,
 ) -> DistanceConfig:
-    # Only the settings the caller wrote are passed on, so the stage config both defaults
-    # the rest and refuses one written for a compressor that does not read it.
+    if compressor not in _COMPRESSOR_SETTINGS:
+        *others, last = (repr(tag) for tag in _COMPRESSOR_SETTINGS)
+        raise ConfigurationError(f"compressor must be exactly {', '.join(others)} or {last}")
+    # Only the settings the caller wrote are passed on, so the compressor model defaults the
+    # rest.
     written = {
         name: value
         for name, value in (
@@ -168,16 +172,18 @@ def _distance_config(
         )
         if value is not None
     }
+    foreign = sorted(written.keys() - _COMPRESSOR_SETTINGS[compressor])
+    if foreign:
+        raise ConfigurationError(f"{', '.join(foreign)} does not apply to {compressor}")
     try:
         return DistanceConfig.model_validate(
             {
-                "compressor": _validated_compressor(compressor),
+                "compressor": {"name": compressor, **written},
                 "compression_chunk_bytes": execution.compression_chunk_bytes,
                 "workers": execution.effective_workers,
                 "pairs_per_shard": execution.pairs_per_shard,
                 "resume": execution.resume,
                 "save_diagnostics": save_diagnostics,
-                **written,
             }
         )
     except ValidationError as exc:
@@ -372,6 +378,7 @@ def _config_payload(
     # default that was never in force. That keeps the configuration hash honest, so two runs
     # differing only in source cannot collide onto the same run directory.
     described = object_source.model_dump(mode="json")
+    compressor = distance.compressor.model_dump(mode="json")
     return {
         "source_kind": described["kind"],
         "split": described.get("split"),
@@ -382,12 +389,12 @@ def _config_payload(
         "include_hidden": described.get("include_hidden"),
         # A setting the compressor does not read is recorded as None, so it neither enters
         # the hash nor reads as a choice that had an effect.
-        "compressor": distance.compressor,
-        "compression_level": distance.compressor_settings.get("compression_level"),
-        "ppmd_order": distance.compressor_settings.get("ppmd_order"),
-        "ppmd_memory_bytes": distance.compressor_settings.get("ppmd_memory_bytes"),
-        "bzip2_block_size_100k": distance.compressor_settings.get("bzip2_block_size_100k"),
-        "lzma_dictionary_bytes": distance.compressor_settings.get("lzma_dictionary_bytes"),
+        "compressor": compressor["name"],
+        "compression_level": compressor.get("compression_level"),
+        "ppmd_order": compressor.get("ppmd_order"),
+        "ppmd_memory_bytes": compressor.get("ppmd_memory_bytes"),
+        "bzip2_block_size_100k": compressor.get("bzip2_block_size_100k"),
+        "lzma_dictionary_bytes": compressor.get("lzma_dictionary_bytes"),
         "num_clusters": num_clusters,
         "keep_normalized": keep_normalized,
         "save_diagnostics": save_diagnostics,

@@ -35,7 +35,7 @@ METHOD = ROOT / "docs" / "method"
 # field to a second page is what produced a duplicate definition of `split` here once: the
 # contract was already stated on the input page, and satisfying the map wrote it again.
 CHOICE_PAGES = {
-    "DistanceConfig.compressor": "docs/method/ncd.md",
+    "DeflateCompressor.name": "docs/method/ncd.md",
     "RunConfig.compressor": "docs/method/ncd.md",
     "DelimitedDatasetInput.split": "docs/input-contract.md",
     "DelimitedSource.split": "docs/input-contract.md",

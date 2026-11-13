@@ -12,9 +12,11 @@ from typing import Any, cast
 import numpy as np
 import pytest
 from damicore_normalizer import NormalizationConfig, NormalizationResult, normalize_csv
+from pydantic import ValidationError
 
 import damicore_distance.api as distance_api
 from damicore_distance import (
+    DeflateCompressor,
     DistanceConfig,
     DistanceError,
     DistanceMatrixView,
@@ -160,7 +162,9 @@ def test_gzip_progress_view_and_resume_guards(tmp_path: Path) -> None:
     result = compute_distance_matrix(
         normalized.manifest_path,
         tmp_path / "gzip",
-        config=DistanceConfig(compressor="gzip", workers=1, pairs_per_shard=2),
+        config=DistanceConfig(
+            compressor=DeflateCompressor(name="gzip"), workers=1, pairs_per_shard=2
+        ),
         progress=lambda completed, total, message: calls.append((completed, total, message)),
     )
     assert calls[-1] == (3, 3, "distance")
@@ -174,7 +178,9 @@ def test_gzip_progress_view_and_resume_guards(tmp_path: Path) -> None:
         compute_distance_matrix(
             normalized.manifest_path,
             tmp_path / "gzip",
-            config=DistanceConfig(compressor="gzip", workers=1, resume=False),
+            config=DistanceConfig(
+                compressor=DeflateCompressor(name="gzip"), workers=1, resume=False
+            ),
         )
 
 
@@ -379,12 +385,11 @@ def test_every_compression_runs_on_the_pool_when_there_is_one(
 def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:
     """ADR 0020: the original implementation's compressor and order, with a model large
     enough to keep measuring past the objects where 10 MB restarts."""
-    config = DistanceConfig()
-    assert (config.compressor, config.ppmd_order, config.ppmd_memory_bytes) == (
-        "ppmd",
-        6,
-        67_108_864,
-    )
+    assert DistanceConfig().model_dump()["compressor"] == {
+        "name": "ppmd",
+        "ppmd_order": 6,
+        "ppmd_memory_bytes": 67_108_864,
+    }
 
 
 @pytest.mark.parametrize(
@@ -408,10 +413,15 @@ def test_a_setting_outside_its_codec_bounds_is_refused_by_name(
     liblzma raise, but only when the first stream opens, deep in a worker. Refused here, the
     error names the setting before any work, and the value just inside each bound is
     accepted."""
-    accepted_config = DistanceConfig.model_validate({"compressor": compressor, setting: accepted})
-    assert getattr(accepted_config, setting) == accepted
-    with pytest.raises(ValueError, match=setting):
-        DistanceConfig.model_validate({"compressor": compressor, setting: refused})
+    accepted_config = DistanceConfig.model_validate(
+        {"compressor": {"name": compressor, setting: accepted}}
+    )
+    assert getattr(accepted_config.compressor, setting) == accepted
+    with pytest.raises(ValidationError) as raised:
+        DistanceConfig.model_validate({"compressor": {"name": compressor, setting: refused}})
+    assert [error["loc"] for error in raised.value.errors()] == [
+        ("compressor", compressor, setting)
+    ]
 
 
 @pytest.mark.parametrize(
@@ -427,23 +437,34 @@ def test_a_setting_outside_its_codec_bounds_is_refused_by_name(
         ("bzip2", "lzma_dictionary_bytes", 4_096),
     ],
 )
-def test_a_setting_for_another_compressor_is_refused_rather_than_ignored(
+def test_a_setting_for_another_compressor_cannot_be_written(
     compressor: str, setting: str, value: int
 ) -> None:
-    with pytest.raises(ValueError, match=f"{setting} does not apply to {compressor}"):
-        DistanceConfig.model_validate({"compressor": compressor, setting: value})
+    """Each compressor is its own settings model, so a setting it does not read is not a
+    field there: refused by name rather than ignored, and never part of the identity."""
+    with pytest.raises(ValidationError) as raised:
+        DistanceConfig.model_validate({"compressor": {"name": compressor, setting: value}})
+    assert [(error["type"], error["loc"]) for error in raised.value.errors()] == [
+        ("extra_forbidden", ("compressor", compressor, setting))
+    ]
+
+
+def test_a_compressor_outside_the_union_is_refused_by_its_tag() -> None:
+    with pytest.raises(ValidationError) as raised:
+        DistanceConfig.model_validate({"compressor": {"name": "rar"}})
+    assert [error["type"] for error in raised.value.errors()] == ["union_tag_invalid"]
 
 
 @pytest.mark.parametrize(
     ("settings", "charged"),
     [
-        ({"compressor": "zlib"}, 262_144),
-        ({"compressor": "gzip"}, 262_144),
-        ({"ppmd_memory_bytes": 1_048_576}, 1_048_576),
-        ({"compressor": "bzip2"}, 10_485_760),
-        ({"compressor": "bzip2", "bzip2_block_size_100k": 1}, 10_485_760),
-        ({"compressor": "lzma"}, 12 * 8_388_608 + 4_194_304),
-        ({"compressor": "lzma", "lzma_dictionary_bytes": 1_048_576}, 12 * 1_048_576 + 4_194_304),
+        ({"name": "zlib"}, 262_144),
+        ({"name": "gzip"}, 262_144),
+        ({"name": "ppmd", "ppmd_memory_bytes": 1_048_576}, 1_048_576),
+        ({"name": "bzip2"}, 10_485_760),
+        ({"name": "bzip2", "bzip2_block_size_100k": 1}, 10_485_760),
+        ({"name": "lzma"}, 12 * 8_388_608 + 4_194_304),
+        ({"name": "lzma", "lzma_dictionary_bytes": 1_048_576}, 12 * 1_048_576 + 4_194_304),
     ],
 )
 def test_every_compressor_states_the_memory_one_stream_holds(
@@ -452,7 +473,8 @@ def test_every_compressor_states_the_memory_one_stream_holds(
     """Preflight charges this once per worker, so it is stated for every compressor rather
     than for the one whose model happens to be large. DEFLATE's is the state zlib's header
     gives for a 15-bit window at memory level 8; PPMd's is the model it was configured with."""
-    assert DistanceConfig.model_validate(settings).stream_memory_bytes == charged
+    config = DistanceConfig.model_validate({"compressor": settings})
+    assert config.compressor.stream_memory_bytes == charged
 
 
 def test_the_codec_build_is_part_of_the_checkpoint_identity() -> None:
@@ -507,12 +529,12 @@ def test_a_stream_that_cannot_be_allocated_is_a_compression_error(
 
     path = tmp_path / "object.jsonl"
     path.write_bytes(b"payload")
-    config = DistanceConfig.model_validate({"compressor": compressor})
+    config = DistanceConfig.model_validate({"compressor": {"name": compressor}})
     monkeypatch.setattr(factory, unallocatable)
     with pytest.raises(DistanceError, match=f"{compressor} stream") as raised:
         compressed_size((path,), config=config)
     assert raised.value.code == "compression_error"
-    assert str(config.stream_memory_bytes) in str(raised.value)
+    assert str(config.compressor.stream_memory_bytes) in str(raised.value)
 
 
 def test_an_unreadable_object_is_reported_as_a_compression_error(tmp_path: Path) -> None:

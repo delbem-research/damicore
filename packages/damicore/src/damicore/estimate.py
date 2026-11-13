@@ -129,7 +129,7 @@ def preflight(
     working_memory = max(
         6 * scan.max_serialized_chunk_bytes,
         execution.effective_workers
-        * (2 * execution.compression_chunk_bytes + distance.stream_memory_bytes)
+        * (2 * execution.compression_chunk_bytes + distance.compressor.stream_memory_bytes)
         + pairs_per_shard * 24,
     )
     existing = disk_target

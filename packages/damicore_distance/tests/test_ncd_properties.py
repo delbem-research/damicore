@@ -24,7 +24,14 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from damicore_distance import DistanceConfig, compute_distance_matrix
+from damicore_distance import (
+    Bzip2Compressor,
+    DeflateCompressor,
+    DistanceConfig,
+    LzmaCompressor,
+    PpmdCompressor,
+    compute_distance_matrix,
+)
 from damicore_distance.compressor import compressed_size
 from damicore_distance.ncd import normalized_compression_distance
 
@@ -35,6 +42,7 @@ pytestmark = pytest.mark.unit
 PAYLOAD = st.binary(max_size=96)
 CHUNK_BYTES = st.integers(min_value=1, max_value=48)
 Compressor = Literal["zlib", "gzip", "ppmd", "bzip2", "lzma"]
+CompressorSettings = DeflateCompressor | PpmdCompressor | Bzip2Compressor | LzmaCompressor
 COMPRESSOR: st.SearchStrategy[Compressor] = st.sampled_from(
     ["zlib", "gzip", "ppmd", "bzip2", "lzma"]
 )
@@ -43,11 +51,22 @@ LEVEL = st.integers(min_value=0, max_value=9)
 
 def _config(compressor: Compressor, level: int, chunk_bytes: int) -> DistanceConfig:
     """The configuration a caller would write: a level only for the compressors that have one."""
-    if compressor not in ("zlib", "gzip"):
-        return DistanceConfig(compressor=compressor, compression_chunk_bytes=chunk_bytes)
-    return DistanceConfig(
-        compressor=compressor, compression_level=level, compression_chunk_bytes=chunk_bytes
-    )
+    settings: CompressorSettings
+    match compressor:
+        case "zlib" | "gzip":
+            settings = DeflateCompressor(name=compressor, compression_level=level)
+        case "ppmd":
+            settings = PpmdCompressor()
+        case "bzip2":
+            settings = Bzip2Compressor()
+        case "lzma":
+            settings = LzmaCompressor()
+    return DistanceConfig(compressor=settings, compression_chunk_bytes=chunk_bytes)
+
+
+def _named(compressor: Compressor) -> DistanceConfig:
+    """A compressor at its defaults, run on one worker."""
+    return DistanceConfig.model_validate({"compressor": {"name": compressor}, "workers": 1})
 
 
 def _direct_size(*payloads: bytes, config: DistanceConfig) -> int:
@@ -59,28 +78,35 @@ def _direct_size(*payloads: bytes, config: DistanceConfig) -> int:
     streaming encoder the implementation drives.
     """
     joined = b"".join(payloads)
-    if config.compressor == "bzip2":
-        return len(bz2.compress(joined, config.bzip2_block_size_100k))
-    if config.compressor == "lzma":
-        lzma2 = {"id": lzma.FILTER_LZMA2, "preset": 6, "dict_size": config.lzma_dictionary_bytes}
-        return len(lzma.compress(joined, format=lzma.FORMAT_RAW, filters=[lzma2]))
-    if config.compressor == "ppmd":
-        return len(
-            pyppmd.compress(
-                b"".join(payloads),
-                max_order=config.ppmd_order,
-                mem_size=config.ppmd_memory_bytes,
-                variant="I",
+    settings = config.compressor
+    match settings:
+        case Bzip2Compressor():
+            return len(bz2.compress(joined, settings.bzip2_block_size_100k))
+        case LzmaCompressor():
+            lzma2 = {
+                "id": lzma.FILTER_LZMA2,
+                "preset": 6,
+                "dict_size": settings.lzma_dictionary_bytes,
+            }
+            return len(lzma.compress(joined, format=lzma.FORMAT_RAW, filters=[lzma2]))
+        case PpmdCompressor():
+            return len(
+                pyppmd.compress(
+                    joined,
+                    max_order=settings.ppmd_order,
+                    mem_size=settings.ppmd_memory_bytes,
+                    variant="I",
+                )
             )
-        )
-    stream = zlib.compressobj(
-        level=config.compression_level,
-        wbits=zlib.MAX_WBITS if config.compressor == "zlib" else 31,
-    )
-    total = 0
-    for payload in payloads:
-        total += len(stream.compress(payload))
-    return total + len(stream.flush())
+        case DeflateCompressor():
+            stream = zlib.compressobj(
+                level=settings.compression_level,
+                wbits=zlib.MAX_WBITS if settings.name == "zlib" else 31,
+            )
+            total = 0
+            for payload in payloads:
+                total += len(stream.compress(payload))
+            return total + len(stream.flush())
 
 
 def _object_file(directory: Path, name: str, payload: bytes) -> Path:
@@ -226,7 +252,7 @@ def _copy_separation(directory: Path, compressor: Compressor, size: int) -> floa
     result = compute_distance_matrix(
         manifest_path,
         directory / f"{compressor}-{size}-run",
-        config=DistanceConfig(compressor=compressor, workers=1),
+        config=_named(compressor),
     )
     matrix = np.load(result.matrix_path, allow_pickle=False)
     return float(matrix[0, 2]) - float(matrix[0, 1])
@@ -264,7 +290,7 @@ def test_past_the_deflate_window_ppmd_still_separates_columns_by_distribution(
         result = compute_distance_matrix(
             manifest_path,
             tmp_path / compressor,
-            config=DistanceConfig(compressor=compressor, workers=1),
+            config=_named(compressor),
         )
         matrix = np.load(result.matrix_path, allow_pickle=False)
         return float(matrix[0, 2]) - float(matrix[0, 1])

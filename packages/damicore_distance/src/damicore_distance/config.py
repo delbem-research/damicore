@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
-from typing import Literal, Self
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 # One shard occupies one worker, so the pairs are spread over at least this many shards: a
 # run of few, large objects has few pairs, and a fixed shard size left it in a single shard
@@ -13,36 +13,110 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 _AUTO_SHARD_COUNT = 64
 _MAX_AUTO_PAIRS_PER_SHARD = 10_000
 
-# The settings each compressor reads. One set for a compressor it does not apply to is
-# refused rather than ignored: a caller who wrote it believes it took effect.
-_SETTINGS: dict[str, frozenset[str]] = {
-    "zlib": frozenset({"compression_level"}),
-    "gzip": frozenset({"compression_level"}),
-    "ppmd": frozenset({"ppmd_order", "ppmd_memory_bytes"}),
-    "bzip2": frozenset({"bzip2_block_size_100k"}),
-    "lzma": frozenset({"lzma_dictionary_bytes"}),
-}
+
+class DeflateCompressor(BaseModel):
+    """DEFLATE through ``zlib``: ``"zlib"`` in the zlib container, ``"gzip"`` in the gzip one.
+
+    Both see a 32 KiB window, the most either format allows: past it, the first object of a
+    pair is out of view while the second is compressed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["zlib", "gzip"] = "zlib"
+    compression_level: int = Field(default=6, ge=0, le=9)
+
+    @property
+    def stream_memory_bytes(self) -> int:
+        """The memory one stream is charged, once per worker, by preflight.
+
+        Stated rather than measured per run: a stream fills to it on incompressible data
+        [adr-0021].
+        """
+        # zconf.h: (1 << (windowBits + 2)) + (1 << (memLevel + 9)) at 15 and 8; the few
+        # kilobytes it adds for small objects are not charged.
+        return 262_144
+
+
+class PpmdCompressor(BaseModel):
+    """PPMd variant I with model restart, at ``ppmd_order`` with ``ppmd_memory_bytes`` of
+    model [adr-0020]. The bounds are the codec's own: pyppmd would clamp a value outside them
+    without saying so."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["ppmd"] = "ppmd"
+    ppmd_order: int = Field(default=6, ge=2, le=64)
+    ppmd_memory_bytes: int = Field(default=67_108_864, ge=2_048, le=4_294_967_259)
+
+    @property
+    def stream_memory_bytes(self) -> int:
+        """The memory one stream is charged, once per worker, by preflight.
+
+        Stated rather than measured per run: a stream fills to it on incompressible data
+        [adr-0021].
+        """
+        return self.ppmd_memory_bytes
+
+
+class Bzip2Compressor(BaseModel):
+    """bzip2 at ``bzip2_block_size_100k``; the block is its window [adr-0021]."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["bzip2"] = "bzip2"
+    bzip2_block_size_100k: int = Field(default=9, ge=1, le=9)
+
+    @property
+    def stream_memory_bytes(self) -> int:
+        """The memory one stream is charged, once per worker, by preflight.
+
+        Stated rather than measured per run: a stream fills to it on incompressible data
+        [adr-0021].
+        """
+        # The measured peak at the largest block, 9.5 MiB, charged at every block size.
+        return 10_485_760
+
+
+class LzmaCompressor(BaseModel):
+    """Raw LZMA2 at preset 6 with ``lzma_dictionary_bytes``; the dictionary is its window
+    [adr-0021]."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["lzma"] = "lzma"
+    lzma_dictionary_bytes: int = Field(default=8_388_608, ge=4_096, le=1_610_612_736)
+
+    @property
+    def stream_memory_bytes(self) -> int:
+        """The memory one stream is charged, once per worker, by preflight.
+
+        Stated rather than measured per run: a stream fills to it on incompressible data
+        [adr-0021].
+        """
+        # Above every measured peak from a 4 KiB to a 64 MiB dictionary at preset 6.
+        return 12 * self.lzma_dictionary_bytes + 4_194_304
+
+
+# Each compressor is its own model, so a setting it does not read is not a field to write:
+# refused by name, never ignored, and never part of a result's identity.
+Compressor = Annotated[
+    DeflateCompressor | PpmdCompressor | Bzip2Compressor | LzmaCompressor,
+    Field(discriminator="name"),
+]
 
 
 class DistanceConfig(BaseModel):
     """What the distance stage measures with, and how it schedules the work.
 
-    ``compressor`` and its settings change every NCD value. ``compression_level`` applies
-    to ``"zlib"`` and ``"gzip"``; ``ppmd_order`` and ``ppmd_memory_bytes`` to ``"ppmd"``,
-    PPMd variant I with model restart; ``bzip2_block_size_100k`` to ``"bzip2"``; and
-    ``lzma_dictionary_bytes`` to ``"lzma"``, raw LZMA2 at preset 6. The PPMd, bzip2 and LZMA
-    bounds are the codecs' own. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA,
-    and ``docs/method/ncd.md`` for what each compressor computes.
+    ``compressor`` and its settings change every NCD value; everything else changes only
+    cost and recovery. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA, and
+    ``docs/method/ncd.md`` for what each compressor computes.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    compressor: Literal["zlib", "gzip", "ppmd", "bzip2", "lzma"] = "ppmd"
-    compression_level: int = Field(default=6, ge=0, le=9)
-    ppmd_order: int = Field(default=6, ge=2, le=64)
-    ppmd_memory_bytes: int = Field(default=67_108_864, ge=2_048, le=4_294_967_259)
-    bzip2_block_size_100k: int = Field(default=9, ge=1, le=9)
-    lzma_dictionary_bytes: int = Field(default=8_388_608, ge=4_096, le=1_610_612_736)
+    compressor: Compressor = PpmdCompressor()
     compression_chunk_bytes: int = Field(default=4_194_304, gt=0)
     workers: int | Literal["auto"] = "auto"
     pairs_per_shard: int | Literal["auto"] = "auto"
@@ -55,43 +129,6 @@ class DistanceConfig(BaseModel):
         if isinstance(value, int) and value < 1:
             raise ValueError(f"{info.field_name} must be at least one")
         return value
-
-    @model_validator(mode="after")
-    def _settings_apply_to_the_compressor(self) -> Self:
-        foreign = sorted(
-            (self.model_fields_set & frozenset().union(*_SETTINGS.values()))
-            - _SETTINGS[self.compressor]
-        )
-        if foreign:
-            raise ValueError(f"{', '.join(foreign)} does not apply to {self.compressor}")
-        return self
-
-    @property
-    def compressor_settings(self) -> dict[str, int]:
-        """The settings ``compressor`` reads, by name, with the values in force."""
-        return {name: getattr(self, name) for name in sorted(_SETTINGS[self.compressor])}
-
-    @property
-    def stream_memory_bytes(self) -> int:
-        """The memory charged for one compressor stream, which every worker holds one of.
-
-        Stated, not measured per run: a stream fills to it on incompressible data. ADR 0021
-        records where each figure comes from, and the measurements behind the bzip2 and LZMA
-        ones.
-        """
-        match self.compressor:
-            case "zlib" | "gzip":
-                # zconf.h: (1 << (windowBits + 2)) + (1 << (memLevel + 9)) at 15 and 8; the
-                # few kilobytes it adds for small objects are not charged.
-                return 262_144
-            case "ppmd":
-                return self.ppmd_memory_bytes
-            case "bzip2":
-                # The measured peak at the largest block, 9.5 MiB, charged at every block size.
-                return 10_485_760
-            case "lzma":
-                # Above every measured peak from a 4 KiB to a 64 MiB dictionary at preset 6.
-                return 12 * self.lzma_dictionary_bytes + 4_194_304
 
     @property
     def effective_workers(self) -> int:

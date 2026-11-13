@@ -41,6 +41,17 @@ preset is not a setting: preset 9 measured the same as preset 6 at every size ab
 `compression_level` remains for `zlib` and `gzip` as the published contract it already is,
 and is not a precedent for this rule.
 
+In `damicore_distance` each compressor is its own settings model, and `DistanceConfig`
+holds one of them, chosen by `name`: `PpmdCompressor`, `DeflateCompressor` for `zlib` and
+`gzip`, which share their one setting, `Bzip2Compressor` and `LzmaCompressor`. A setting
+for another compressor is then not refused by a rule but absent: the model has no field to
+hold it, and a result's identity holds no default of a compressor it did not use. Each
+setting keeps one name on every surface -- the model field, `damicore.run`'s argument, the
+CLI flag and the manifest field -- so `damicore`, whose signature stays flat (ADR 0013),
+derives which arguments each compressor accepts from the models rather than restating them,
+and a test holds the four surfaces to the models. A compressor added later is a model added
+to that union.
+
 ## What it costs
 
 Every worker holds one stream, and preflight charges each compressor's stream memory once per

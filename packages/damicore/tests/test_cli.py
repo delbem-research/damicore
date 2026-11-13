@@ -1,15 +1,19 @@
+import inspect
 import json
 import os
 import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, get_args
 
 import pytest
+from damicore_distance import DistanceConfig
 
-from damicore import DamicoreResult
+from damicore import DamicoreResult, estimate, run
+from damicore.api import _distance_config
 from damicore.cli import _parser, main
+from damicore.manifest import RunConfig
 
 pytestmark = pytest.mark.unit
 
@@ -144,14 +148,8 @@ def test_estimate_without_json_keeps_stdout_empty(
     assert json.loads(captured.err)["object_count"] == 2
 
 
-def test_every_argument_carries_help_text() -> None:
-    """`--help` is the whole documentation of the command line, and the release smoke runs it
-    as a gate: without this, that gate proves the parser builds, not that it explains anything.
-
-    argparse exposes no public way to walk its arguments, so this reads `_actions`. The private
-    attribute is confined to this test, where a rename surfaces as a failed test rather than as
-    a silently unchecked contract.
-    """
+def _commands() -> dict[str, Any]:
+    """Each subcommand's parser, by name, read from argparse's private `_actions`."""
     # argparse's private attributes are untyped in the shipped stubs; one cast isolates that
     # boundary here rather than letting Unknown leak into the assertions. The subcommand action
     # is the only one whose `choices` is a mapping of parsers, so it needs no private class.
@@ -162,9 +160,19 @@ def test_every_argument_carries_help_text() -> None:
         if isinstance(choices, dict):
             commands.update(cast(dict[str, Any], choices))
     assert set(commands) == {"estimate", "run"}
+    return commands
 
+
+def test_every_argument_carries_help_text() -> None:
+    """`--help` is the whole documentation of the command line, and the release smoke runs it
+    as a gate: without this, that gate proves the parser builds, not that it explains anything.
+
+    argparse exposes no public way to walk its arguments, so this reads `_actions`. The private
+    attribute is confined to this test, where a rename surfaces as a failed test rather than as
+    a silently unchecked contract.
+    """
     bare: list[str] = []
-    for name, command in commands.items():
+    for name, command in _commands().items():
         assert command.description, name
         for action in command._actions:
             if action.dest in {"help", "version"}:
@@ -219,3 +227,30 @@ def test_a_write_to_a_closed_pipe_returns_the_sigpipe_status(
 
     monkeypatch.setattr(sys, "stdout", ClosedPipe())
     assert main(["estimate", str(_csv(tmp_path)), "--json"]) == 141
+
+
+def test_every_compressor_setting_is_reachable_on_every_surface() -> None:
+    """The flat public signature is an adapter onto the compressor union of the distance
+    stage, and the manifest records it flat again, so a setting can be lost at any of them.
+
+    A field added to a compressor model with no matching keyword, flag or manifest field is
+    a setting the stage offers and no `damicore` caller can reach, or one a run uses and its
+    manifest does not record; a compressor added to the union but not to the manifest or the
+    flag fails only when someone first picks it. Asserted against the union rather than a
+    list, so the models stay the one declaration.
+    """
+    models = get_args(DistanceConfig.model_fields["compressor"].annotation)
+    fields = {field for model in models for field in model.model_fields} - {"name"}
+    tags = {tag for model in models for tag in get_args(model.model_fields["name"].annotation)}
+    # Guards the discovery: an empty set would make every assertion below vacuous.
+    assert len(fields) >= 5 and len(tags) >= 5, (fields, tags)
+
+    for surface in (run, estimate, _distance_config):
+        parameters = set(inspect.signature(surface).parameters)
+        assert not fields - parameters, (surface.__name__, sorted(fields - parameters))
+    assert not fields - set(RunConfig.model_fields), sorted(fields - set(RunConfig.model_fields))
+    assert set(get_args(RunConfig.model_fields["compressor"].annotation)) == tags
+    for name, command in _commands().items():
+        flags = {action.dest: action for action in command._actions}
+        assert not fields - set(flags), (name, sorted(fields - set(flags)))
+        assert set(flags["compressor"].choices) == tags, name

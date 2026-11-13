@@ -21,8 +21,8 @@ References
    not precisely symmetric". The window, and for PPMd the order and the model memory, are
    properties of this unit rather than of the method: the paper fixes none of them, and
    every NCD value is a function of whichever are in force, which is why
-   `DistanceConfig.compressor` is a `Literal` and why a name outside it must fail to
-   type-check rather than compress as something else.
+   `DistanceConfig.compressor` is a closed union of settings models and why a name outside
+   it must fail validation rather than compress as something else.
    Read: 2026-11-06, primary.
 .. [shkarin2003] PPM: one step to practicality. Describes PPMII, the model behind Shkarin's
    PPMd, whose variant I `pyppmd` implements and this unit drives. What this unit takes from
@@ -42,37 +42,44 @@ from pathlib import Path
 
 import pyppmd
 
-from damicore_distance.config import DistanceConfig
+from damicore_distance.config import (
+    Bzip2Compressor,
+    DeflateCompressor,
+    DistanceConfig,
+    LzmaCompressor,
+    PpmdCompressor,
+)
 from damicore_distance.errors import DistanceError
 
 
 def _stream(config: DistanceConfig) -> tuple[Callable[[bytes], bytes], Callable[[], bytes]]:
     """Open one stream and return how to feed it and how to finish it.
 
-    The match is total over the compressor ``Literal``: a name added there without a case
-    here leaves a path with no return, which the type checker refuses.
+    The match is total over the compressor union: a model added there without a case here
+    leaves a path with no return, which the type checker refuses.
     """
-    match config.compressor:
-        case "zlib" | "gzip":
-            # The literal is what makes the window total rather than a fallback: every NCD
-            # value is a function of it, so a name outside the pair must fail to type-check,
+    settings = config.compressor
+    match settings:
+        case DeflateCompressor():
+            # The tag is what makes the container total rather than a fallback: every NCD
+            # value is a function of it, so a name outside the pair must fail validation,
             # never quietly compress as gzip.
-            wbits = zlib.MAX_WBITS if config.compressor == "zlib" else 31
-            deflate = zlib.compressobj(level=config.compression_level, wbits=wbits)
+            wbits = zlib.MAX_WBITS if settings.name == "zlib" else 31
+            deflate = zlib.compressobj(level=settings.compression_level, wbits=wbits)
             return deflate.compress, deflate.flush
-        case "ppmd":
+        case PpmdCompressor():
             model = pyppmd.Ppmd8Encoder(
-                config.ppmd_order,
-                config.ppmd_memory_bytes,
+                settings.ppmd_order,
+                settings.ppmd_memory_bytes,
                 pyppmd.PPMD8_RESTORE_METHOD_RESTART,
             )
             return model.encode, model.flush
-        case "bzip2":
-            block = bz2.BZ2Compressor(config.bzip2_block_size_100k)
+        case Bzip2Compressor():
+            block = bz2.BZ2Compressor(settings.bzip2_block_size_100k)
             return block.compress, block.flush
-        case "lzma":
+        case LzmaCompressor():
             dictionary = lzma.LZMACompressor(
-                lzma.FORMAT_RAW, filters=[_lzma2(config.lzma_dictionary_bytes)]
+                lzma.FORMAT_RAW, filters=[_lzma2(settings.lzma_dictionary_bytes)]
             )
             return dictionary.compress, dictionary.flush
 
@@ -110,8 +117,9 @@ def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:
         feed, finish = _stream(config)
     except MemoryError as exc:
         raise DistanceError(
-            f"Could not allocate a {config.compressor} stream of "
-            f"{config.stream_memory_bytes} bytes; lower its settings or the worker count",
+            f"Could not allocate a {config.compressor.name} stream of "
+            f"{config.compressor.stream_memory_bytes} bytes; lower its settings or the worker "
+            "count",
             code="compression_error",
         ) from exc
     total = 0

@@ -19,7 +19,10 @@ the sum of the compressed output plus the final flush. `C(xy)` is the same call 
 paths in order, so the concatenation is never materialised on disk.
 
 The compressor and its settings are part of the value, and each compressor reads only its
-own; a setting for another compressor is refused, not ignored.
+own; a setting for another compressor is refused, not ignored. `damicore` takes them as
+flat arguments; `damicore_distance` takes one settings model per compressor --
+`PpmdCompressor`, `DeflateCompressor` (`name="zlib"` or `"gzip"`), `Bzip2Compressor`,
+`LzmaCompressor` -- which has no field for a setting its compressor does not read.
 
 - `compressor="ppmd"`, the default, is PPMd variant I through `pyppmd`, restarting its
   model from scratch when the model memory fills. `ppmd_order` (2 to 64, default 6) and
