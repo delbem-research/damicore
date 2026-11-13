@@ -41,15 +41,15 @@ pytestmark = pytest.mark.unit
 # exercised below and to give the deflate window something to match on.
 PAYLOAD = st.binary(max_size=96)
 CHUNK_BYTES = st.integers(min_value=1, max_value=48)
-Compressor = Literal["zlib", "gzip", "ppmd", "bzip2", "lzma"]
+CompressorName = Literal["zlib", "gzip", "ppmd", "bzip2", "lzma"]
 CompressorSettings = DeflateCompressor | PpmdCompressor | Bzip2Compressor | LzmaCompressor
-COMPRESSOR: st.SearchStrategy[Compressor] = st.sampled_from(
+COMPRESSOR: st.SearchStrategy[CompressorName] = st.sampled_from(
     ["zlib", "gzip", "ppmd", "bzip2", "lzma"]
 )
 LEVEL = st.integers(min_value=0, max_value=9)
 
 
-def _config(compressor: Compressor, level: int, chunk_bytes: int) -> DistanceConfig:
+def _config(compressor: CompressorName, level: int, chunk_bytes: int) -> DistanceConfig:
     """The configuration a caller would write: a level only for the compressors that have one."""
     settings: CompressorSettings
     match compressor:
@@ -64,7 +64,7 @@ def _config(compressor: Compressor, level: int, chunk_bytes: int) -> DistanceCon
     return DistanceConfig(compressor=settings, compression_chunk_bytes=chunk_bytes)
 
 
-def _named(compressor: Compressor) -> DistanceConfig:
+def _named(compressor: CompressorName) -> DistanceConfig:
     """A compressor at its defaults, run on one worker."""
     return DistanceConfig.model_validate({"compressor": {"name": compressor}, "workers": 1})
 
@@ -165,7 +165,7 @@ def test_chunked_compression_matches_a_direct_single_shot_stream(
     tmp_path_factory: pytest.TempPathFactory,
     payload: bytes,
     chunk_bytes: int,
-    compressor: Compressor,
+    compressor: CompressorName,
     level: int,
 ) -> None:
     directory = tmp_path_factory.mktemp("chunked")
@@ -197,7 +197,7 @@ def test_pair_compression_equals_compressing_the_joined_bytes(
     left: bytes,
     right: bytes,
     chunk_bytes: int,
-    compressor: Compressor,
+    compressor: CompressorName,
 ) -> None:
     """C(xy) feeds x then y through one compressor instance and must equal compressing the
     concatenation, which the implementation never materializes."""
@@ -244,7 +244,7 @@ def _mutated(payload: bytes, rate: float) -> bytes:
     return bytes(mutated)
 
 
-def _copy_separation(directory: Path, compressor: Compressor, size: int) -> float:
+def _copy_separation(directory: Path, compressor: CompressorName, size: int) -> float:
     """Distance to an unrelated column minus distance to the same column with 1 % changed."""
     column = _column(1, 10, size)
     payloads = [column, _mutated(column, 0.01), _column(2, 12, size)]
