@@ -23,8 +23,10 @@ from damicore import (
     CheckpointMismatchError,
     ExecutionConfig,
     InputValidationError,
+    MaterializationError,
     OutputDirectoryConflictError,
     ResourceEstimate,
+    ResourceLimits,
     load_result,
     run,
 )
@@ -170,6 +172,54 @@ def test_a_directory_holding_another_configuration_is_refused(tmp_path: Path) ->
             progress=False,
             execution=_single_worker(),
         )
+
+
+def test_execution_settings_do_not_change_which_run_a_directory_belongs_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Execution settings change cost and recovery, never the result, so an interrupted run
+    resumes under any of them -- on a machine with another CPU count, for instance -- and keeps
+    the identity it was created with. See ADR 0022."""
+    output = tmp_path / "run"
+    source = _incomplete_run(tmp_path, monkeypatch, output)
+    recorded = _read_json(output / "manifest.json")
+    other = ExecutionConfig(
+        workers=2,
+        csv_chunk_rows=1,
+        compression_chunk_bytes=1,
+        pairs_per_shard=1,
+        pandas_materialization_limit_bytes=1,
+        limits=ResourceLimits(max_objects=100),
+    )
+    result = run(source, output_dir=output, progress=False, execution=other)
+    try:
+        assert result.report.status == "completed"
+        resumed = _read_json(output / "manifest.json")
+        assert (resumed["run_id"], resumed["config_hash"]) == (
+            recorded["run_id"],
+            recorded["config_hash"],
+        )
+        # The manifest keeps the settings of the invocation that created the directory, and
+        # the returned view still obeys the caller's own materialization limit.
+        assert resumed["config"] == recorded["config"]
+        with pytest.raises(MaterializationError):
+            result.distance_matrix.to_pandas()
+    finally:
+        result.close()
+
+
+def test_auto_workers_name_the_same_default_directory_on_any_cpu_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``workers="auto"`` resolves from ``os.cpu_count()``; a second machine must reuse the
+    completed run rather than compute the same result into a second directory."""
+    source = _csv(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    run(source, progress=False).close()
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    run(source, progress=False).close()
+    assert len(list((tmp_path / "damicore-results").iterdir())) == 1
 
 
 def test_an_incomplete_run_is_refused_when_resume_is_disabled(

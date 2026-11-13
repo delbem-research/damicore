@@ -282,7 +282,13 @@ def _checkpoint_identity(
         "schema_version": 1,
         "normalization_manifest_sha256": _sha256(manifest_path),
         "object_ids": object_ids,
-        "config": settings.model_dump(mode="json"),
+        # These settings change cost or control flow, never a stored size or shard value, so a
+        # checkpoint stays valid across them; `pairs_per_shard` stays in because it is the
+        # layout the shards are indexed by (ADR 0022).
+        "config": settings.model_dump(
+            mode="json",
+            exclude={"workers", "compression_chunk_bytes", "resume", "save_diagnostics"},
+        ),
         "runtime": _runtime_fingerprint(),
     }
 

@@ -33,11 +33,13 @@ class ExecutionConfig(BaseModel):
     """How a run is executed, as opposed to what it computes.
 
     These settings change cost and restart behavior, not the clustering: the pipeline is
-    exact and deterministic under any of them. They do change run identity -- every field
-    except ``resume`` and ``reuse_completed`` enters the configuration hash that names the
-    default output directory, so ``workers="auto"`` resolving differently on another machine
-    produces a different run rather than resuming the existing one. ``pairs_per_shard="auto"``
-    resolves from the pair count alone, so it names the same run on every machine.
+    exact and deterministic under any of them, so none enters the configuration hash that
+    names the run. ``manifest.json`` records the values of the invocation that created the
+    run directory; a later invocation that resumes or reuses it -- on another machine, where
+    ``workers="auto"`` resolves differently, for instance -- adopts the same directory. A
+    resume with another ``pairs_per_shard`` is refused while the distance stage is incomplete,
+    because its checkpoint is indexed by that layout; ``pairs_per_shard="auto"`` resolves
+    from the pair count alone, so it gives the same layout on every machine. See ADR 0022.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

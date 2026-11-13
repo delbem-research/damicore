@@ -796,6 +796,31 @@ def test_a_shard_checkpoint_describing_another_computation_is_rejected(tmp_path:
     assert raised.value.code == "checkpoint_mismatch_error"
 
 
+def test_a_checkpoint_resumes_under_other_execution_settings(tmp_path: Path) -> None:
+    """A checkpoint holds compressed sizes and shard values, which no execution setting
+    changes; only the shard layout it is indexed by must match. See ADR 0022."""
+    manifest, output = _completed_run(tmp_path)
+    expected = np.load(output / "distance.npy", allow_pickle=False)
+    compute_distance_matrix(
+        manifest,
+        output,
+        config=DistanceConfig(
+            workers=2, pairs_per_shard=1, compression_chunk_bytes=1, save_diagnostics=True
+        ),
+    )
+    assert np.array_equal(np.load(output / "distance.npy", allow_pickle=False), expected)  # pyright: ignore[reportUnknownMemberType]
+    # The shard size is operational for the result even though a checkpoint is keyed by it.
+    wide = compute_distance_matrix(
+        manifest, tmp_path / "wide", config=DistanceConfig(workers=1, pairs_per_shard=10_000)
+    )
+    assert np.array_equal(np.load(wide.matrix_path, allow_pickle=False), expected)  # pyright: ignore[reportUnknownMemberType]
+    with pytest.raises(DistanceError, match="incompatible") as raised:
+        compute_distance_matrix(
+            manifest, output, config=DistanceConfig(workers=1, pairs_per_shard=2)
+        )
+    assert raised.value.code == "checkpoint_mismatch_error"
+
+
 def test_a_shard_index_outside_the_shard_count_is_rejected(tmp_path: Path) -> None:
     manifest, output = _completed_run(tmp_path)
     _rewrite(

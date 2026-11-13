@@ -7,6 +7,22 @@ carries anything else, a date included, matches neither and fails the release.
 
 ## 0.4.0
 
+### Breaking
+
+- `config_hash`, and so `run_id` and the default run directory, no longer covers the
+  execution settings: `workers`, `csv_chunk_rows`, `compression_chunk_bytes`,
+  `pairs_per_shard`, `pandas_materialization_limit_bytes` and `limits`. They change cost and
+  recovery, never an artifact, yet `workers="auto"` resolved from the CPU count made the same
+  call name another run on another machine, so an interrupted run could not be resumed there
+  and identical results carried two identities. `manifest.json` still records every setting,
+  as the invocation that created the directory resolved them. **Every existing run has a new
+  identity**: a completed earlier run is recomputed rather than reused, an interrupted one
+  cannot be resumed, and an explicit `output_dir` holding either raises
+  `OutputDirectoryConflictError`. Completed earlier runs still load with `load_result`; the
+  schema version did not change. The distance checkpoint follows the same rule and keeps
+  `pairs_per_shard`, the layout its shards are indexed by, so resuming an incomplete distance
+  stage with another shard size is refused as `checkpoint_mismatch_error`. See ADR 0022.
+
 ### Added
 
 - `damicore-distance` measures with two more compressors, both from the standard library, so

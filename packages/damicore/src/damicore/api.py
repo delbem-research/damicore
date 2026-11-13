@@ -407,8 +407,24 @@ def _config_payload(
     }
 
 
+# Execution settings change cost, admission and recovery, never the result, so `config`
+# records them and the hash that names the run leaves them out (ADR 0022). The set names what
+# is excluded rather than what enters, so a new field is identity until someone classifies it.
+_OPERATIONAL_CONFIG_KEYS = frozenset(
+    {
+        "workers",
+        "csv_chunk_rows",
+        "compression_chunk_bytes",
+        "pairs_per_shard",
+        "pandas_materialization_limit_bytes",
+        "limits",
+    }
+)
+
+
 def _identity(input_hash: str, config: dict[str, object]) -> tuple[str, str]:
-    encoded = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    semantic = {key: value for key, value in config.items() if key not in _OPERATIONAL_CONFIG_KEYS}
+    encoded = json.dumps(semantic, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     config_hash = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     run_hash = hashlib.sha256(f"{input_hash}{config_hash}{SCHEMA_VERSION}".encode()).hexdigest()
     return config_hash, run_hash[:16]
@@ -886,7 +902,9 @@ def run(
                 raise OutputDirectoryConflictError(
                     "Completed run was created by a different runtime fingerprint"
                 )
-            return load_result(run_dir)
+            return _load_result(
+                run_dir, materialization_limit_bytes=settings.pandas_materialization_limit_bytes
+            )
         if not settings.resume:
             raise OutputDirectoryConflictError("Incomplete output resume is disabled")
         if not same_runtime:
@@ -1147,7 +1165,9 @@ def run(
         atomic_json(manifest_path, manifest)
         logger.info("verification_completed", extra={"run_id": run_id})
         logger.info("run_completed", extra={"run_id": run_id})
-        return load_result(run_dir)
+        return _load_result(
+            run_dir, materialization_limit_bytes=settings.pandas_materialization_limit_bytes
+        )
     except KeyboardInterrupt as exc:
         _write_failure(
             journal,
@@ -1224,6 +1244,14 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
         wrong-version manifest or report; a hash or size mismatch; a path that escapes the
         run directory; or a membership, cluster, or Newick artifact that does not parse.
     """
+    return _load_result(output_dir, materialization_limit_bytes=None)
+
+
+def _load_result(
+    output_dir: str | Path, *, materialization_limit_bytes: int | None
+) -> DamicoreResult:
+    # `run` passes its caller's limit: a reused or resumed directory records the limit of the
+    # invocation that created it, which is operational and no longer part of its identity.
     run_dir = Path(output_dir).resolve()
     paths = artifact_paths(run_dir)
     try:
@@ -1274,7 +1302,11 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
     view = DistanceMatrixView(
         paths.distance_matrix,
         list(labels_payload.labels),
-        materialization_limit_bytes=manifest.config.pandas_materialization_limit_bytes,
+        materialization_limit_bytes=(
+            manifest.config.pandas_materialization_limit_bytes
+            if materialization_limit_bytes is None
+            else materialization_limit_bytes
+        ),
         materialization_error=MaterializationError,
     )
     return DamicoreResult(
