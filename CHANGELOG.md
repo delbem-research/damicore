@@ -11,11 +11,11 @@ carries anything else, a date included, matches neither and fails the release.
 
 - `damicore-distance` measures with two more compressors, both from the standard library, so
   no dependency is added. `compressor="lzma"` is raw LZMA2 at preset 6 with
-  `lzma_dictionary_bytes` (default 8 MiB), and it is the only compressor here that finds
-  shared content past 32 KiB: a column against its 1 % mutated copy separated by 0.906 at
-  every size up to 4 MiB, where PPMd separated by 0.090 to 0.298. `compressor="bzip2"` uses
-  `bzip2_block_size_100k` (default 9) and sees both a copy and a distribution, but only
-  within its 900 kB block. PPMd stays the default. Each setting is refused outside its
+  `lzma_dictionary_bytes` (default 8 MiB), and it is the compressor here that keeps finding
+  shared content at any size its dictionary holds: a column against its 1 % mutated copy
+  separated by 0.884 to 0.907 at every size from 16 KiB to 4 MiB, where PPMd separated by
+  0.531 falling to 0.090. `compressor="bzip2"` uses `bzip2_block_size_100k` (default 9) and
+  sees both a copy and a distribution, but only within its 900 kB block. PPMd stays the default. Each setting is refused outside its
   codec's bounds or for another compressor, each stream's memory is charged per worker
   (10 MiB for bzip2, 12 times the dictionary plus 4 MiB for LZMA), and `codec_fingerprint()`
   names libbz2 and liblzma by the size each gives a fixed payload, since neither reports a
@@ -31,9 +31,9 @@ carries anything else, a date included, matches neither and fails the release.
   recognizes when it reads it again, the idempotency [cilibrasi2005] requires of a normal
   compressor, which nothing measured before. It costs one more compression of the largest
   object, run on the pool beside the shards. It is never a gate, and a high value is not by
-  itself a fault -- on one independently drawn value per line no compressor here recognizes
-  a 128 KiB repeat -- but it shows a compressor that stopped recognizing repetition at this
-  run's object size. `RunReport` gains the field, so its specified field list changes; it is
+  itself a fault -- on one independently drawn value per line neither DEFLATE nor PPMd
+  recognizes a 128 KiB repeat -- but it shows a compressor that stopped recognizing
+  repetition at this run's object size. `RunReport` gains the field, so its specified field list changes; it is
   `None` on a report written before it and on a failure report.
 - `ResourceEstimate` reports `compression_input_bytes`, the exact bytes the distance stage
   feeds its compressor (`object_count * normalized_bytes`, plus twice the largest object

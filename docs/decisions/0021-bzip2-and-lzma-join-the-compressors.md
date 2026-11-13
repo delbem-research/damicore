@@ -1,9 +1,9 @@
 # ADR 0021: bzip2 and LZMA join the compressors
 
 ADR 0020 made PPMd the default and left every other compressor deferred. This adds two,
-`bzip2` and `lzma`, both from the Python standard library, because neither DEFLATE nor PPMd
-measures shared content across objects larger than 32 KiB, and LZMA does. PPMd stays the
-default.
+`bzip2` and `lzma`, both from the Python standard library, because past 32 KiB DEFLATE loses
+shared content entirely and PPMd keeps less of it as objects grow, while LZMA keeps it at
+any size its dictionary holds. PPMd stays the default.
 
 ## The measurement
 
@@ -49,8 +49,8 @@ worker. Measured peak resident memory, on incompressible data, on Linux x86_64:
 | stream | measured | charged |
 |---|---|---|
 | `bzip2`, block 9 | 9.5 MiB | 10 MiB at every block size |
-| `lzma`, dictionary 1 / 4 / 8 / 16 / 64 MiB | 14.5 / 50.7 / 94 / 187 / 675 MiB | 12 x dictionary + 4 MiB |
-| `zlib`, `gzip`, level 6 | -- | 256 KiB, the deflate state zlib's own header gives |
+| `lzma`, dictionary 4 KiB / 1 / 4 / 8 / 16 / 64 MiB | 1.5 / 14.5 / 50.7 / 94 / 187 / 675 MiB | 12 x dictionary + 4 MiB |
+| `zlib`, `gzip`, level 6 | -- | 256 KiB, the two tables `zconf.h` sizes; the few kilobytes it adds are not charged |
 | `ppmd` | -- | the configured model memory (ADR 0020) |
 
 At the defaults, four workers stay inside the default 512 MiB limit for every compressor.
@@ -62,11 +62,16 @@ by 256 KiB per worker.
 `bz2` and `lzma` call the system's libbz2 and liblzma, and Python exposes the version of
 neither. A result is a function of the encoder, so the runtime fingerprint names each by
 behavior instead: the compressed size of a fixed payload, recorded beside the zlib versions
-and the `pyppmd` version. A system library that encodes differently changes that size, and a
-checkpoint or a completed run written under the old one is refused rather than resumed.
+and the `pyppmd` version. A system library that encodes that payload differently changes
+that size, and a checkpoint or a completed run written under the old one is refused rather
+than resumed. A difference that leaves the payload's size alone, or shows only at larger
+blocks or dictionaries than the probe uses, goes unseen.
 
 ## Status
 
-The window each compressor declares for a gate is deferred to issue 59, which has the gate to
-use it. Revisit the LZMA charge if the preset changes, since the match finder's memory is
-what the factor of 12 measures.
+ADR 0005 stands: like zlib and PPMd, both compressors open a fresh stream per pair and
+keep no state across pairs, so the process pool is unchanged; what their larger streams
+change is the memory per worker, which preflight now charges. The window each compressor
+declares for a gate is deferred to issue 59, which has the gate to use it. Revisit the LZMA
+charge if the preset changes, since the match finder's memory is what the factor of 12
+measures.

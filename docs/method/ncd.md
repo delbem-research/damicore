@@ -35,8 +35,9 @@ own; a setting for another compressor is refused, not ignored.
   nothing between them.
 - `compressor="lzma"` is raw LZMA2, with no container, at preset 6, with
   `lzma_dictionary_bytes` (4096 to 1610612736, default 8388608). The dictionary is its
-  window, and it is the compressor that finds a copy of an object past 32 KiB; it is also
-  the slowest, at 1.7 to 3.4 MB/s against PPMd's 15.
+  window, and it keeps finding a copy of an object at any size the dictionary holds the
+  pair in, where bzip2 stops at its block; it is also the slowest, at 1.7 to 3.4 MB/s
+  against PPMd's 15.
 
 Which one measures what, at which size, is the table in [adr-0021]: LZMA finds shared
 content at any size its dictionary holds, PPMd keeps a shared distribution across large
@@ -81,8 +82,10 @@ defined below depend on the details of the compressor used". It also states plai
 "the theory developed in [29] does not hold directly for the (possibly poorly) approximating
 NCD".
 
-`zlib` is Lempel-Ziv and PPMd is of the PPM family. This implementation therefore inherits
-the caveat the paper names for both, whichever is configured, and takes no step to correct
+`zlib` and LZMA are Lempel-Ziv and PPMd is of the PPM family, so with any of them this
+implementation inherits the caveat the paper names for that family; `bzip2` is
+block-sorting, a family the paper does not name, and nothing here establishes its symmetry
+either. This implementation takes no step to correct
 it.
 
 ## What this implementation does not take from that source
@@ -100,8 +103,8 @@ it.
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is
   never a gate, and a high value is not by itself a fault: on one independently drawn value
-  per line neither compressor recognizes a repeat of 128 KiB, while PPMd still separates
-  such columns by their distributions [adr-0020].
+  per line neither DEFLATE nor PPMd recognizes a repeat of 128 KiB, while PPMd still
+  separates such columns by their distributions [adr-0020]; LZMA recognizes it.
 - **No `1+e` bound is enforced.** The paper's range is `0 <= r <= 1+e`; the validation pass
   measures the realised range and reports `ncd_min`, `ncd_max` and
   `ncd_out_of_range_count` rather than rejecting a value outside it.
@@ -112,7 +115,7 @@ it.
 |---|---|
 | Available | `ppmd` through `pyppmd`; `zlib` and `gzip` through `zlib.compressobj`; `bzip2` and `lzma` through the standard library; exact (every pair computed) |
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
-| Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a PPMd model that cannot be allocated, raises the same class with code `compression_error` |
+| Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a compressor stream that cannot be allocated, raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
 
 ## Sources

@@ -30,9 +30,9 @@ class DistanceConfig(BaseModel):
     ``compressor`` and its settings change every NCD value. ``compression_level`` applies
     to ``"zlib"`` and ``"gzip"``; ``ppmd_order`` and ``ppmd_memory_bytes`` to ``"ppmd"``,
     PPMd variant I with model restart; ``bzip2_block_size_100k`` to ``"bzip2"``; and
-    ``lzma_dictionary_bytes`` to ``"lzma"``, raw LZMA2 at preset 6. Each bound is the codec's
-    own. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA, and ``docs/method/ncd.md``
-    for what each compressor computes.
+    ``lzma_dictionary_bytes`` to ``"lzma"``, raw LZMA2 at preset 6. The PPMd, bzip2 and LZMA
+    bounds are the codecs' own. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA,
+    and ``docs/method/ncd.md`` for what each compressor computes.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -73,14 +73,16 @@ class DistanceConfig(BaseModel):
 
     @property
     def stream_memory_bytes(self) -> int:
-        """The memory one compressor stream can hold, which every worker holds one of.
+        """The memory charged for one compressor stream, which every worker holds one of.
 
         Stated, not measured per run: a stream fills to it on incompressible data. ADR 0021
-        records the measurements each figure is checked against.
+        records where each figure comes from, and the measurements behind the bzip2 and LZMA
+        ones.
         """
         match self.compressor:
             case "zlib" | "gzip":
-                # zlib.h: (1 << (windowBits + 2)) + (1 << (memLevel + 9)) at 15 and 8.
+                # zconf.h: (1 << (windowBits + 2)) + (1 << (memLevel + 9)) at 15 and 8; the
+                # few kilobytes it adds for small objects are not charged.
                 return 262_144
             case "ppmd":
                 return self.ppmd_memory_bytes

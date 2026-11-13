@@ -30,13 +30,14 @@ class ResourceEstimate(BaseModel):
     ``input_sha256`` identifies the whole input: one file's digest for a dataset, and a digest
     over every adopted file for a corpus, since no single file identifies that run.
 
-    ``compression_input_bytes`` is the exact number of bytes the distance stage feeds its
-    compressor: every object once for its own size, both objects of every pair, and the
-    largest object twice for ``ncd_self_largest``, which is ``object_count *
-    normalized_bytes`` plus twice the largest object. Divided by a measured throughput it is
-    the stage's time, and nothing gates on it. ``max_pair_bytes`` is the longest
-    concatenation the compressor is given -- the two largest objects -- which is what a
-    compressor's window or model memory has to hold for an NCD value to see across the pair.
+    ``compression_input_bytes`` is the exact number of bytes a distance stage that starts
+    from no checkpoint feeds its compressor: every object once for its own size, both
+    objects of every pair, and the largest object twice for ``ncd_self_largest``, which is
+    ``object_count * normalized_bytes`` plus twice the largest object. Divided by a measured
+    throughput it is the stage's time, and nothing gates on it. ``max_pair_bytes`` is the
+    longest concatenation the compressor is given -- the two largest objects -- which is
+    what a compressor's window or model memory has to hold for an NCD value to see across
+    the pair.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)

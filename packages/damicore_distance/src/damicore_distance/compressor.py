@@ -90,8 +90,9 @@ def codec_fingerprint() -> dict[str, str]:
 
     zlib and pyppmd report their versions. libbz2 and liblzma come from the system and
     report none, so each is named by the size it gives a fixed payload: an encoder that
-    compresses differently changes that size, and a checkpoint or a run recorded under the
-    other one is refused rather than resumed [adr-0021].
+    compresses that payload differently changes that size, and a checkpoint or a run
+    recorded under the other one is refused rather than resumed. A difference the payload
+    does not reach goes unseen [adr-0021].
     """
     return {
         "zlib_build": zlib.ZLIB_VERSION,

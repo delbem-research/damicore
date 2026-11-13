@@ -110,8 +110,8 @@ def _parser() -> argparse.ArgumentParser:
             type=int,
             help="worker processes for the distance stage; omit to choose automatically",
         )
-        # The compressor decides the distances and, through the PPMd model each worker
-        # holds, the memory a run needs, so estimate takes it as well as run.
+        # The compressor decides the distances and, through the stream each worker holds,
+        # the memory a run needs, so estimate takes it as well as run.
         command.add_argument(
             "--compressor",
             choices=("ppmd", "zlib", "gzip", "bzip2", "lzma"),
