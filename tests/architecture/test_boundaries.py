@@ -556,8 +556,18 @@ def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
 
 
 def test_public_packages_support_the_specified_interpreter_range() -> None:
+    """Every package supports one range, and Ruff judges the code against its floor.
+
+    `target-version` restates the floor because the root, whose section every package copy
+    equals, has no `requires-python` for Ruff to infer it from. Held to it here, so raising the
+    floor cannot leave Ruff linting against an interpreter the packages no longer support.
+    """
     for package in sorted(PUBLIC):
         assert _project(package)["requires-python"] == ">=3.11,<3.15"
+    floor = re.match(r">=(\d+)\.(\d+),", str(_project("damicore")["requires-python"]))
+    assert floor is not None
+    target = cast("dict[str, object]", _tool(ROOT / "pyproject.toml")["ruff"])["target-version"]
+    assert target == f"py{floor[1]}{floor[2]}", target
 
 
 def test_publish_allowlist_matches_the_public_workspace_members() -> None:
@@ -712,7 +722,8 @@ def test_package_ruff_and_sdist_configuration_does_not_drift() -> None:
 
     tools = {member: _tool(ROOT / "packages" / member / "pyproject.toml") for member in members}
     # The root's rules must reach the code outside `packages/` too: with no section there,
-    # `tests/`, `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults.
+    # `tests/`, `benchmarks/`, `scripts/` and `.github/scripts` fall back to Ruff's built-in
+    # defaults.
     root_ruff = _tool(ROOT / "pyproject.toml").get("ruff")
     assert root_ruff is not None, "the repository root declares no [tool.ruff]"
 
