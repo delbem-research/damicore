@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import heapq
 import math
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
+from damicore_distance import DistanceConfig
 from damicore_normalizer import NormalizationConfig, NormalizerError
 from damicore_normalizer.api import scan_source
 from damicore_normalizer.config import ObjectSource
@@ -27,6 +29,15 @@ class ResourceEstimate(BaseModel):
 
     ``input_sha256`` identifies the whole input: one file's digest for a dataset, and a digest
     over every adopted file for a corpus, since no single file identifies that run.
+
+    ``compression_input_bytes`` is the exact number of bytes a distance stage that starts
+    from no checkpoint feeds its compressor: every object once for its own size, both
+    objects of every pair, and the largest object twice for ``ncd_self_largest``, which is
+    ``object_count * normalized_bytes`` plus twice the largest object. Divided by a measured
+    throughput it is the stage's time, and nothing gates on it. ``max_pair_bytes`` is the
+    longest concatenation the compressor is given -- the two largest objects -- which is
+    what a compressor's window or model memory has to hold for an NCD value to see across
+    the pair.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -45,6 +56,10 @@ class ResourceEstimate(BaseModel):
     tree_workspace_bytes: int = Field(ge=0)
     normalized_bytes: int = Field(ge=0)
     max_serialized_chunk_bytes: int = Field(ge=0)
+    # Absent from an estimate persisted before they were measured, which `None` states
+    # rather than a value nobody computed; every estimate this release makes sets both.
+    compression_input_bytes: int | None = Field(default=None, ge=0)
+    max_pair_bytes: int | None = Field(default=None, ge=0)
     estimated_working_memory_bytes: int = Field(ge=0)
     estimated_final_metadata_bytes: int = Field(ge=0)
     estimated_diagnostic_bytes: int = Field(ge=0)
@@ -66,6 +81,7 @@ def preflight(
     object_source: ObjectSource,
     save_diagnostics: bool,
     execution: ExecutionConfig,
+    distance: DistanceConfig,
     disk_target: Path,
 ) -> ResourceEstimate:
     """Project a run's exact cost by performing the run's own traversal without writing.
@@ -94,7 +110,11 @@ def preflight(
     objects = len(scan.objects)
     pairs = objects * (objects - 1) // 2
     matrix_bytes = objects * objects * 8
-    checkpoint_bytes = math.ceil(pairs / execution.pairs_per_shard) * 256
+    object_sizes = [item.size_bytes for item in scan.objects]
+    # Every source yields at least two objects, so the two largest always form a pair.
+    max_pair_bytes = sum(heapq.nlargest(2, object_sizes))
+    pairs_per_shard = execution.effective_pairs_per_shard(pairs)
+    checkpoint_bytes = math.ceil(pairs / pairs_per_shard) * 256
     label_bytes = sum(len(item.label.encode("utf-8")) for item in scan.objects)
     metadata_bytes = 1_048_576 + objects * 4_096 + 8 * label_bytes
     diagnostic_bytes = (
@@ -104,10 +124,13 @@ def preflight(
         scan.total_bytes + 2 * matrix_bytes + checkpoint_bytes + metadata_bytes + diagnostic_bytes
     )
     required_disk = math.ceil(artifact_bytes * execution.limits.required_free_disk_factor)
+    # Every worker holds one compressor stream, which fills to its stated size on
+    # incompressible data, so that size is charged rather than any multiple of the object bytes.
     working_memory = max(
         6 * scan.max_serialized_chunk_bytes,
-        execution.effective_workers * 2 * execution.compression_chunk_bytes
-        + execution.pairs_per_shard * 24,
+        execution.effective_workers
+        * (2 * execution.compression_chunk_bytes + distance.compressor.stream_memory_bytes)
+        + pairs_per_shard * 24,
     )
     existing = disk_target
     while not existing.exists() and existing != existing.parent:
@@ -135,6 +158,10 @@ def preflight(
         tree_workspace_bytes=matrix_bytes,
         normalized_bytes=scan.total_bytes,
         max_serialized_chunk_bytes=scan.max_serialized_chunk_bytes,
+        # Each object once for C(x), both of every pair for C(xy), and the largest twice for
+        # the self-distance the stage reports.
+        compression_input_bytes=objects * scan.total_bytes + 2 * max(object_sizes),
+        max_pair_bytes=max_pair_bytes,
         estimated_working_memory_bytes=working_memory,
         estimated_final_metadata_bytes=metadata_bytes,
         estimated_diagnostic_bytes=diagnostic_bytes,

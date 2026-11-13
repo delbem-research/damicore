@@ -59,6 +59,10 @@ nitpick_ignore = [
     # `FileCorpusSource`, each public and each documented. Only the convenience name is
     # unfollowable.
     ("py:class", "ObjectSource"),
+    # The same for `DistanceConfig.compressor`: a caller constructs `PpmdCompressor`,
+    # `DeflateCompressor`, `Bzip2Compressor` or `LzmaCompressor`, each exported and
+    # documented.
+    ("py:class", "Compressor"),
     # Manifest payloads, and the two unions over them, discriminated on `kind`. A caller
     # reads these off a validated manifest and branches on `kind`, whose values --
     # `delimited`, `xlsx`, `files` -- are the source axis `docs/input-contract.md` and

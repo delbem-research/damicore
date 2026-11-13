@@ -9,18 +9,29 @@ for every pair.
 
 from __future__ import annotations
 
+import bz2
 import hashlib
 import json
+import lzma
+import random
 import zlib
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
+import pyppmd
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from damicore_distance import DistanceConfig, compute_distance_matrix
+from damicore_distance import (
+    Bzip2Compressor,
+    DeflateCompressor,
+    DistanceConfig,
+    LzmaCompressor,
+    PpmdCompressor,
+    compute_distance_matrix,
+)
 from damicore_distance.compressor import compressed_size
 from damicore_distance.ncd import normalized_compression_distance
 
@@ -30,24 +41,72 @@ pytestmark = pytest.mark.unit
 # exercised below and to give the deflate window something to match on.
 PAYLOAD = st.binary(max_size=96)
 CHUNK_BYTES = st.integers(min_value=1, max_value=48)
-COMPRESSOR: st.SearchStrategy[Literal["zlib", "gzip"]] = st.sampled_from(["zlib", "gzip"])
+CompressorName = Literal["zlib", "gzip", "ppmd", "bzip2", "lzma"]
+CompressorSettings = DeflateCompressor | PpmdCompressor | Bzip2Compressor | LzmaCompressor
+COMPRESSOR: st.SearchStrategy[CompressorName] = st.sampled_from(
+    ["zlib", "gzip", "ppmd", "bzip2", "lzma"]
+)
 LEVEL = st.integers(min_value=0, max_value=9)
 
 
-def _direct_size(*payloads: bytes, compressor: Literal["zlib", "gzip"], level: int) -> int:
+def _config(compressor: CompressorName, level: int, chunk_bytes: int) -> DistanceConfig:
+    """The configuration a caller would write: a level only for the compressors that have one."""
+    settings: CompressorSettings
+    match compressor:
+        case "zlib" | "gzip":
+            settings = DeflateCompressor(name=compressor, compression_level=level)
+        case "ppmd":
+            settings = PpmdCompressor()
+        case "bzip2":
+            settings = Bzip2Compressor()
+        case "lzma":
+            settings = LzmaCompressor()
+    return DistanceConfig(compressor=settings, compression_chunk_bytes=chunk_bytes)
+
+
+def _named(compressor: CompressorName) -> DistanceConfig:
+    """A compressor at its defaults, run on one worker."""
+    return DistanceConfig.model_validate({"compressor": {"name": compressor}, "workers": 1})
+
+
+def _direct_size(*payloads: bytes, config: DistanceConfig) -> int:
     """Compress payloads in one pass, in memory, as the reference for ``compressed_size``.
 
-    Deliberately shares nothing with the implementation except zlib itself: no file handles
-    and no chunking, so a defect in either would show up as a size disagreement.
+    Deliberately shares nothing with the implementation except the codec itself: no file
+    handles and no chunking, so a defect in either would show up as a size disagreement.
+    PPMd, bzip2 and LZMA go through each library's one-shot entry point rather than the
+    streaming encoder the implementation drives.
     """
-    stream = zlib.compressobj(
-        level=level,
-        wbits=zlib.MAX_WBITS if compressor == "zlib" else 31,
-    )
-    total = 0
-    for payload in payloads:
-        total += len(stream.compress(payload))
-    return total + len(stream.flush())
+    joined = b"".join(payloads)
+    settings = config.compressor
+    match settings:
+        case Bzip2Compressor():
+            return len(bz2.compress(joined, settings.bzip2_block_size_100k))
+        case LzmaCompressor():
+            lzma2 = {
+                "id": lzma.FILTER_LZMA2,
+                "preset": 6,
+                "dict_size": settings.lzma_dictionary_bytes,
+            }
+            return len(lzma.compress(joined, format=lzma.FORMAT_RAW, filters=[lzma2]))
+        case PpmdCompressor():
+            return len(
+                pyppmd.compress(
+                    joined,
+                    max_order=settings.ppmd_order,
+                    mem_size=settings.ppmd_memory_bytes,
+                    variant="I",
+                )
+            )
+        case DeflateCompressor():
+            stream = zlib.compressobj(
+                level=settings.compression_level,
+                wbits=zlib.MAX_WBITS if settings.name == "zlib" else 31,
+            )
+            total = 0
+            for payload in payloads:
+                total += len(stream.compress(payload))
+            return total + len(stream.flush())
 
 
 def _object_file(directory: Path, name: str, payload: bytes) -> Path:
@@ -106,14 +165,13 @@ def test_chunked_compression_matches_a_direct_single_shot_stream(
     tmp_path_factory: pytest.TempPathFactory,
     payload: bytes,
     chunk_bytes: int,
-    compressor: Literal["zlib", "gzip"],
+    compressor: CompressorName,
     level: int,
 ) -> None:
     directory = tmp_path_factory.mktemp("chunked")
     path = _object_file(directory, "object.jsonl", payload)
-    assert compressed_size(
-        (path,), compressor=compressor, level=level, chunk_bytes=chunk_bytes
-    ) == _direct_size(payload, compressor=compressor, level=level)
+    config = _config(compressor, level, chunk_bytes)
+    assert compressed_size((path,), config=config) == _direct_size(payload, config=config)
 
 
 @given(payload=PAYLOAD, chunk_bytes=CHUNK_BYTES, level=LEVEL)
@@ -128,9 +186,8 @@ def test_zlib_sizes_match_the_one_shot_module_function(
     compressor, ``zlib.compress`` must produce a stream of exactly the same length."""
     directory = tmp_path_factory.mktemp("one-shot")
     path = _object_file(directory, "object.jsonl", payload)
-    assert compressed_size((path,), compressor="zlib", level=level, chunk_bytes=chunk_bytes) == len(
-        zlib.compress(payload, level)
-    )
+    config = _config("zlib", level, chunk_bytes)
+    assert compressed_size((path,), config=config) == len(zlib.compress(payload, level))
 
 
 @given(left=PAYLOAD, right=PAYLOAD, chunk_bytes=CHUNK_BYTES, compressor=COMPRESSOR)
@@ -140,23 +197,106 @@ def test_pair_compression_equals_compressing_the_joined_bytes(
     left: bytes,
     right: bytes,
     chunk_bytes: int,
-    compressor: Literal["zlib", "gzip"],
+    compressor: CompressorName,
 ) -> None:
     """C(xy) feeds x then y through one compressor instance and must equal compressing the
     concatenation, which the implementation never materializes."""
     directory = tmp_path_factory.mktemp("pair")
     left_path = _object_file(directory, "left.jsonl", left)
     right_path = _object_file(directory, "right.jsonl", right)
-    joined = _direct_size(left + right, compressor=compressor, level=6)
-    assert (
-        compressed_size(
-            (left_path, right_path),
-            compressor=compressor,
-            level=6,
-            chunk_bytes=chunk_bytes,
-        )
-        == joined
+    config = _config(compressor, 6, chunk_bytes)
+    assert compressed_size((left_path, right_path), config=config) == _direct_size(
+        left + right, config=config
     )
+
+
+def test_the_default_compressor_reproduces_a_known_size(tmp_path: Path) -> None:
+    """A size computed once with pyppmd 1.3.1, so a codec build that encodes differently --
+    another platform, another patch release -- fails here instead of shifting every NCD."""
+    payload = b"".join(b"damicore %d\n" % index for index in range(5_000))
+    path = _object_file(tmp_path, "object.jsonl", payload)
+    assert len(payload) == 68_890
+    assert compressed_size((path,), config=DistanceConfig()) == 5_801
+
+
+def _column(vocabulary_seed: int, draw_seed: int, size: int) -> bytes:
+    """A column as the normalizer writes it: one JSON value per line, drawn independently
+    from a vocabulary, so two columns share a distribution and never a run of content."""
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    shape = random.Random(vocabulary_seed)
+    vocabulary = [
+        "".join(shape.choice(letters) for _ in range(shape.randint(4, 9))) for _ in range(200)
+    ]
+    draws = random.Random(draw_seed)
+    lines: list[str] = []
+    written = 0
+    while written < size:
+        lines.append(json.dumps(draws.choice(vocabulary)) + "\n")
+        written += len(lines[-1])
+    return "".join(lines).encode()[:size]
+
+
+def _mutated(payload: bytes, rate: float) -> bytes:
+    draws = random.Random(3)
+    mutated = bytearray(payload)
+    for index in draws.sample(range(len(mutated)), int(len(mutated) * rate)):
+        mutated[index] = draws.randint(97, 122)
+    return bytes(mutated)
+
+
+def _copy_separation(directory: Path, compressor: CompressorName, size: int) -> float:
+    """Distance to an unrelated column minus distance to the same column with 1 % changed."""
+    column = _column(1, 10, size)
+    payloads = [column, _mutated(column, 0.01), _column(2, 12, size)]
+    manifest_path = _normalization_manifest(directory / f"{compressor}-{size}", payloads)
+    result = compute_distance_matrix(
+        manifest_path,
+        directory / f"{compressor}-{size}-run",
+        config=_named(compressor),
+    )
+    matrix = np.load(result.matrix_path, allow_pickle=False)
+    return float(matrix[0, 2]) - float(matrix[0, 1])
+
+
+def test_lzma_finds_a_copy_at_any_size_its_dictionary_holds(tmp_path: Path) -> None:
+    """Why LZMA is offered (ADR 0021): a column and its 1 % mutated copy at 128 KiB are past
+    DEFLATE's window, and its default 8 MiB dictionary holds the pair. Measured: 0.906 under
+    LZMA, 0.019 under zlib."""
+    lzma_separation = _copy_separation(tmp_path, "lzma", 131_072)
+    assert lzma_separation > 0.8
+    assert lzma_separation > 20 * _copy_separation(tmp_path, "zlib", 131_072)
+
+
+def test_bzip2_finds_a_copy_within_its_block_and_not_past_it(tmp_path: Path) -> None:
+    """The 900 kB block is bzip2's window: a pair of 128 KiB columns fits it, a pair of
+    1 MiB columns spans blocks that share nothing. Measured: 0.590 and 0.070."""
+    assert _copy_separation(tmp_path, "bzip2", 131_072) > 0.3
+    assert _copy_separation(tmp_path, "bzip2", 1_048_576) < 0.1
+
+
+def test_past_the_deflate_window_ppmd_still_separates_columns_by_distribution(
+    tmp_path: Path,
+) -> None:
+    """The defect the default exists to fix. Two columns drawn from one vocabulary and a
+    third from another, 128 KiB each: DEFLATE sees 32 KiB, so the pair it compresses holds
+    the first column out of view of the second and every distance nears 1. PPMd keeps the
+    statistics of what it has read, which is what such columns share. Measured: separation
+    0.028 under zlib and 0.238 under PPMd; the bounds below sit well inside both."""
+    size = 131_072
+    payloads = [_column(1, 10, size), _column(1, 11, size), _column(2, 12, size)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+
+    def separation(compressor: Literal["zlib", "ppmd"]) -> float:
+        result = compute_distance_matrix(
+            manifest_path,
+            tmp_path / compressor,
+            config=_named(compressor),
+        )
+        matrix = np.load(result.matrix_path, allow_pickle=False)
+        return float(matrix[0, 2]) - float(matrix[0, 1])
+
+    assert separation("ppmd") > 0.15
+    assert separation("ppmd") > 4 * separation("zlib")
 
 
 @given(
@@ -198,9 +338,17 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
     assert np.array_equal(matrix, matrix.T)  # pyright: ignore[reportUnknownMemberType]
     assert [float(matrix[index, index]) for index in range(count)] == [0.0] * count
 
-    sizes = [_direct_size(payload, compressor="zlib", level=6) for payload in payloads]
+    config = DistanceConfig()
+    sizes = [_direct_size(payload, config=config) for payload in payloads]
     for left in range(count):
         for right in range(left + 1, count):
-            joined = _direct_size(payloads[left], payloads[right], compressor="zlib", level=6)
+            joined = _direct_size(payloads[left], payloads[right], config=config)
             expected = normalized_compression_distance(sizes[left], sizes[right], joined)
             assert float(matrix[left, right]) == expected
+
+    # The first of the longest objects, compressed after itself: C(xx) against C(x).
+    largest = max(range(count), key=lambda index: len(payloads[index]))
+    doubled = _direct_size(payloads[largest], payloads[largest], config=config)
+    assert result.ncd_self_largest == normalized_compression_distance(
+        sizes[largest], sizes[largest], doubled
+    )

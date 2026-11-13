@@ -36,11 +36,12 @@ damicore-clusterizer = { workspace = true }
 
 # Ruff resolves its configuration per file, walking up to the nearest pyproject that declares
 # this section, so a package's copy governs that package and nothing above it. This one is what
-# `tests`, `benchmarks` and `.github/scripts` are linted by; without it they fall back to Ruff's
-# defaults and `make check` checks them against rules this repository never chose. Held equal to
-# the package sections by tests/architecture/test_boundaries.py.
+# `tests`, `benchmarks`, `scripts` and `.github/scripts` are linted by; without it they fall
+# back to Ruff's defaults and `make check` checks them against rules this repository never
+# chose. Held equal to the package sections by tests/architecture/test_boundaries.py.
 [tool.ruff]
 line-length = 100
+target-version = "py311"
 exclude = [".venv", "dist", "__pycache__"]
 
 # PGH and TID close two rules this file states in prose and nothing else checked: a

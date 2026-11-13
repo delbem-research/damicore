@@ -70,6 +70,12 @@ Sanches, A., Cardoso, J. M., Delbem, A. C. (2011). *Identifying Merge-Beneficial
 
 <https://doi.org/10.1109/ReConFig.2011.51>
 
+## `shkarin2003`
+
+Shkarin, D. (2003). *PPM: one step to practicality*. Proceedings DCC 2002. Data Compression Conference.
+
+<https://doi.org/10.1109/DCC.2002.999958>
+
 ## `song2020`
 
 Song, M., Zhong, H. (2020). *Efficient weighted univariate clustering maps outstanding dysregulated genomic zones in human cancers*. Bioinformatics.

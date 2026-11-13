@@ -1,15 +1,20 @@
+import inspect
 import json
 import os
 import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, get_args
 
 import pytest
+from damicore_distance import DistanceConfig
+from damicore_normalizer import DelimitedSource
 
-from damicore import DamicoreResult
+from damicore import DamicoreResult, ExecutionConfig, estimate, run
+from damicore.api import _COMPRESSOR_SETTINGS, _config_payload, _distance_config
 from damicore.cli import _parser, main
+from damicore.manifest import RunConfig
 
 pytestmark = pytest.mark.unit
 
@@ -27,6 +32,40 @@ def test_cli_estimate_json_has_clean_stdout(
     captured = capsys.readouterr()
     assert code == 0
     assert json.loads(captured.out)["object_count"] == 2
+
+
+def test_cli_passes_the_compressor_settings_to_estimate_and_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = _csv(tmp_path)
+    settings = ["--compressor", "ppmd", "--ppmd-order", "8", "--ppmd-memory-bytes", "1048576"]
+    assert main(["estimate", str(source), "--workers", "2", "--json", *settings]) == 0
+    deflate = ["estimate", str(source), "--workers", "2", "--json", "--compressor", "zlib"]
+    estimated = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
+    assert main(deflate) == 0
+    # Two workers, each charged its stream: the 1 MiB model against DEFLATE's 256 KiB state.
+    assert estimated - json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"] == (
+        2 * (1_048_576 - 262_144)
+    )
+    output = tmp_path / "run"
+    run_arguments = ["run", str(source), "--workers", "1", "--no-progress", *settings]
+    assert main([*run_arguments, "--output-dir", str(output)]) == 0
+    config = json.loads((output / "manifest.json").read_text(encoding="utf-8"))["config"]
+    assert (config["ppmd_order"], config["ppmd_memory_bytes"]) == (8, 1_048_576)
+    capsys.readouterr()
+    assert main(["run", str(source), "--compression-level", "9", "--no-progress"]) == 2
+    assert "compression_level does not apply to ppmd" in capsys.readouterr().err
+    lzma = ["--compressor", "lzma", "--lzma-dictionary-bytes", "1048576"]
+    assert main(["estimate", str(source), "--workers", "2", "--json", *lzma]) == 0
+    lzma_estimate = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
+    assert main(deflate) == 0
+    deflate_estimate = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
+    assert lzma_estimate - deflate_estimate == 2 * (12 * 1_048_576 + 4_194_304 - 262_144)
+    bzip2 = ["--compressor", "bzip2", "--bzip2-block-size-100k", "3"]
+    bzip2_output = tmp_path / "bzip2"
+    assert main([*run_arguments[:5], *bzip2, "--output-dir", str(bzip2_output)]) == 0
+    config = json.loads((bzip2_output / "manifest.json").read_text(encoding="utf-8"))["config"]
+    assert (config["compressor"], config["bzip2_block_size_100k"]) == ("bzip2", 3)
 
 
 def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -110,14 +149,8 @@ def test_estimate_without_json_keeps_stdout_empty(
     assert json.loads(captured.err)["object_count"] == 2
 
 
-def test_every_argument_carries_help_text() -> None:
-    """`--help` is the whole documentation of the command line, and the release smoke runs it
-    as a gate: without this, that gate proves the parser builds, not that it explains anything.
-
-    argparse exposes no public way to walk its arguments, so this reads `_actions`. The private
-    attribute is confined to this test, where a rename surfaces as a failed test rather than as
-    a silently unchecked contract.
-    """
+def _commands() -> dict[str, Any]:
+    """Each subcommand's parser, by name, read from argparse's private `_actions`."""
     # argparse's private attributes are untyped in the shipped stubs; one cast isolates that
     # boundary here rather than letting Unknown leak into the assertions. The subcommand action
     # is the only one whose `choices` is a mapping of parsers, so it needs no private class.
@@ -128,9 +161,19 @@ def test_every_argument_carries_help_text() -> None:
         if isinstance(choices, dict):
             commands.update(cast(dict[str, Any], choices))
     assert set(commands) == {"estimate", "run"}
+    return commands
 
+
+def test_every_argument_carries_help_text() -> None:
+    """`--help` is the whole documentation of the command line, and the release smoke runs it
+    as a gate: without this, that gate proves the parser builds, not that it explains anything.
+
+    argparse exposes no public way to walk its arguments, so this reads `_actions`. The private
+    attribute is confined to this test, where a rename surfaces as a failed test rather than as
+    a silently unchecked contract.
+    """
     bare: list[str] = []
-    for name, command in commands.items():
+    for name, command in _commands().items():
         assert command.description, name
         for action in command._actions:
             if action.dest in {"help", "version"}:
@@ -185,3 +228,73 @@ def test_a_write_to_a_closed_pipe_returns_the_sigpipe_status(
 
     monkeypatch.setattr(sys, "stdout", ClosedPipe())
     assert main(["estimate", str(_csv(tmp_path)), "--json"]) == 141
+
+
+def test_every_compressor_setting_is_reachable_on_every_surface() -> None:
+    """The flat public signature is an adapter onto the compressor union of the distance
+    stage, and the manifest records it flat again, so a setting can be lost at any of them.
+
+    A field added to a compressor model with no matching keyword, flag or manifest field is
+    a setting the stage offers and no `damicore` caller can reach, or one a run uses and its
+    manifest does not record; a compressor added to the union but not to the manifest or the
+    flag fails only when someone first picks it. Asserted against the union rather than a
+    list, so the models stay the one declaration.
+    """
+    models = get_args(DistanceConfig.model_fields["compressor"].annotation)
+    fields = {field for model in models for field in model.model_fields} - {"name"}
+    tags = {tag for model in models for tag in get_args(model.model_fields["name"].annotation)}
+    # Guards the discovery: an empty set would make every assertion below vacuous.
+    assert len(fields) >= 5 and len(tags) >= 5, (fields, tags)
+
+    for surface in (run, estimate, _distance_config):
+        parameters = set(inspect.signature(surface).parameters)
+        assert not fields - parameters, (surface.__name__, sorted(fields - parameters))
+    assert not fields - set(RunConfig.model_fields), sorted(fields - set(RunConfig.model_fields))
+    assert set(get_args(RunConfig.model_fields["compressor"].annotation)) == tags
+    for name, command in _commands().items():
+        flags = {action.dest: action for action in command._actions}
+        assert not fields - set(flags), (name, sorted(fields - set(flags)))
+        assert set(flags["compressor"].choices) == tags, name
+
+
+def test_every_compressor_setting_written_is_the_one_recorded() -> None:
+    """Each setting a caller writes reaches the manifest under its own name.
+
+    The test above proves each setting has a keyword; this one proves the keyword is
+    threaded. A setting mapped onto another field, or dropped from the payload, records
+    `None` or another setting's value and leaves the configuration hash blind to it, so two
+    runs differing only in that setting share one run directory. Each is written at its
+    lower bound, where no default sits, so a value that never arrived cannot pass for one
+    that did.
+    """
+    models = get_args(DistanceConfig.model_fields["compressor"].annotation)
+    tags = {tag for model in models for tag in get_args(model.model_fields["name"].annotation)}
+    assert set(_COMPRESSOR_SETTINGS) == tags
+    fields = {field for model in models for field in model.model_fields} - {"name"}
+    execution = ExecutionConfig(workers=1)
+    checked = 0
+    for model in models:
+        for tag in get_args(model.model_fields["name"].annotation):
+            for field, info in model.model_fields.items():
+                if field == "name":
+                    continue
+                lowest = next(item.ge for item in info.metadata if hasattr(item, "ge"))
+                assert lowest != info.default, (tag, field)
+                written = dict.fromkeys(fields, None) | {field: lowest}
+                distance = _distance_config(
+                    tag, **written, execution=execution, save_diagnostics=False
+                )
+                payload = _config_payload(
+                    object_source=DelimitedSource(),
+                    distance=distance,
+                    num_clusters=None,
+                    keep_normalized=False,
+                    save_diagnostics=False,
+                    execution=execution,
+                    pairs_per_shard=1,
+                )
+                recorded = RunConfig.model_validate_json(json.dumps(payload))
+                assert (recorded.compressor, getattr(recorded, field)) == (tag, lowest)
+                checked += 1
+    # Guards the discovery: zlib and gzip share one setting, so six of five fields.
+    assert checked >= 6, checked

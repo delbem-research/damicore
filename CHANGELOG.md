@@ -7,8 +7,57 @@ carries anything else, a date included, matches neither and fails the release.
 
 ## 0.4.0
 
+### Breaking
+
+- `config_hash`, and so `run_id` and the default run directory, no longer covers the
+  execution settings: `workers`, `csv_chunk_rows`, `compression_chunk_bytes`,
+  `pairs_per_shard`, `pandas_materialization_limit_bytes` and `limits`. They change cost and
+  recovery, never an artifact, yet `workers="auto"` resolved from the CPU count made the same
+  call name another run on another machine, so an interrupted run could not be resumed there
+  and identical results carried two identities. `manifest.json` still records every setting,
+  as the invocation that created the directory resolved them. **Every existing run has a new
+  identity**: a completed earlier run is recomputed rather than reused, an interrupted one
+  cannot be resumed, and an explicit `output_dir` holding either raises
+  `OutputDirectoryConflictError`. Completed earlier runs still load with `load_result`; the
+  schema version did not change. The distance checkpoint follows the same rule and keeps
+  `pairs_per_shard`, the layout its shards are indexed by, so resuming an incomplete distance
+  stage with another shard size is refused as `checkpoint_mismatch_error`. See ADR 0022.
+
 ### Added
 
+- `damicore-distance` measures with two more compressors, both from the standard library, so
+  no dependency is added. `LzmaCompressor` (`compressor="lzma"`) is raw LZMA2 at preset 6 with
+  `lzma_dictionary_bytes` (default 8 MiB), and it is the compressor here that keeps finding
+  shared content at any size its dictionary holds: a column against its 1 % mutated copy
+  separated by 0.884 to 0.907 at every size from 16 KiB to 4 MiB, where PPMd separated by
+  0.531 falling to 0.090. `Bzip2Compressor` (`compressor="bzip2"`) uses `bzip2_block_size_100k` (default 9) and
+  sees both a copy and a distribution, but only within its 900 kB block. PPMd stays the default. Each setting is refused outside its
+  codec's bounds or for another compressor, each stream's memory is charged per worker
+  (10 MiB for bzip2, 12 times the dictionary plus 4 MiB for LZMA), and `codec_fingerprint()`
+  names libbz2 and liblzma by the size each gives a fixed payload, since neither reports a
+  version; it joins the checkpoint identity. See ADR 0021.
+- `damicore.run`, `damicore.estimate` and both CLI commands take `compressor="bzip2"` and
+  `"lzma"`, with `bzip2_block_size_100k` and `lzma_dictionary_bytes` (`--bzip2-block-size-100k`,
+  `--lzma-dictionary-bytes`). The manifest records them only for the compressor that reads
+  them and `None` elsewhere; both fields are additive, so earlier manifests still load. The
+  runtime record and the resume fingerprint take `codec_fingerprint()` whole, so a completed
+  or incomplete run written under another libbz2 or liblzma is not reused or resumed.
+- `DistanceResult.ncd_self_largest` and `report.json`'s `ncd_self_largest` report NCD(x, x)
+  for the largest object, `(C(xx) - C(x)) / C(x)`: how much of an object the compressor
+  recognizes when it reads it again, the idempotency [cilibrasi2005] requires of a normal
+  compressor, which nothing measured before. It costs one more compression of the largest
+  object, run on the pool beside the shards. It is never a gate, and a high value is not by
+  itself a fault -- on one independently drawn value per line neither DEFLATE nor PPMd
+  recognizes a 128 KiB repeat -- but it shows a compressor that stopped recognizing
+  repetition at this run's object size. `RunReport` gains the field, so its specified field list changes; it is
+  `None` on a report written before it and on a failure report.
+- `ResourceEstimate` reports `compression_input_bytes`, the exact bytes the distance stage
+  feeds its compressor (`object_count * normalized_bytes`, plus twice the largest object
+  for `ncd_self_largest`), and `max_pair_bytes`, the
+  longest concatenation it compresses. Preflight approved a 50 GB distance stage as readily
+  as a 5 MB one, and the object, pair and matrix figures it did report cannot tell them
+  apart. Both are persisted with the estimate in `manifest.json` and are `None` when read
+  from a run that predates them; neither is a gate.
 - `docs/roadmap.md` states what this library does not implement yet, in the structure the
   issue tree carries: one group per pipeline layer, the sequence by milestone, and the five
   rules every item is held to. The plan lived only in GitHub issues, so a reader of the
@@ -230,6 +279,23 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Fixed
 
+- The distance stage ran on one worker whatever `workers` said whenever a run had at most
+  10,000 pairs -- 141 objects or fewer -- because the default `pairs_per_shard=10000` made
+  the whole run one shard, and one shard occupies one worker. A checkpoint then covered all
+  of the run or none of it. Few, large objects is the shape of large-data runs, so this hit
+  them hardest: 16 objects of 0.8 MB took 6.2 s on four workers against 5.5 s on one.
+  `pairs_per_shard` now defaults to `"auto"` in both `DistanceConfig` and `ExecutionConfig`,
+  resolved by `DistanceConfig.effective_pairs_per_shard` to at least 64 shards, or one per
+  pair below that, and never more than 10,000 pairs per shard. It depends on the pair count
+  alone, so it never changes a run's identity from one machine to another. The manifest
+  and `report.json`, the failure report included, record the resolved size, and preflight
+  projects checkpoint and memory cost from it. A default run therefore hashes to a new run directory, and a 0.3 run directory is
+  recomputed rather than reused; an explicit integer behaves exactly as before.
+- The compressed size of every object, `C(x)`, was computed serially in the coordinating
+  process before the worker pool existed, which is the fraction `workers / (N + workers - 1)`
+  of the stage -- about a third for ten objects on four workers. One pool now serves the
+  sizes and the shards, and a failure in either reaches the caller with the same typed codes.
+  With both fixes, the 16-object run above takes 2.6 s on four workers, from 6.2 s.
 - `AGENTS.md` described itself as the contract for "DAMICORE 0.2" and qualified four of its
   rules with that version. 0.3.0 shipped and 0.4.0 is in this changelog, so the file
   governed two releases it did not name. The qualifier is removed rather than bumped,
@@ -328,6 +394,48 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Changed
 
+- **`damicore-distance` measures with PPMd by default, and its NCD values change.**
+  `DistanceConfig.compressor` is now a settings model rather than a name, one per codec:
+  `PpmdCompressor`, the default, PPMd variant I with model restart through `pyppmd`, with
+  `ppmd_order` (2 to 64, default 6) and `ppmd_memory_bytes` (2048 to 4294967259, default 64
+  MiB); `DeflateCompressor`, whose `name` is `"zlib"` or `"gzip"`, with
+  `compression_level`; and `Bzip2Compressor` and `LzmaCompressor`, below. A 0.3
+  `DistanceConfig(compressor="zlib", compression_level=9)` is now
+  `DistanceConfig(compressor=DeflateCompressor(compression_level=9))`, the former
+  `config.compressor` string is `config.compressor.name`, and `config.compression_level` is
+  `config.compressor.compression_level`. A name alone is refused, and the error names the
+  model to write in its place. DEFLATE sees 32 KiB, so
+  past that `zlib` and `gzip` report every pair nearly unrelated: on 128 KiB columns drawn
+  from two vocabularies the distance across them exceeded the distance within one by 0.028
+  under `zlib` and by 0.238 under PPMd. The original DAMICORE implementation already
+  defaulted to PPMd variant I at order 6, and against it the matrices rank with Spearman
+  0.78 to 0.93 under PPMd and 0.49 to 0.65 under `zlib`. `pyppmd>=1.3.1,<1.4` is a new
+  runtime dependency, not an extra, because a default cannot be optional. A setting for a
+  compressor it does not apply to -- `compression_level` with PPMd, a `ppmd_*` setting with
+  `zlib` or `gzip` -- is not a field of that compressor's model, so it is refused rather
+  than ignored, and a PPMd setting outside the codec's
+  bounds is refused because the codec would clamp it silently. The `pyppmd` version joins
+  the checkpoint identity, so a checkpoint from another codec build is refused. See ADR
+  0020.
+- Preflight charges every compressor's stream memory once per worker, from
+  each compressor model's `stream_memory_bytes`, rather than PPMd's model alone. DEFLATE's state, 256
+  KiB at the settings `zlib` and `gzip` use, was never charged, so a `zlib` or `gzip`
+  estimate rises by 256 KiB per worker. See ADR 0021.
+- **`damicore.run`, `damicore.estimate` and both CLI commands use PPMd by default.**
+  `compressor` defaults to `"ppmd"`, and `ppmd_order` and `ppmd_memory_bytes` join
+  `compression_level`, which now defaults to `None`, meaning the compressor's own default.
+  `run(compression_level=9)` with no compressor is therefore refused, since PPMd has no
+  level; pass `compressor="zlib"` with it. `estimate` takes the same four arguments,
+  because preflight now charges the PPMd model once per worker against
+  `max_working_memory_bytes` -- four workers at the default fit the default limit -- and
+  `--compressor`, `--compression-level`, `--ppmd-order` and `--ppmd-memory-bytes` apply to
+  `damicore estimate` as well as `damicore run`. The manifest records each compressor's
+  settings only where it reads them and `None` elsewhere; the two PPMd fields are additive,
+  so a 0.3 manifest still loads. Every default run hashes to a new run directory, and the
+  `pyppmd` version joins the resume fingerprint, so an incomplete run from an earlier build
+  is not resumed. The compressor models are the one statement of which settings a compressor
+  reads: the orchestrator derives which arguments it accepts for each compressor, what it
+  records and what it charges from them.
 - Every distribution's `Documentation` URL now points at the published site,
   `https://delbem-research.github.io/damicore/`, rather than at one Markdown file in the
   repository. The README links it too.

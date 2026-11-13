@@ -247,6 +247,20 @@ def test_estimate_reports_the_source_it_was_given(tmp_path: Path) -> None:
     assert preview.normalized_bytes == sum(path.stat().st_size for path in preview.source_paths)
 
 
+def test_estimate_reports_the_exact_compression_work_and_the_largest_pair(tmp_path: Path) -> None:
+    """The distance stage's cost is the bytes it feeds its compressor, and preflight states
+    them exactly. The expectation is counted the way the stage spends it -- every object once
+    for C(x), both objects of every pair for C(xy), the largest twice for C(xx) -- not by the
+    closed form preflight uses."""
+    preview = estimate(_corpus(tmp_path / "corpus"), source_kind="files")
+    sizes = [path.stat().st_size for path in preview.source_paths]
+    pairs = [(i, j) for i in range(len(sizes)) for j in range(i + 1, len(sizes))]
+    assert preview.compression_input_bytes == sum(sizes) + sum(
+        sizes[i] + sizes[j] for i, j in pairs
+    ) + 2 * max(sizes)
+    assert preview.max_pair_bytes == max(sizes[i] + sizes[j] for i, j in pairs)
+
+
 def test_estimate_counts_the_corpus_copy_in_the_disk_requirement(tmp_path: Path) -> None:
     """The corpus is copied into the run directory, so its bytes are part of what a run needs.
 

@@ -1,6 +1,6 @@
 [project]
 name = "damicore-clusterizer"
-version = "0.3.0"
+version = "0.4.0"
 description = "FastGreedy clustering stage for the DAMICORE pipeline."
 readme = "README.md"
 license = "Apache-2.0"
@@ -50,6 +50,7 @@ exclude = ["Makefile", "pyrightconfig.json", "tests"]
 # modules stay first party. Held equal to the other members by tests/architecture.
 [tool.ruff]
 line-length = 100
+target-version = "py311"
 exclude = [".venv", "dist", "__pycache__"]
 
 [tool.ruff.lint]

@@ -1,21 +1,27 @@
 import hashlib
 import json
+import math
+import re
 import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from importlib.metadata import version
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
 import pytest
 from damicore_normalizer import NormalizationConfig, NormalizationResult, normalize_csv
+from pydantic import ValidationError
 
 import damicore_distance.api as distance_api
 from damicore_distance import (
+    DeflateCompressor,
     DistanceConfig,
     DistanceError,
     DistanceMatrixView,
+    codec_fingerprint,
     compute_distance_matrix,
 )
 from damicore_distance.ncd import normalized_compression_distance
@@ -23,9 +29,7 @@ from damicore_distance.ncd import normalized_compression_distance
 pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
-WorkerArguments = tuple[
-    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
-]
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 
 
@@ -159,7 +163,9 @@ def test_gzip_progress_view_and_resume_guards(tmp_path: Path) -> None:
     result = compute_distance_matrix(
         normalized.manifest_path,
         tmp_path / "gzip",
-        config=DistanceConfig(compressor="gzip", workers=1, pairs_per_shard=2),
+        config=DistanceConfig(
+            compressor=DeflateCompressor(name="gzip"), workers=1, pairs_per_shard=2
+        ),
         progress=lambda completed, total, message: calls.append((completed, total, message)),
     )
     assert calls[-1] == (3, 3, "distance")
@@ -173,7 +179,9 @@ def test_gzip_progress_view_and_resume_guards(tmp_path: Path) -> None:
         compute_distance_matrix(
             normalized.manifest_path,
             tmp_path / "gzip",
-            config=DistanceConfig(compressor="gzip", workers=1, resume=False),
+            config=DistanceConfig(
+                compressor=DeflateCompressor(name="gzip"), workers=1, resume=False
+            ),
         )
 
 
@@ -295,11 +303,265 @@ def test_workers_below_one_is_rejected_and_auto_resolves_to_a_positive_count() -
     assert DistanceConfig(workers=3).effective_workers == 3
 
 
+@pytest.mark.parametrize("pair_count", [1, 2, 63, 64, 127, 128, 6_399, 640_000, 10**8])
+def test_auto_shard_size_spreads_pairs_over_enough_shards_to_feed_every_worker(
+    pair_count: int,
+) -> None:
+    """One shard occupies one worker, so a run of few, large objects -- few pairs -- must still
+    split into many shards. The cap keeps a shard's result payload and its checkpoint cost
+    bounded at the other end."""
+    size = DistanceConfig().effective_pairs_per_shard(pair_count)
+    assert 1 <= size <= 10_000
+    assert math.ceil(pair_count / size) >= min(pair_count, 64)
+
+
+def test_an_explicit_shard_size_is_used_as_given_and_must_be_positive() -> None:
+    assert DistanceConfig(pairs_per_shard=7).effective_pairs_per_shard(1_000) == 7
+    with pytest.raises(ValueError, match="pairs_per_shard must be at least one"):
+        DistanceConfig(pairs_per_shard=0)
+
+
+def test_the_default_shard_size_gives_a_small_run_one_shard_per_pair(tmp_path: Path) -> None:
+    normalized = _normalized(tmp_path)
+    compute_distance_matrix(
+        normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=1)
+    )
+    checkpoint = json.loads(
+        (tmp_path / "out" / "checkpoints" / "distance-shards.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["pair_count"] == 3
+    assert checkpoint["shard_count"] == 3
+
+
+def test_every_compression_runs_on_the_pool_when_there_is_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C(x) is one compression per object, and run serially in the coordinator it is the
+    fraction workers / (N + workers - 1) of the wall time: about a third for ten objects on
+    four workers. The pool is replaced at the process boundary by one that runs its work in
+    this process and marks it, so every compression can say where it ran."""
+    normalized = _normalized(tmp_path)
+    in_pool = False
+    placements: list[bool] = []
+
+    class MarkingExecutor:
+        def __init__(self, **_options: object) -> None:
+            pass
+
+        def _call(self, function: Callable[[Any], Any], argument: object) -> Any:
+            nonlocal in_pool
+            in_pool = True
+            try:
+                return function(argument)
+            finally:
+                in_pool = False
+
+        def submit(self, function: Callable[[Any], Any], argument: object) -> Future[Any]:
+            future: Future[Any] = Future()
+            future.set_result(self._call(function, argument))
+            return future
+
+        def map(self, function: Callable[[Any], Any], arguments: list[object]) -> Iterator[Any]:
+            return iter([self._call(function, argument) for argument in arguments])
+
+        def shutdown(self, **_options: object) -> None:
+            pass
+
+    original = distance_api.compressed_size
+
+    def placed(*args: Any, **kwargs: Any) -> int:
+        placements.append(in_pool)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(distance_api, "ProcessPoolExecutor", MarkingExecutor)
+    monkeypatch.setattr(distance_api, "compressed_size", placed)
+    compute_distance_matrix(
+        normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
+    )
+    # Three objects, three pairs and the largest object after itself: every one of the seven
+    # compressions ran in the pool.
+    assert placements == [True] * 7
+
+
+def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:
+    """ADR 0020: the original implementation's compressor and order, with a model large
+    enough to keep measuring past the objects where 10 MB restarts."""
+    assert DistanceConfig().model_dump()["compressor"] == {
+        "name": "ppmd",
+        "ppmd_order": 6,
+        "ppmd_memory_bytes": 67_108_864,
+    }
+
+
+@pytest.mark.parametrize(
+    ("compressor", "setting", "refused", "accepted"),
+    [
+        ("ppmd", "ppmd_order", 1, 2),
+        ("ppmd", "ppmd_order", 65, 64),
+        ("ppmd", "ppmd_memory_bytes", 2_047, 2_048),
+        ("ppmd", "ppmd_memory_bytes", 4_294_967_260, 4_294_967_259),
+        ("bzip2", "bzip2_block_size_100k", 0, 1),
+        ("bzip2", "bzip2_block_size_100k", 10, 9),
+        ("lzma", "lzma_dictionary_bytes", 4_095, 4_096),
+        ("lzma", "lzma_dictionary_bytes", 1_610_612_737, 1_610_612_736),
+    ],
+)
+def test_a_setting_outside_its_codec_bounds_is_refused_by_name(
+    compressor: str, setting: str, refused: int, accepted: int
+) -> None:
+    """The bounds are each codec's own. pyppmd clamps outside them without reporting it, so
+    two configurations would compute one result under two configuration hashes; libbz2 and
+    liblzma raise, but only when the first stream opens, deep in a worker. Refused here, the
+    error names the setting before any work, and the value just inside each bound is
+    accepted."""
+    accepted_config = DistanceConfig.model_validate(
+        {"compressor": {"name": compressor, setting: accepted}}
+    )
+    assert getattr(accepted_config.compressor, setting) == accepted
+    with pytest.raises(ValidationError) as raised:
+        DistanceConfig.model_validate({"compressor": {"name": compressor, setting: refused}})
+    assert [error["loc"] for error in raised.value.errors()] == [
+        ("compressor", compressor, setting)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("compressor", "setting", "value"),
+    [
+        ("ppmd", "compression_level", 9),
+        ("zlib", "ppmd_order", 8),
+        ("gzip", "ppmd_memory_bytes", 10_485_760),
+        ("ppmd", "bzip2_block_size_100k", 9),
+        ("zlib", "lzma_dictionary_bytes", 4_096),
+        ("lzma", "compression_level", 6),
+        ("bzip2", "ppmd_order", 6),
+        ("bzip2", "lzma_dictionary_bytes", 4_096),
+    ],
+)
+def test_a_setting_for_another_compressor_cannot_be_written(
+    compressor: str, setting: str, value: int
+) -> None:
+    """Each compressor is its own settings model, so a setting it does not read is not a
+    field there: refused by name rather than ignored, and never part of the identity."""
+    with pytest.raises(ValidationError) as raised:
+        DistanceConfig.model_validate({"compressor": {"name": compressor, setting: value}})
+    assert [(error["type"], error["loc"]) for error in raised.value.errors()] == [
+        ("extra_forbidden", ("compressor", compressor, setting))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "hint"),
+    [
+        ("zlib", "DeflateCompressor(name='zlib')"),
+        ("gzip", "DeflateCompressor(name='gzip')"),
+        ("ppmd", "PpmdCompressor()"),
+        ("lzma", "LzmaCompressor()"),
+        ("rar", "PpmdCompressor(), DeflateCompressor(), Bzip2Compressor() or LzmaCompressor()"),
+    ],
+)
+def test_a_compressor_given_by_name_is_refused_with_the_model_to_write(
+    name: str, hint: str
+) -> None:
+    """0.3 took the compressor by name. That call now fails, and the error says what to
+    write instead rather than that a string is not a dictionary."""
+    with pytest.raises(ValidationError, match=re.escape(hint)):
+        DistanceConfig.model_validate({"compressor": name})
+
+
+def test_a_compressor_outside_the_union_is_refused_by_its_tag() -> None:
+    with pytest.raises(ValidationError) as raised:
+        DistanceConfig.model_validate({"compressor": {"name": "rar"}})
+    assert [error["type"] for error in raised.value.errors()] == ["union_tag_invalid"]
+
+
+@pytest.mark.parametrize(
+    ("settings", "charged"),
+    [
+        ({"name": "zlib"}, 262_144),
+        ({"name": "gzip"}, 262_144),
+        ({"name": "ppmd", "ppmd_memory_bytes": 1_048_576}, 1_048_576),
+        ({"name": "bzip2"}, 10_485_760),
+        ({"name": "bzip2", "bzip2_block_size_100k": 1}, 10_485_760),
+        ({"name": "lzma"}, 12 * 8_388_608 + 4_194_304),
+        ({"name": "lzma", "lzma_dictionary_bytes": 1_048_576}, 12 * 1_048_576 + 4_194_304),
+    ],
+)
+def test_every_compressor_states_the_memory_one_stream_holds(
+    settings: dict[str, object], charged: int
+) -> None:
+    """Preflight charges this once per worker, so it is stated for every compressor rather
+    than for the one whose model happens to be large. DEFLATE's is the state zlib's header
+    gives for a 15-bit window at memory level 8; PPMd's is the model it was configured with."""
+    config = DistanceConfig.model_validate({"compressor": settings})
+    assert config.compressor.stream_memory_bytes == charged
+
+
+def test_the_codec_build_is_part_of_the_checkpoint_identity() -> None:
+    """A checkpoint holds compressed sizes, which belong to the codec that measured them."""
+    codecs = codec_fingerprint()
+    assert codecs["pyppmd"] == version("pyppmd")
+    assert distance_api._runtime_fingerprint().items() >= codecs.items()
+
+
+def test_a_fingerprint_a_caller_changes_is_not_the_one_the_next_caller_gets() -> None:
+    """The fingerprint names a result's codecs; one caller editing its copy must not rename
+    the codecs every later checkpoint and run is identified by."""
+    first = codec_fingerprint()
+    first["pyppmd"] = "changed by a caller"
+    assert codec_fingerprint()["pyppmd"] == version("pyppmd")
+
+
+@pytest.mark.parametrize(("module", "key"), [("bz2", "libbz2_probe"), ("lzma", "liblzma_probe")])
+def test_a_system_codec_that_encodes_differently_changes_the_fingerprint(
+    monkeypatch: pytest.MonkeyPatch, module: str, key: str
+) -> None:
+    """libbz2 and liblzma come from the system and expose no version, so each is named by
+    the size it gives a fixed payload: an encoder that compresses that payload differently
+    must show."""
+    before = codec_fingerprint()[key]
+
+    def another_encoder(*_args: object, **_kwargs: object) -> bytes:
+        return b"another encoder"
+
+    monkeypatch.setattr(f"{module}.compress", another_encoder)
+    assert codec_fingerprint()[key] != before
+
+
+@pytest.mark.parametrize(
+    ("compressor", "factory"),
+    [
+        ("ppmd", "pyppmd.Ppmd8Encoder"),
+        ("zlib", "zlib.compressobj"),
+        ("bzip2", "bz2.BZ2Compressor"),
+        ("lzma", "lzma.LZMACompressor"),
+    ],
+)
+def test_a_stream_that_cannot_be_allocated_is_a_compression_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compressor: str, factory: str
+) -> None:
+    """Every compressor's stream can fail to allocate -- an LZMA dictionary is charged up to
+    about 18 GiB -- and each failure is the compressor's, with the figure that caused it."""
+    from damicore_distance.compressor import compressed_size
+
+    def unallocatable(*_args: object, **_kwargs: object) -> object:
+        raise MemoryError
+
+    path = tmp_path / "object.jsonl"
+    path.write_bytes(b"payload")
+    config = DistanceConfig.model_validate({"compressor": {"name": compressor}})
+    monkeypatch.setattr(factory, unallocatable)
+    with pytest.raises(DistanceError, match=f"{compressor} stream") as raised:
+        compressed_size((path,), config=config)
+    assert raised.value.code == "compression_error"
+    assert str(config.compressor.stream_memory_bytes) in str(raised.value)
+
+
 def test_an_unreadable_object_is_reported_as_a_compression_error(tmp_path: Path) -> None:
     from damicore_distance.compressor import compressed_size
 
     with pytest.raises(DistanceError, match="Could not compress") as raised:
-        compressed_size((tmp_path / "missing.jsonl",), compressor="zlib", level=6, chunk_bytes=1024)
+        compressed_size((tmp_path / "missing.jsonl",), config=DistanceConfig())
     assert raised.value.code == "compression_error"
 
 
@@ -534,6 +796,31 @@ def test_a_shard_checkpoint_describing_another_computation_is_rejected(tmp_path:
     assert raised.value.code == "checkpoint_mismatch_error"
 
 
+def test_a_checkpoint_resumes_under_other_execution_settings(tmp_path: Path) -> None:
+    """A checkpoint holds compressed sizes and shard values, which no execution setting
+    changes; only the shard layout it is indexed by must match. See ADR 0022."""
+    manifest, output = _completed_run(tmp_path)
+    expected = np.load(output / "distance.npy", allow_pickle=False)
+    compute_distance_matrix(
+        manifest,
+        output,
+        config=DistanceConfig(
+            workers=2, pairs_per_shard=1, compression_chunk_bytes=1, save_diagnostics=True
+        ),
+    )
+    assert np.array_equal(np.load(output / "distance.npy", allow_pickle=False), expected)  # pyright: ignore[reportUnknownMemberType]
+    # The shard size is operational for the result even though a checkpoint is keyed by it.
+    wide = compute_distance_matrix(
+        manifest, tmp_path / "wide", config=DistanceConfig(workers=1, pairs_per_shard=10_000)
+    )
+    assert np.array_equal(np.load(wide.matrix_path, allow_pickle=False), expected)  # pyright: ignore[reportUnknownMemberType]
+    with pytest.raises(DistanceError, match="incompatible") as raised:
+        compute_distance_matrix(
+            manifest, output, config=DistanceConfig(workers=1, pairs_per_shard=2)
+        )
+    assert raised.value.code == "checkpoint_mismatch_error"
+
+
 def test_a_shard_index_outside_the_shard_count_is_rejected(tmp_path: Path) -> None:
     manifest, output = _completed_run(tmp_path)
     _rewrite(
@@ -646,7 +933,7 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
     no_paths: list[str] = []
     no_sizes: list[int] = []
     shards: list[distance_api.WorkerArguments] = [
-        (index, no_pairs, no_paths, no_sizes, "zlib", 6, 1024) for index in range(total)
+        (index, no_pairs, no_paths, no_sizes, DistanceConfig()) for index in range(total)
     ]
     arguments: Iterator[distance_api.WorkerArguments] = iter(shards)
     results = distance_api._bounded_submit(

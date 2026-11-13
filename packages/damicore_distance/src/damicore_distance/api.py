@@ -10,14 +10,13 @@ import platform
 import struct
 import tempfile
 import time
-import zlib
 from collections import deque
 from collections.abc import Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -29,7 +28,7 @@ from damicore_distance.artifacts import (
     LabelsArtifact,
     NormalizationManifest,
 )
-from damicore_distance.compressor import compressed_size
+from damicore_distance.compressor import codec_fingerprint, compressed_size
 from damicore_distance.config import DistanceConfig
 from damicore_distance.errors import DistanceError
 from damicore_distance.matrix import DistanceResult
@@ -38,6 +37,7 @@ from damicore_distance.shards import iter_pair_shards
 
 logger = logging.getLogger(__name__)
 CheckpointT = TypeVar("CheckpointT", bound=BaseModel)
+ResultT = TypeVar("ResultT")
 
 
 class ProgressCallback(Protocol):
@@ -121,25 +121,26 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
 
 
 # One shard's work: its index, its pairs, and the run-wide inputs a worker process needs.
-WorkerArguments = tuple[
-    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
-]
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
+# One stream's work: the paths it compresses in order and the run's settings -- one path for
+# C(x), the largest object twice for C(xx).
+SizeArguments = tuple[tuple[str, ...], DistanceConfig]
+
+
+def _size_worker(arguments: SizeArguments) -> int:
+    raw_paths, config = arguments
+    return compressed_size(tuple(Path(path) for path in raw_paths), config=config)
 
 
 def _worker(arguments: WorkerArguments) -> WorkerResult:
-    shard_index, pairs, raw_paths, sizes, compressor, level, chunk_bytes = arguments
+    shard_index, pairs, raw_paths, sizes, config = arguments
     paths = [Path(path) for path in raw_paths]
     left: list[int] = []
     right: list[int] = []
     values: list[float] = []
     for i, j in pairs:
-        cxy = compressed_size(
-            (paths[i], paths[j]),
-            compressor=compressor,
-            level=level,
-            chunk_bytes=chunk_bytes,
-        )
+        cxy = compressed_size((paths[i], paths[j]), config=config)
         left.append(i)
         right.append(j)
         values.append(normalized_compression_distance(sizes[i], sizes[j], cxy))
@@ -181,7 +182,7 @@ _BROKEN_POOL_MESSAGE = (
 )
 
 
-def _typed_results(results: Iterator[WorkerResult]) -> Iterator[WorkerResult]:
+def _typed_results(results: Iterator[ResultT]) -> Iterator[ResultT]:
     """Yield worker results, reporting a failed worker as a typed error.
 
     Both concurrency modes pass through here, so the failure contract does not depend on the
@@ -268,8 +269,7 @@ def _runtime_fingerprint() -> dict[str, str]:
     return {
         "python": platform.python_version(),
         "numpy": np.__version__,
-        "zlib_build": zlib.ZLIB_VERSION,
-        "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        **codec_fingerprint(),
     }
 
 
@@ -282,7 +282,13 @@ def _checkpoint_identity(
         "schema_version": 1,
         "normalization_manifest_sha256": _sha256(manifest_path),
         "object_ids": object_ids,
-        "config": settings.model_dump(mode="json"),
+        # These settings change cost or control flow, never a stored size or shard value, so a
+        # checkpoint stays valid across them; `pairs_per_shard` stays in because it is the
+        # layout the shards are indexed by (ADR 0022).
+        "config": settings.model_dump(
+            mode="json",
+            exclude={"workers", "compression_chunk_bytes", "resume", "save_diagnostics"},
+        ),
         "runtime": _runtime_fingerprint(),
     }
 
@@ -302,6 +308,7 @@ def _load_or_compute_sizes(
     identity: dict[str, object],
     paths: list[Path],
     settings: DistanceConfig,
+    executor: ProcessPoolExecutor | None,
 ) -> list[int]:
     if checkpoint_path.exists():
         if not settings.resume:
@@ -321,15 +328,13 @@ def _load_or_compute_sizes(
                 code="checkpoint_mismatch_error",
             )
         return list(checkpoint.sizes)
-    sizes = [
-        compressed_size(
-            (path,),
-            compressor=settings.compressor,
-            level=settings.compression_level,
-            chunk_bytes=settings.compression_chunk_bytes,
-        )
-        for path in paths
-    ]
+    arguments: list[SizeArguments] = [((str(path),), settings) for path in paths]
+    # Executor.map submits every argument up front, which is bounded here: one short tuple
+    # per object, where a shard's carries every path and size (see _bounded_submit).
+    results = (
+        map(_size_worker, arguments) if executor is None else executor.map(_size_worker, arguments)
+    )
+    sizes = list(_typed_results(results))
     checkpoint = CompressedSizesCheckpoint(identity=identity, sizes=tuple(sizes))
     _atomic_json(checkpoint_path, checkpoint.model_dump(mode="json"))
     return sizes
@@ -460,14 +465,15 @@ def compute_distance_matrix(
     zero-diagonal, and bitwise symmetric before this returns, and it is what
     :func:`damicore_tree_builder.build_tree` consumes together with ``labels.json``. That
     validation pass also measures the matrix range, reported as ``ncd_min``, ``ncd_max``
-    and ``ncd_out_of_range_count`` on the result.
+    and ``ncd_out_of_range_count`` on the result, and the largest object is compressed once
+    more after itself for ``ncd_self_largest``.
 
     Pairs are computed shard by shard straight into the memory map, and each finished shard
     is checkpointed with a digest, so an interrupted run resumes from the shards already
     done. With ``config.resume`` disabled, existing outputs are a conflict instead of a
-    starting point. With more than one worker the shards run in spawned processes that
-    re-import the caller's ``__main__``, so a script-level call must sit under
-    ``if __name__ == "__main__":``.
+    starting point. With more than one worker the per-object compressed sizes and the shards
+    run in one pool of spawned processes that re-import the caller's ``__main__``, so a
+    script-level call must sit under ``if __name__ == "__main__":``.
 
     Parameters
     ----------
@@ -495,68 +501,72 @@ def compute_distance_matrix(
     manifest_path = Path(normalization_manifest).resolve()
     object_ids, labels, paths = _load_objects(manifest_path)
     identity = _checkpoint_identity(manifest_path, settings, object_ids)
-    sizes = _load_or_compute_sizes(
-        checkpoints / "compressed-sizes.json",
-        identity,
-        paths,
-        settings,
-    )
-
-    pair_count = len(paths) * (len(paths) - 1) // 2
-    shard_count = math.ceil(pair_count / settings.pairs_per_shard)
-    matrix_path = destination / "distance.npy"
-    matrix = _open_matrix(matrix_path, len(paths), resume=settings.resume)
-    shard_checkpoint = checkpoints / "distance-shards.json"
-    completed_shards = _load_completed_shards(
-        shard_checkpoint,
-        identity,
-        pair_count,
-        shard_count,
-        resume=settings.resume,
-    )
-    completed_pairs = 0
-    for index, shard in iter_pair_shards(len(paths), settings.pairs_per_shard):
-        if index in completed_shards:
-            _validate_completed_shard(matrix, shard)
-            if _shard_digest(matrix, shard) != completed_shards[index]:
-                raise DistanceError(
-                    "Completed shard digest does not match distance.npy",
-                    code="checkpoint_mismatch_error",
-                )
-            completed_pairs += len(shard)
-    raw_paths = [str(path) for path in paths]
-    # Annotated rather than inferred: a tuple display widens the compressor literal to str,
-    # which would put the widening back that the parameter type exists to prevent.
-    arguments: Iterator[WorkerArguments] = (
-        (
-            index,
-            shard,
-            raw_paths,
-            sizes,
-            settings.compressor,
-            settings.compression_level,
-            settings.compression_chunk_bytes,
-        )
-        for index, shard in iter_pair_shards(len(paths), settings.pairs_per_shard)
-        if index not in completed_shards
-    )
-    if progress is not None:
-        progress(completed_pairs, pair_count, "distance")
-    executor: ProcessPoolExecutor | None = None
-    results: Iterator[WorkerResult]
-    if settings.effective_workers == 1:
-        results = map(_worker, arguments)
-    else:
-        executor = ProcessPoolExecutor(
+    # One pool serves both phases, so neither the per-object sizes nor the pairs run
+    # serially in this process while the workers wait.
+    executor = (
+        None
+        if settings.effective_workers == 1
+        else ProcessPoolExecutor(
             max_workers=settings.effective_workers,
             mp_context=get_context("spawn"),
         )
-        # Two shards per worker: enough that a worker never idles waiting for the next
-        # submission, small enough that the queued payload stays proportional to the pool.
-        results = _bounded_submit(executor, arguments, settings.effective_workers * 2)
-    results = _typed_results(results)
+    )
     try:
-        for shard_index, left, right, values in results:
+        sizes = _load_or_compute_sizes(
+            checkpoints / "compressed-sizes.json",
+            identity,
+            paths,
+            settings,
+            executor,
+        )
+
+        # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
+        # defers it until it is read after the last shard.
+        largest = max(range(len(paths)), key=lambda index: paths[index].stat().st_size)
+        doubled: list[SizeArguments] = [((str(paths[largest]),) * 2, settings)]
+        self_size = (
+            map(_size_worker, doubled) if executor is None else executor.map(_size_worker, doubled)
+        )
+
+        pair_count = len(paths) * (len(paths) - 1) // 2
+        pairs_per_shard = settings.effective_pairs_per_shard(pair_count)
+        shard_count = math.ceil(pair_count / pairs_per_shard)
+        matrix_path = destination / "distance.npy"
+        matrix = _open_matrix(matrix_path, len(paths), resume=settings.resume)
+        shard_checkpoint = checkpoints / "distance-shards.json"
+        completed_shards = _load_completed_shards(
+            shard_checkpoint,
+            identity,
+            pair_count,
+            shard_count,
+            resume=settings.resume,
+        )
+        completed_pairs = 0
+        for index, shard in iter_pair_shards(len(paths), pairs_per_shard):
+            if index in completed_shards:
+                _validate_completed_shard(matrix, shard)
+                if _shard_digest(matrix, shard) != completed_shards[index]:
+                    raise DistanceError(
+                        "Completed shard digest does not match distance.npy",
+                        code="checkpoint_mismatch_error",
+                    )
+                completed_pairs += len(shard)
+        raw_paths = [str(path) for path in paths]
+        arguments: Iterator[WorkerArguments] = (
+            (index, shard, raw_paths, sizes, settings)
+            for index, shard in iter_pair_shards(len(paths), pairs_per_shard)
+            if index not in completed_shards
+        )
+        if progress is not None:
+            progress(completed_pairs, pair_count, "distance")
+        results: Iterator[WorkerResult] = (
+            map(_worker, arguments)
+            if executor is None
+            # Two shards per worker: enough that a worker never idles waiting for the next
+            # submission, small enough that the queued payload stays proportional to the pool.
+            else _bounded_submit(executor, arguments, settings.effective_workers * 2)
+        )
+        for shard_index, left, right, values in _typed_results(results):
             if len(left) != len(values) or not all(math.isfinite(value) for value in values):
                 raise DistanceError(
                     "Worker returned an invalid shard",
@@ -588,6 +598,10 @@ def compute_distance_matrix(
             completed_pairs += len(values)
             if progress is not None:
                 progress(completed_pairs, pair_count, "distance")
+        (doubled_size,) = _typed_results(self_size)
+        ncd_self_largest = normalized_compression_distance(
+            sizes[largest], sizes[largest], doubled_size
+        )
     finally:
         if executor is not None:
             executor.shutdown(cancel_futures=True)
@@ -613,4 +627,5 @@ def compute_distance_matrix(
         ncd_min=ncd_min,
         ncd_max=ncd_max,
         ncd_out_of_range_count=out_of_range,
+        ncd_self_largest=ncd_self_largest,
     )

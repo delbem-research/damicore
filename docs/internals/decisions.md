@@ -23,6 +23,9 @@ one line per record, saying what it settles rather than what it is about.
 | [0017](../decisions/0017-the-neighbor-joining-tie-rule.md) | Q scores within a relative band are one tie, broken in lexicographic label order; neither published source states a tie rule |
 | [0018](../decisions/0018-method-provenance-in-the-manifest.md) | The manifest records which named rule was in force at each stage, separately from the parameters `config_hash` already covers |
 | [0019](../decisions/0019-an-attribution-declares-whether-it-was-read.md) | Every attribution to a published work declares whether anybody read it against this code, and the gate checks shape, never truth |
+| [0020](../decisions/0020-ppmd-is-the-default-compressor.md) | PPMd variant I with restart is the default compressor, its order and memory are configuration, and `pyppmd` is a required dependency |
+| [0021](../decisions/0021-bzip2-and-lzma-join-the-compressors.md) | bzip2 and raw LZMA2 join the compressors; each exposes only the settings that change its window, its stream memory is charged per worker, and its codec is named by a probe |
+| [0022](../decisions/0022-execution-settings-are-not-run-identity.md) | `config_hash` leaves out the execution settings, which `config` still records, so a run resumes and is reused on any machine and under any worker count |
 
 ```{toctree}
 :maxdepth: 1
@@ -43,4 +46,7 @@ one line per record, saying what it settles rather than what it is about.
 /decisions/0017-the-neighbor-joining-tie-rule
 /decisions/0018-method-provenance-in-the-manifest
 /decisions/0019-an-attribution-declares-whether-it-was-read
+/decisions/0020-ppmd-is-the-default-compressor
+/decisions/0021-bzip2-and-lzma-join-the-compressors
+/decisions/0022-execution-settings-are-not-run-identity
 ```

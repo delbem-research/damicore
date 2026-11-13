@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 import platform
 import time
-import zlib
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
+
+from damicore_distance import codec_fingerprint
 
 from damicore.errors import ArtifactValidationError, CheckpointMismatchError
 from damicore.manifest import (
@@ -31,6 +32,9 @@ RESUME_FINGERPRINT_KEYS = (
     "igraph",
     "zlib_build",
     "zlib_runtime",
+    "pyppmd",
+    "libbz2_probe",
+    "liblzma_probe",
 )
 
 
@@ -56,8 +60,7 @@ def runtime_fingerprint() -> dict[str, str]:
         "pydantic": version("pydantic"),
         "igraph": version("igraph"),
         "tqdm": version("tqdm"),
-        "zlib_build": zlib.ZLIB_VERSION,
-        "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        **codec_fingerprint(),
         **versions,
     }
 

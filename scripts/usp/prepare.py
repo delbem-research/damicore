@@ -11,11 +11,11 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-import tomllib
 from reportlab import __file__ as reportlab_file
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics

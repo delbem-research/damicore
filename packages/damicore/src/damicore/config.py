@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from damicore_distance import DistanceConfig
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class ResourceLimits(BaseModel):
@@ -13,7 +14,8 @@ class ResourceLimits(BaseModel):
     cubic in the object count, so a limit lifted without that check buys a run that does not
     finish. Two gates are less visible than the object, pair, and matrix caps.
     ``max_working_memory_bytes`` bounds the peak RAM the distance stage is projected to need
-    from the largest serialized chunk, the worker count, and the shard size.
+    from the largest serialized chunk, the worker count, the shard size, and the compressor
+    stream each worker holds, charged at its stated size.
     ``required_free_disk_factor`` is the headroom multiplier applied to the projected artifact
     bytes; the free-disk check it produces is enforced no matter how the limits are set.
     """
@@ -31,10 +33,13 @@ class ExecutionConfig(BaseModel):
     """How a run is executed, as opposed to what it computes.
 
     These settings change cost and restart behavior, not the clustering: the pipeline is
-    exact and deterministic under any of them. They do change run identity -- every field
-    except ``resume`` and ``reuse_completed`` enters the configuration hash that names the
-    default output directory, so ``workers="auto"`` resolving differently on another machine
-    produces a different run rather than resuming the existing one.
+    exact and deterministic under any of them, so none enters the configuration hash that
+    names the run. ``manifest.json`` records the values of the invocation that created the
+    run directory; a later invocation that resumes or reuses it -- on another machine, where
+    ``workers="auto"`` resolves differently, for instance -- adopts the same directory. A
+    resume with another ``pairs_per_shard`` is refused while the distance stage is incomplete,
+    because its checkpoint is indexed by that layout; ``pairs_per_shard="auto"`` resolves
+    from the pair count alone, so it gives the same layout on every machine. See ADR 0022.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -42,17 +47,17 @@ class ExecutionConfig(BaseModel):
     workers: int | Literal["auto"] = "auto"
     csv_chunk_rows: int = Field(default=50_000, gt=0)
     compression_chunk_bytes: int = Field(default=4_194_304, gt=0)
-    pairs_per_shard: int = Field(default=10_000, gt=0)
+    pairs_per_shard: int | Literal["auto"] = "auto"
     resume: bool = True
     reuse_completed: bool = True
     pandas_materialization_limit_bytes: int = Field(default=268_435_456, gt=0)
     limits: ResourceLimits = Field(default_factory=ResourceLimits)
 
-    @field_validator("workers")
+    @field_validator("workers", "pairs_per_shard")
     @classmethod
-    def _validate_workers(cls, value: int | str) -> int | str:
+    def _validate_positive_or_auto(cls, value: int | str, info: ValidationInfo) -> int | str:
         if isinstance(value, int) and value < 1:
-            raise ValueError("workers must be at least one")
+            raise ValueError(f"{info.field_name} must be at least one")
         return value
 
     @property
@@ -60,3 +65,11 @@ class ExecutionConfig(BaseModel):
         if isinstance(self.workers, int):
             return self.workers
         return min(4, max(1, (os.cpu_count() or 1) - 1))
+
+    def effective_pairs_per_shard(self, pair_count: int) -> int:
+        # The distance stage owns the rule, and it is the stage that lays the shards out:
+        # resolving through it keeps what preflight projects and the manifest records equal
+        # to what the stage runs.
+        return DistanceConfig(pairs_per_shard=self.pairs_per_shard).effective_pairs_per_shard(
+            pair_count
+        )

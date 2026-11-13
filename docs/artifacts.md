@@ -36,6 +36,11 @@ produced it, rather than guessing. See
 Only `completed` is a successful terminal state. `failed` and `interrupted`
 reports remain diagnostic and may be resumed when their input, configuration,
 schema, runtime fingerprint, receipts, and checkpoints remain compatible.
+`config_hash` covers every `config` field except the execution settings --
+`workers`, `csv_chunk_rows`, `compression_chunk_bytes`, `pairs_per_shard`,
+`pandas_materialization_limit_bytes` and `limits` -- which `config` still
+records as the invocation that created the directory resolved them. See
+[ADR 0022](decisions/0022-execution-settings-are-not-run-identity.md).
 
 `partition.json`, written by `damicore_normalizer.partition_dataset` beside the
 subset files it describes, is a user-facing artifact rather than an
