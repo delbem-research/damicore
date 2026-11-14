@@ -40,8 +40,10 @@ together.
 Each column rises past its own declared limit and not before: `zlib` between a 32 KiB pair
 and a 64 KiB one, `bzip2` at 100 kB with the smallest block and at 900 kB with the largest,
 `lzma` with a 64 KiB dictionary between 128 and 256 KiB, and `lzma` with 8 MiB nowhere in
-this range. Each column is monotone in pair size; the two `bzip2` columns differ only in the
-block, which is the point. The LZMA row shows that a declared window is conservative -- the
+this range. Below its limit a column is not monotone -- both `bzip2` columns fall from 0.432 at a
+16 KiB pair to 0.384 at a 64 KiB one, as the fixed cost of a block is spread over more data --
+and the rise past the limit is what the window predicts, not the shape before it. The two
+`bzip2` columns differ only in the block, which is the point. The LZMA row shows that a declared window is conservative -- the
 copy survives to about twice the dictionary -- which is the direction a gate should err in.
 
 **Where the loss actually happens, and what the gate costs.** It is not a cliff at the pair

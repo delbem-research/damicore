@@ -1082,8 +1082,11 @@ def run(
                 "ncd_max": distance.ncd_max,
                 "ncd_out_of_range_count": distance.ncd_out_of_range_count,
                 "ncd_self_largest": distance.ncd_self_largest,
-                "pairs_over_window": distance.pairs_over_window or 0,
             }
+            # A stage that ran counted its pairs, so this is written rather than defaulted:
+            # recording a zero where the count is absent would be a measurement nobody made.
+            if distance.pairs_over_window is not None:
+                distance_metrics["pairs_over_window"] = distance.pairs_over_window
             journal.stage_completed(
                 "distancing",
                 started,

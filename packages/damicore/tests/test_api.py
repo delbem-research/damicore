@@ -17,6 +17,7 @@ from damicore import (
     load_result,
     run,
 )
+from damicore.api import _SCALE_GUIDANCE, _WINDOW_GUIDANCE, _guidance
 
 pytestmark = pytest.mark.unit
 
@@ -590,6 +591,35 @@ def test_a_pair_past_the_compressor_window_is_reported_and_refused(tmp_path: Pat
     manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["config"]["limits"]["max_pair_window_factor"] == 8.0
     result.close()
+
+
+def test_the_refusal_advises_on_the_gates_it_actually_tripped(tmp_path: Path) -> None:
+    """The window is not a cost, so the advice for costs must not be the advice it gets.
+
+    Reshaping the source or raising a limit after reading the estimate does nothing for a pair
+    the compressor cannot match across, and the three outcomes -- the window alone, the window
+    beside a scale gate, and scale alone -- are what a caller reads in the error.
+    """
+    assert _guidance(["compressor_window"]) == _WINDOW_GUIDANCE
+    both = _guidance(["max_objects", "compressor_window"])
+    assert both.startswith(_SCALE_GUIDANCE)
+    assert both.endswith(_WINDOW_GUIDANCE)
+    assert _guidance(["max_objects"]) == _SCALE_GUIDANCE
+
+    source = _wide_csv(tmp_path)
+    with pytest.raises(DamicoreError) as refused:
+        run(
+            source,
+            split="columns",
+            output_dir=tmp_path / "advised",
+            compressor="zlib",
+            compression_level=6,
+            progress=False,
+            execution=ExecutionConfig(workers=1, limits=ResourceLimits()),
+        )
+    message = str(refused.value)
+    assert _WINDOW_GUIDANCE in message
+    assert _SCALE_GUIDANCE not in message
 
 
 def test_the_default_compressor_declares_no_window_and_is_not_gated(tmp_path: Path) -> None:

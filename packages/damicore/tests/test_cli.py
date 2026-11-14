@@ -68,6 +68,50 @@ def test_cli_passes_the_compressor_settings_to_estimate_and_run(
     assert (config["compressor"], config["bzip2_block_size_100k"]) == ("bzip2", 3)
 
 
+def _wide_csv(tmp_path: Path) -> Path:
+    """Two columns whose pair is longer than what DEFLATE can match across."""
+    path = tmp_path / "wide.csv"
+    rows = ["a,b"]
+    for index in range(1_400):
+        rows.append(f"value-{index:05d},value-{index:05d}x")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return path
+
+
+def test_the_window_factor_flag_reaches_the_limits_the_run_is_admitted_under(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The override has to exist on the documented interface, not only in the Python API.
+
+    A flag that parsed but never reached `ResourceLimits` would leave the gate unliftable
+    from the command line while looking liftable, so this asks the estimate to change its
+    verdict on the same source.
+    """
+    source = _wide_csv(tmp_path)
+    arguments = [
+        "estimate",
+        str(source),
+        "--split",
+        "columns",
+        "--compressor",
+        "zlib",
+        "--compression-level",
+        "6",
+        "--json",
+    ]
+    assert main(arguments) == 0
+    gated = json.loads(capsys.readouterr().out)
+    assert gated["violations"] == ["compressor_window"]
+    assert gated["compressor_window_bytes"] == 32_768
+
+    assert main([*arguments, "--max-pair-window-factor", "8"]) == 0
+    lifted = json.loads(capsys.readouterr().out)
+    assert lifted["violations"] == []
+    assert lifted["within_limits"]
+    # The same corpus, admitted rather than reshaped: the pair is still over the window.
+    assert lifted["max_pair_bytes"] == gated["max_pair_bytes"]
+
+
 def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "run"
