@@ -44,7 +44,8 @@ this range. Below its limit a column is not monotone -- both `bzip2` columns fal
 16 KiB pair to 0.384 at a 64 KiB one, as the fixed cost of a block is spread over more data --
 and the rise past the limit is what the window predicts, not the shape before it. The two
 `bzip2` columns differ only in the block, which is the point. The LZMA row shows that a declared window is conservative -- the
-copy survives to about twice the dictionary -- which is the direction a gate should err in.
+copy survives at twice the dictionary and is gone at four times, and this grid does not say
+where between them it goes -- which is the direction a gate should err in.
 
 **Where the loss actually happens, and what the gate costs.** It is not a cliff at the pair
 boundary. Measured finely around DEFLATE's window, a pair of 32,768 bytes reads 0.199, one of

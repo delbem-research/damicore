@@ -104,9 +104,10 @@ it.
   refused rather than corrected: each compressor declares the bytes of a pair it can match
   across, preflight raises the `compressor_window` violation when the two largest objects
   exceed it, and `ResourceLimits.max_pair_window_factor` lifts the gate for a caller who
-  wants the measurement anyway. The result and `report.json` carry
-  `compressor_window_bytes` and `pairs_over_window`, so a run admitted that way says how
-  much of its matrix was measured with one object out of view. PPMd declares no window, and
+  wants the measurement anyway. `report.json` carries `compressor_window_bytes` and
+  `pairs_over_window`, and the result carries the count beside the window its own
+  configuration declares, so a run admitted that way says how much of its matrix was
+  measured with one object out of view. PPMd declares no window, and
   [adr-0023] carries the measurement that says why: its model size is not a limit, and the
   number that would go in that field would be invented. Correcting the measurement for
   oversized objects -- interleaved pairing -- is still open work.

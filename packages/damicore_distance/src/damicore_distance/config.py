@@ -41,7 +41,7 @@ class DeflateCompressor(BaseModel):
     def window_bytes(self) -> int:
         """The bytes of a pair this compressor can still match across [adr-0023].
 
-        32 KiB, which is `zlib.MAX_WBITS` and the most either container allows.
+        32 KiB, which is ``2 ** zlib.MAX_WBITS`` and the most either container allows.
         """
         return 32_768
 
@@ -129,8 +129,8 @@ class LzmaCompressor(BaseModel):
     def window_bytes(self) -> int:
         """The bytes of a pair this compressor can still match across [adr-0023].
 
-        The dictionary. Measured, a copy survives to about twice it, so declaring the
-        dictionary gates earlier than the measurement requires, never later.
+        The dictionary. Measured, a copy still survives at twice it [adr-0023], so declaring
+        the dictionary gates earlier than the measurement requires, never later.
         """
         return self.lzma_dictionary_bytes
 
