@@ -279,6 +279,15 @@ carries anything else, a date included, matches neither and fails the release.
 
 ### Fixed
 
+- `[fisher1958]`'s `Not read:` reason owed its delta sentence to issue #112. That issue
+  closed when the two works it was waiting on were read, and this one was not among them:
+  the reason pointed a reader at a closed issue that never owned it. The obligation is
+  stated without naming an issue, which is what it was before a number was attached to it.
+- `docs/method/evidence.md` says what the `title` column of `evidence-corpus.csv` is: the
+  document's title cut to fifty characters, with a `(2)` suffix where two documents by the
+  same author and year cut to the same string. Two rows carry that suffix, and nothing said
+  it was a disambiguator rather than part of a title -- a short title read as a citation is
+  a wrong citation, and the column identifies documents rather than citing them.
 - The distance stage ran on one worker whatever `workers` said whenever a run had at most
   10,000 pairs -- 141 objects or fewer -- because the default `pairs_per_shard=10000` made
   the whole run one shard, and one shard occupies one worker. A checkpoint then covered all
