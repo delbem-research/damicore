@@ -40,8 +40,12 @@ cluster labeling counts once, and so does one that mentions labeling as future w
 
 `evidence-corpus.csv`, beside this page, is one row per document: year, first author, short
 title, role, the object count it reports if it reports one, and one `0`/`1` column per
-capability. **The table below is that file's column sums**, which is what makes the counts
-checkable: load the file, sum the column, compare.
+capability. The title is the document's title cut to its first fifty characters, so it
+identifies a document rather than citing it; where two documents by the same author and year
+cut to the same string, the second carries a `(2)` suffix and they are two distinct works.
+
+**The table below is that file's column sums**, which is what makes the counts checkable:
+load the file, sum the column, compare.
 
 ## What the corpus attests, and what 0.3 has
 
