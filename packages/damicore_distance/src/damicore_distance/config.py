@@ -37,6 +37,14 @@ class DeflateCompressor(BaseModel):
         # kilobytes it adds for small objects are not charged.
         return 262_144
 
+    @property
+    def window_bytes(self) -> int:
+        """The bytes of a pair this compressor can still match across [adr-0023].
+
+        32 KiB, which is `zlib.MAX_WBITS` and the most either container allows.
+        """
+        return 32_768
+
 
 class PpmdCompressor(BaseModel):
     """PPMd variant I with model restart, at ``ppmd_order`` with ``ppmd_memory_bytes`` of
@@ -58,6 +66,17 @@ class PpmdCompressor(BaseModel):
         """
         return self.ppmd_memory_bytes
 
+    @property
+    def window_bytes(self) -> None:
+        """PPMd declares no window, because it has none to declare [adr-0023].
+
+        Its reach across a pair is a property of the content, not a byte count: the model's
+        size does not decide what it finds, which is measured in that record. What it loses
+        with size is the copy, not the distribution [adr-0020], and
+        ``DistanceResult.ncd_self_largest`` is where that shows.
+        """
+        return None
+
 
 class Bzip2Compressor(BaseModel):
     """bzip2 at ``bzip2_block_size_100k``; the block is its window [adr-0021]."""
@@ -76,6 +95,15 @@ class Bzip2Compressor(BaseModel):
         """
         # The measured peak at the largest block, 9.5 MiB, charged at every block size.
         return 10_485_760
+
+    @property
+    def window_bytes(self) -> int:
+        """The bytes of a pair this compressor can still match across [adr-0023].
+
+        The block, which bzip2 sizes in units of 100,000 bytes rather than of 100 KiB. Two
+        objects in different blocks share nothing [adr-0021].
+        """
+        return self.bzip2_block_size_100k * 100_000
 
 
 class LzmaCompressor(BaseModel):
@@ -96,6 +124,15 @@ class LzmaCompressor(BaseModel):
         """
         # Above every measured peak from a 4 KiB to a 64 MiB dictionary at preset 6.
         return 12 * self.lzma_dictionary_bytes + 4_194_304
+
+    @property
+    def window_bytes(self) -> int:
+        """The bytes of a pair this compressor can still match across [adr-0023].
+
+        The dictionary. Measured, a copy survives to about twice it, so declaring the
+        dictionary gates earlier than the measurement requires, never later.
+        """
+        return self.lzma_dictionary_bytes
 
 
 # Each compressor is its own model, so a setting it does not read is not a field to write:

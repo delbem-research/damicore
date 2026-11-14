@@ -525,3 +525,75 @@ def test_a_platform_without_rusage_reports_no_peak_memory(
 
     monkeypatch.setattr(resource, "getrusage", refusing_getrusage)
     assert damicore_api._peak_rss() is None
+
+
+def _wide_csv(tmp_path: Path) -> Path:
+    """Two columns whose objects are 20 KiB each, so their pair is past DEFLATE's window."""
+    path = tmp_path / "wide.csv"
+    rows = ["a,b"]
+    for index in range(1_400):
+        rows.append(f"value-{index:05d},value-{index:05d}x")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return path
+
+
+def test_a_pair_past_the_compressor_window_is_reported_and_refused(tmp_path: Path) -> None:
+    """The gate of issue 59: preflight names it, `run` raises it, and raising the factor runs.
+
+    `zlib` is asked for a pair it cannot match across, which is the measurement defect
+    ADR 0023 records -- not a cost. The override is a limit like any other, and the run it
+    allows records the factor it ran under.
+    """
+    source = _wide_csv(tmp_path)
+    execution = ExecutionConfig(workers=1, limits=ResourceLimits())
+    preview = estimate(
+        source, split="columns", compressor="zlib", compression_level=6, execution=execution
+    )
+    assert preview.compressor_window_bytes == 32_768
+    assert preview.max_pair_bytes is not None
+    assert preview.max_pair_bytes > 32_768
+    assert preview.violations == ["compressor_window"]
+    assert not preview.within_limits
+
+    with pytest.raises(DamicoreError) as refused:
+        run(
+            source,
+            split="columns",
+            output_dir=tmp_path / "refused",
+            compressor="zlib",
+            compression_level=6,
+            progress=False,
+            execution=execution,
+        )
+    assert "compressor_window" in str(refused.value)
+
+    lifted = ExecutionConfig(
+        workers=1,
+        pairs_per_shard=1,
+        limits=ResourceLimits(max_pair_window_factor=8.0),
+    )
+    allowed = estimate(
+        source, split="columns", compressor="zlib", compression_level=6, execution=lifted
+    )
+    assert allowed.violations == []
+    result = run(
+        source,
+        split="columns",
+        output_dir=tmp_path / "allowed",
+        compressor="zlib",
+        compression_level=6,
+        progress=False,
+        execution=lifted,
+    )
+    assert result.report.compressor_window_bytes == 32_768
+    assert result.report.pairs_over_window == 1
+    manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["config"]["limits"]["max_pair_window_factor"] == 8.0
+    result.close()
+
+
+def test_the_default_compressor_declares_no_window_and_is_not_gated(tmp_path: Path) -> None:
+    """PPMd has a model, not a window, so the same source it would gate on runs ungated."""
+    preview = estimate(_wide_csv(tmp_path), split="columns", execution=ExecutionConfig(workers=1))
+    assert preview.compressor_window_bytes is None
+    assert "compressor_window" not in preview.violations

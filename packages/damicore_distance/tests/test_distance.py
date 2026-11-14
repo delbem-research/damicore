@@ -21,6 +21,7 @@ from damicore_distance import (
     DistanceConfig,
     DistanceError,
     DistanceMatrixView,
+    LzmaCompressor,
     codec_fingerprint,
     compute_distance_matrix,
 )
@@ -1015,3 +1016,68 @@ def test_a_pandas_view_without_the_extra_names_the_extra_to_install(
         assert view.shape == (2, 2)
     finally:
         view.close()
+
+
+def _corpus_manifest(tmp_path: Path, payloads: list[bytes]) -> Path:
+    """A file-corpus manifest over payloads whose sizes the caller chose."""
+    objects_dir = tmp_path / "normalized" / "objects"
+    objects_dir.mkdir(parents=True, exist_ok=True)
+    objects: list[dict[str, object]] = []
+    for index, payload in enumerate(payloads, start=1):
+        name = f"object_{index:06d}"
+        (objects_dir / name).write_bytes(payload)
+        objects.append(
+            {
+                "object_id": name,
+                "label": f"label_{index}",
+                "relative_path": f"objects/{name}",
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    manifest_path = tmp_path / "normalized" / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "object_encoding": "raw-bytes/1",
+                "input": {
+                    "kind": "files",
+                    "sha256": "b" * 64,
+                    "size_bytes": sum(map(len, payloads)),
+                    "root": str(tmp_path),
+                    "file_count": len(payloads),
+                    "recursive": True,
+                    "include_hidden": False,
+                },
+                "objects": objects,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def test_the_result_counts_every_pair_the_window_cannot_hold(tmp_path: Path) -> None:
+    """Counted from the object sizes, so a resumed run reports the same number as a fresh one.
+
+    Three objects against a 4 KiB LZMA dictionary: one of the three pairs is longer than it.
+    """
+    payloads = [b"a" * 1_000, b"b" * 1_500, b"c" * 3_000]
+    manifest_path = _corpus_manifest(tmp_path, payloads)
+    result = compute_distance_matrix(
+        manifest_path,
+        tmp_path / "gated",
+        config=DistanceConfig(compressor=LzmaCompressor(lzma_dictionary_bytes=4_096), workers=1),
+    )
+    assert result.pairs_over_window == 1
+
+
+def test_a_compressor_with_no_window_reports_none_rather_than_zero(tmp_path: Path) -> None:
+    """PPMd declares no window, so no pair can be over one and the count is zero, not a guess."""
+    manifest_path = _corpus_manifest(tmp_path, [b"a" * 1_000, b"b" * 9_000])
+    result = compute_distance_matrix(
+        manifest_path, tmp_path / "ungated", config=DistanceConfig(workers=1)
+    )
+    assert DistanceConfig().compressor.window_bytes is None
+    assert result.pairs_over_window == 0

@@ -448,6 +448,27 @@ def _write_diagnostics(
                 writer.writerow([i, j, object_ids[i], object_ids[j], repr(float(matrix[i, j]))])
 
 
+def _pairs_over_window(object_bytes: list[int], window: int | None) -> int:
+    """Count the pairs whose two objects together exceed what the compressor matches across.
+
+    Counted from the object sizes rather than during compression: the pair loop runs in
+    workers and across shards, so a resumed run would otherwise count only the shards it
+    ran. Sorted once, it is two pointers over the sizes, and the count is exact for every
+    pair whether or not this run computed it.
+    """
+    if window is None:
+        return 0
+    ordered = sorted(object_bytes)
+    left, right, over = 0, len(ordered) - 1, 0
+    while left < right:
+        if ordered[left] + ordered[right] > window:
+            over += right - left
+            right -= 1
+        else:
+            left += 1
+    return over
+
+
 def compute_distance_matrix(
     normalization_manifest: str | Path,
     output_dir: str | Path,
@@ -628,4 +649,7 @@ def compute_distance_matrix(
         ncd_max=ncd_max,
         ncd_out_of_range_count=out_of_range,
         ncd_self_largest=ncd_self_largest,
+        pairs_over_window=_pairs_over_window(
+            [path.stat().st_size for path in paths], settings.compressor.window_bytes
+        ),
     )

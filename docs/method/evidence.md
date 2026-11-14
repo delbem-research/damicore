@@ -93,6 +93,13 @@ distance stage now measures with, and what each one sees, are
 [ADR 0021](../decisions/0021-bzip2-and-lzma-join-the-compressors.md); the work was issues #60
 and #61. As of 0.4.0, nothing else in the table has moved.
 
+**"Objects larger than the compressor window" is detected, not closed.** 0.5.0 refuses a run
+whose largest pair exceeds the window its compressor declares, which turns the condition those
+7 documents report from a silent distortion into a named preflight violation
+([ADR 0023](../decisions/0023-the-compressor-window-is-a-correctness-gate.md), issue #59).
+Measuring such a corpus still needs a representation that fits -- chunking, or a distance that
+does not read the pair as one stream -- so the row stays `absent`.
+
 ## Limitations
 
 1. **Pages were sampled, not read whole.** Each document was read at its method-dense pages

@@ -23,9 +23,19 @@ compressor `n` times the object bytes, plus the largest object twice for
 `ncd_self_largest`: 50 columns of 20 MB are 50 GB of compressor input. `estimate` reports that figure exactly as
 `compression_input_bytes`, which a measured compressor throughput turns into
 time, and `max_pair_bytes`, the longest concatenation the compressor must hold
-for an NCD value to see across a pair. Neither is a gate. After the run,
+for an NCD value to see across a pair. The first is not a gate; the second is,
+against the window the compressor declares: `zlib` and `gzip` match across
+32 KiB, `bzip2` across its block, `lzma` across its dictionary, and a pair
+longer than that is refused with the `compressor_window` violation, because
+past it the compressor is given a pair it cannot see across and every distance
+moves toward 1 with nothing saying so. `ResourceLimits.max_pair_window_factor`
+lifts the gate -- the value is recorded in the manifest -- and `ppmd`, the
+default, declares no window at all, which [adr-0023] measures rather than
+assumes. After the run,
 `ncd_self_largest` in `report.json` says how much of its largest object the
 compressor recognized when it read it twice, which is where a window or a
-filled model shows at the size the run actually used. The work is split
+filled model shows at the size the run actually used, and
+`pairs_over_window` says how many pairs were longer than the window to begin
+with. The work is split
 into at least 64 shards whatever the object count, so every worker has work
 even when a few large objects make few pairs.
