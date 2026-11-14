@@ -1,14 +1,22 @@
 # Roadmap
 
-DAMICORE 0.3 implements the canonical 2011 pipeline -- exact NCD over `zlib`/`gzip`,
+DAMICORE 0.3 implemented the canonical 2011 pipeline -- exact NCD over `zlib`/`gzip`,
 deterministic Neighbor Joining, FastGreedy community detection -- with engineering the
 published work on the method never had: content-addressed runs, a manifest that records input,
 configuration and artifact hashes, resumable shards, preflight resource gates, decision
-records, strict typing.
+records, strict typing. That release is the baseline this plan was measured against, and the
+one [the evidence page](method/evidence.md) audits.
 
-What it does not implement is what the literature added to the method after [sanches2011]. A
+What it did not implement is what the literature added to the method after [sanches2011]. A
 run returns `membership`, `clusters`, `tree_newick`, the distance matrix and a modularity
 value: a partition with no meaning attached and no measure of how stable it is.
+
+0.4.0 closed one of those gaps and the whole scientific record. The distance stage measures
+with more than one compressor, each exposing the settings that change what it can see across
+a pair -- which is two of G1's seven items, #60 and #61, and the compressors themselves are
+named by ADRs 0020 and 0021 rather than restated here; and `docs/` carries the method, the
+references and the provenance, which is G7, closed. The rest of G1 and every other group
+below is still ahead.
 
 This page is the plan for closing that gap. The evidence it rests on -- which capability is
 attested by how many published works, and the data behind each count -- is
@@ -28,9 +36,12 @@ this page carries the structure and the rules, which do not change when an item 
    `object_encoding`, ADR 0014 for `partition_rule` and ADR 0018 for the `method` block. A run
    directory from a year ago must still say which variant of the method produced it.
 3. **Deferred decisions need a record.** `AGENTS.md` names the decisions this project has
-   deferred -- alternative compressors, approximate NCD, GPU, a remote service, DataFrame and
-   stream input among them. An item that reopens one carries a decision record in its
-   acceptance criteria, and that record states the measurement, not the intention.
+   deferred -- approximate NCD, Dask or Ray, PyArrow or Polars, GPU, compressors beyond the
+   ones ADRs 0020 and 0021 settle, DataFrame or stream input, Parquet output, a remote
+   service, legacy spreadsheet formats, archive expansion. An item that reopens one carries a
+   decision record in its acceptance criteria, and that record states the measurement, not
+   the intention. ADRs 0020 and 0021 are what that looks like done: both reopened the
+   compressor deferral, and both carry the measured table that decided it.
 4. **The quality-driver order settles trade-offs.** Correctness above bounded memory above
    reproducibility, down to portability ([quality drivers](quality-drivers.md)). Correctness
    items come first because they are correctness, not features.
@@ -52,7 +63,7 @@ The whole tree hangs from the epic,
 |---|---|---|
 | [#59](https://github.com/delbem-research/damicore/issues/59) | 0.4 | refuse or flag objects larger than the compressor window |
 | [#60](https://github.com/delbem-research/damicore/issues/60) | 0.4 | add bzip2 and LZMA compressors (standard library, no new dependency; ADR 0021) |
-| [#61](https://github.com/delbem-research/damicore/issues/61) | 0.5 | add PPMd (pyppmd) as the default compressor and a required dependency (ADR 0020) |
+| [#61](https://github.com/delbem-research/damicore/issues/61) | 0.4 | add PPMd (pyppmd) as the default compressor and a required dependency (ADR 0020) |
 | [#62](https://github.com/delbem-research/damicore/issues/62) | 0.5 | interleaved pairing for objects larger than the compressor window |
 | [#63](https://github.com/delbem-research/damicore/issues/63) | 0.5 | incremental NCD — extend an existing run with new objects |
 | [#64](https://github.com/delbem-research/damicore/issues/64) | 0.9 | pluggable metric interface (Levenshtein, DTW, Euclidean) alongside NCD |
