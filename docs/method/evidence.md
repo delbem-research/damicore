@@ -86,13 +86,12 @@ The table is the audit's reading of the 0.3 source tree and does not move: it is
 the roadmap was planned against, and it is the column sums of the data file. What the library
 has done since belongs here instead.
 
-**0.4.0 closed "compressors beyond DEFLATE"** — the third most attested capability in the
-corpus, 15 documents. The distance stage measures with `ppmd` (the default, PPMd variant I
-with model restart), `zlib`, `gzip`, `bzip2` and `lzma`, each exposing only the settings that
-change what it can see across a pair. The measurements that decided it are in
+**0.4.0 closed "compressors beyond DEFLATE"** — 15 documents, behind only automatic labeling
+(19) and validation (18), and tied at 15 with tree visualization. The compressors the
+distance stage now measures with, and what each one sees, are
 [ADR 0020](../decisions/0020-ppmd-is-the-default-compressor.md) and
 [ADR 0021](../decisions/0021-bzip2-and-lzma-join-the-compressors.md); the work was issues #60
-and #61. Nothing else in the table has moved.
+and #61. As of 0.4.0, nothing else in the table has moved.
 
 ## Limitations
 

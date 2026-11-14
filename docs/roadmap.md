@@ -11,11 +11,12 @@ What it did not implement is what the literature added to the method after [sanc
 run returns `membership`, `clusters`, `tree_newick`, the distance matrix and a modularity
 value: a partition with no meaning attached and no measure of how stable it is.
 
-0.4.0 closed the first of those gaps and the whole scientific record. The distance stage now
-measures with five compressors -- `ppmd` (the default), `zlib`, `gzip`, `bzip2` and `lzma` --
-each with the settings that change what it can see across a pair, which is G1's first two
-items and ADRs 0020 and 0021; and `docs/` carries the method, the references and the
-provenance, which is G7, closed. Everything else below is still ahead.
+0.4.0 closed one of those gaps and the whole scientific record. The distance stage measures
+with more than one compressor, each exposing the settings that change what it can see across
+a pair -- which is two of G1's seven items, #60 and #61, and the compressors themselves are
+named by ADRs 0020 and 0021 rather than restated here; and `docs/` carries the method, the
+references and the provenance, which is G7, closed. The rest of G1 and every other group
+below is still ahead.
 
 This page is the plan for closing that gap. The evidence it rests on -- which capability is
 attested by how many published works, and the data behind each count -- is
