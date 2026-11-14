@@ -7,7 +7,7 @@ References
 ----------
 .. [fisher1958] On Grouping for Maximum Homogeneity. The exact dynamic-programming grouping
    this module computes, carried forward from `docs/dataset-partitioning.md`.
-   Not read: closed access and no open copy, so what this module leaves out is owed (#112).
+   Not read: closed access and no open copy, so what this module leaves out stays owed.
 .. [jenks1977] Optimal data classification for choropleth maps. Cited for one thing only:
    the natural-breaks formulation of the same objective, and the name a caller writes as
    `method="jenks"`.
