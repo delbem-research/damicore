@@ -80,6 +80,20 @@ quartile 846, the maximum 8,755, and six report more than 1,000. The preflight c
 objects is therefore above the median published study and below the six largest, which is the
 measurement behind the roadmap treating scale as a real limit rather than a theoretical one.
 
+## What has changed since the audit
+
+The table is the audit's reading of the 0.3 source tree and does not move: it is the baseline
+the roadmap was planned against, and it is the column sums of the data file. What the library
+has done since belongs here instead.
+
+**0.4.0 closed "compressors beyond DEFLATE"** — the third most attested capability in the
+corpus, 15 documents. The distance stage measures with `ppmd` (the default, PPMd variant I
+with model restart), `zlib`, `gzip`, `bzip2` and `lzma`, each exposing only the settings that
+change what it can see across a pair. The measurements that decided it are in
+[ADR 0020](../decisions/0020-ppmd-is-the-default-compressor.md) and
+[ADR 0021](../decisions/0021-bzip2-and-lzma-join-the-compressors.md); the work was issues #60
+and #61. Nothing else in the table has moved.
+
 ## Limitations
 
 1. **Pages were sampled, not read whole.** Each document was read at its method-dense pages
