@@ -453,7 +453,14 @@ def test_a_distancing_receipt_without_the_pair_count_resumes_to_none(
 
     monkeypatch.setattr(api, "_verify_cross_artifacts", refusing_verification)
     with pytest.raises(ArtifactValidationError, match="injected verification failure"):
-        run(source, output_dir=output, progress=False, execution=_single_worker())
+        run(
+            source,
+            output_dir=output,
+            compressor="zlib",
+            compression_level=6,
+            progress=False,
+            execution=_single_worker(),
+        )
     monkeypatch.undo()
 
     manifest = _read_json(output / "manifest.json")
@@ -461,12 +468,20 @@ def test_a_distancing_receipt_without_the_pair_count_resumes_to_none(
     assert metrics.pop("pairs_over_window") == 0
     _write_json(output / "manifest.json", manifest)
 
-    result = run(source, output_dir=output, progress=False, execution=_single_worker())
+    result = run(
+        source,
+        output_dir=output,
+        compressor="zlib",
+        compression_level=6,
+        progress=False,
+        execution=_single_worker(),
+    )
     try:
         assert result.report.status == "completed"
         assert result.report.pairs_over_window is None
-        # The window itself is configuration, so a resumed run still reports it.
-        assert result.report.compressor_window_bytes is None
+        # The window itself is configuration, so a resumed run still reports it. `zlib`
+        # declares one, which `ppmd` does not, so this can tell reported from dropped.
+        assert result.report.compressor_window_bytes == 32_768
     finally:
         result.close()
 
