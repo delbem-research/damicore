@@ -115,6 +115,30 @@ _SCALE_GUIDANCE = (
 )
 
 
+# `compressor_window` is the one violation that is not about cost: the run would fit and
+# would finish, and what it would produce is a matrix the compressor could not see across.
+# Scale advice -- reshape the source, raise a limit after reading the estimate -- is
+# unactionable for it, so it gets the two moves that do apply.
+_WINDOW_GUIDANCE = (
+    "A pair longer than the window its compressor declares is compressed with one object out "
+    "of view, so C(xy) approaches C(x) + C(y) and every distance moves toward 1 while still "
+    "looking like a measurement. Choose a compressor whose window holds the pair -- `ppmd`, "
+    "the default, declares none, and `lzma` matches across its dictionary -- or raise "
+    "ResourceLimits.max_pair_window_factor (--max-pair-window-factor) to measure anyway; the "
+    "run records the factor it was admitted under, and report.json counts the pairs above the "
+    "window. See ADR 0023."
+)
+
+
+def _guidance(violations: list[str]) -> str:
+    """The advice that applies to the gates a run actually tripped."""
+    if violations == ["compressor_window"]:
+        return _WINDOW_GUIDANCE
+    if "compressor_window" in violations:
+        return f"{_SCALE_GUIDANCE} {_WINDOW_GUIDANCE}"
+    return _SCALE_GUIDANCE
+
+
 def _execution(execution: ExecutionConfig | None) -> ExecutionConfig:
     try:
         return execution or ExecutionConfig()
@@ -652,6 +676,15 @@ def _artifact_inventory(run_dir: Path) -> dict[str, dict[str, object]]:
     }
 
 
+def _optional_int(value: int | float | str | bool | None) -> int | None:
+    """A receipt metric read back as an integer, or `None` where the receipt has no such key.
+
+    A receipt written before a metric existed does not carry it, and a reused stage is not
+    re-run to produce it, so the honest value is `None` rather than a zero nobody measured.
+    """
+    return None if value is None else int(value)
+
+
 def run(
     source: str | Path | Sequence[str | Path],
     *,
@@ -835,7 +868,8 @@ def run(
     )
     if not preview.within_limits:
         raise ResourceLimitError(
-            f"Resource limits exceeded: {', '.join(preview.violations)}. {_SCALE_GUIDANCE}",
+            f"Resource limits exceeded: {', '.join(preview.violations)}. "
+            f"{_guidance(preview.violations)}",
             estimate=preview,
         )
     # The upper bound on num_clusters is part of the argument contract, but it is expressed
@@ -1005,6 +1039,10 @@ def run(
                 ncd_max=float(metrics["ncd_max"]),
                 ncd_out_of_range_count=int(metrics["ncd_out_of_range_count"]),
                 ncd_self_largest=float(metrics["ncd_self_largest"]),
+                # A receipt written before this count existed does not carry it, and a
+                # reused stage is not recomputed to find out: `None` says the run does not
+                # know, which is what it does not know.
+                pairs_over_window=_optional_int(metrics.get("pairs_over_window")),
             )
         else:
             for stale in (run_dir / "tree.json", run_dir / "tree.nwk", run_dir / "tree-work.npy"):
@@ -1035,18 +1073,25 @@ def run(
                 distance_outputs.extend(
                     path for path in diagnostics_dir.iterdir() if path.is_file()
                 )
+            # The window is not here: it is a property of the configuration, which a resumed
+            # run already holds. Only what this stage measured is recorded.
+            distance_metrics: dict[str, int | float | str | bool] = {
+                "object_count": distance.object_count,
+                "pair_count": distance.pair_count,
+                "ncd_min": distance.ncd_min,
+                "ncd_max": distance.ncd_max,
+                "ncd_out_of_range_count": distance.ncd_out_of_range_count,
+                "ncd_self_largest": distance.ncd_self_largest,
+            }
+            # A stage that ran counted its pairs, so this is written rather than defaulted:
+            # recording a zero where the count is absent would be a measurement nobody made.
+            if distance.pairs_over_window is not None:
+                distance_metrics["pairs_over_window"] = distance.pairs_over_window
             journal.stage_completed(
                 "distancing",
                 started,
                 distance_outputs,
-                {
-                    "object_count": distance.object_count,
-                    "pair_count": distance.pair_count,
-                    "ncd_min": distance.ncd_min,
-                    "ncd_max": distance.ncd_max,
-                    "ncd_out_of_range_count": distance.ncd_out_of_range_count,
-                    "ncd_self_largest": distance.ncd_self_largest,
-                },
+                distance_metrics,
             )
 
         current_stage = "tree_building"
@@ -1142,6 +1187,8 @@ def run(
             ncd_max=distance.ncd_max,
             ncd_out_of_range_count=distance.ncd_out_of_range_count,
             ncd_self_largest=distance.ncd_self_largest,
+            compressor_window_bytes=distance_config.compressor.window_bytes,
+            pairs_over_window=distance.pairs_over_window,
             negative_branch_count=tree.negative_branch_count,
             modularity=clustered.modularity,
             timings_seconds=timings,

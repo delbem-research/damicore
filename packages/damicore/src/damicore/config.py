@@ -18,6 +18,14 @@ class ResourceLimits(BaseModel):
     stream each worker holds, charged at its stated size.
     ``required_free_disk_factor`` is the headroom multiplier applied to the projected artifact
     bytes; the free-disk check it produces is enforced no matter how the limits are set.
+    ``max_pair_window_factor`` is the only gate on what a run *measures* rather than on what
+    it costs: the largest pair may be at most this multiple of the window the compressor
+    declares, because past that the compressor is given a pair it cannot match across and
+    every distance in the matrix moves toward 1 with nothing in the result saying so. The
+    default of 1.0 is the window itself. Raise it to measure anyway -- the value is recorded
+    in the manifest, so a run says which gate it ran under -- or choose a compressor whose
+    window holds the pair. A compressor that declares no window, which is PPMd, is not
+    gated here at all. See ADR 0023.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -27,6 +35,7 @@ class ResourceLimits(BaseModel):
     max_matrix_bytes: int = Field(default=536_870_912, gt=0)
     max_working_memory_bytes: int = Field(default=536_870_912, gt=0)
     required_free_disk_factor: float = Field(default=1.25, ge=1.0)
+    max_pair_window_factor: float = Field(default=1.0, gt=0)
 
 
 class ExecutionConfig(BaseModel):

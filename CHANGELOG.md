@@ -7,6 +7,26 @@ carries anything else, a date included, matches neither and fails the release.
 
 ## 0.5.0
 
+### Breaking
+
+- **A pair longer than the window its compressor declares is refused before the run starts.**
+  Past that window the compressor is given a pair it cannot match across, `C(xy)` approaches
+  `C(x) + C(y)`, and every distance moves toward 1 while still looking like a measurement.
+  Each compressor now declares `window_bytes`; preflight raises the `compressor_window`
+  violation when the two largest objects exceed it times
+  `ResourceLimits.max_pair_window_factor` (`--max-pair-window-factor`), default 1.0. Runs
+  under `zlib`, `gzip`, `bzip2` or `lzma` that passed in 0.4.0 are refused where their
+  largest pair is past the window; raising the factor runs them, and the factor is recorded
+  in `manifest.json`. `ppmd`, the default, declares no window and is never gated. The
+  measurement, and why PPMd declares none, are in ADR 0023.
+
+### Added
+
+- `report.json` carries `compressor_window_bytes` and `pairs_over_window` -- what the
+  compressor can match across, and how many of this run's pairs are longer than that, counted
+  from the object sizes so a resumed run reports what a fresh one would. `ResourceEstimate`
+  carries the window beside the `max_pair_bytes` it already reported.
+
 ### Fixed
 
 - `[fisher1958]`'s `Not read:` reason owed its delta sentence to issue #112. That issue

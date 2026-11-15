@@ -19,7 +19,7 @@ from damicore.errors import (
 )
 from damicore.result import DamicoreResult
 
-# The CLI exposes four of the five resource limits as flags. Their values are
+# The CLI exposes five of the six resource limits as flags. Their values are
 # read from the model rather than restated here: ResourceLimits owns them, so raising a limit
 # there cannot leave the CLI clamped at the old one while `damicore.run()` honours the new one.
 # The model is frozen, so one shared instance is safe to read from.
@@ -181,6 +181,18 @@ def _parser() -> argparse.ArgumentParser:
             ),
         )
         command.add_argument(
+            "--max-pair-window-factor",
+            type=float,
+            default=_DEFAULT_LIMITS.max_pair_window_factor,
+            help=(
+                "allow the largest pair to be this multiple of the window its compressor "
+                "declares; above it the compressor cannot match across the pair and every "
+                "distance moves toward 1 "
+                f"(default: {_DEFAULT_LIMITS.max_pair_window_factor}; `ppmd` declares no "
+                "window and is never gated)"
+            ),
+        )
+        command.add_argument(
             "--keep-normalized",
             action="store_true",
             help="keep the normalized object files instead of discarding them after the run",
@@ -222,6 +234,7 @@ def _execution_from_arguments(arguments: argparse.Namespace) -> ExecutionConfig:
         max_pairs=arguments.max_pairs,
         max_matrix_bytes=arguments.max_matrix_bytes,
         max_working_memory_bytes=arguments.max_working_memory_bytes,
+        max_pair_window_factor=arguments.max_pair_window_factor,
     )
     # "auto" is a literal in the config contract, so branch rather than widen to int | str.
     if requested is None:

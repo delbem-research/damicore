@@ -100,8 +100,17 @@ it.
   are conditional on them; this code does not establish the condition.
 - **No correction for the window or the model memory.** A pair whose concatenation exceeds
   the DEFLATE window, the bzip2 block or the LZMA dictionary, or fills the PPMd model until it
-  restarts, is compressed anyway, and the resulting value is reported. Refusing or flagging
-  that case is open work.
+  restarts, measures what the compressor could still see and no more. That case is now
+  refused rather than corrected: each compressor declares the bytes of a pair it can match
+  across, preflight raises the `compressor_window` violation when the two largest objects
+  exceed it, and `ResourceLimits.max_pair_window_factor` lifts the gate for a caller who
+  wants the measurement anyway. `report.json` carries `compressor_window_bytes` and
+  `pairs_over_window`, and the result carries the count beside the window its own
+  configuration declares, so a run admitted that way says how much of its matrix was
+  measured with one object out of view. PPMd declares no window, and
+  [adr-0023] carries the measurement that says why: its model size is not a limit, and the
+  number that would go in that field would be invented. Correcting the measurement for
+  oversized objects -- interleaved pairing -- is still open work.
 - **Idempotency is measured once, not established.** The largest object is compressed a
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is
@@ -118,6 +127,7 @@ it.
 |---|---|
 | Available | `ppmd` through `pyppmd`; `zlib` and `gzip` through `zlib.compressobj`; `bzip2` and `lzma` through the standard library; exact (every pair computed) |
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
+| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result |
 | Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a compressor stream that cannot be allocated, raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
 

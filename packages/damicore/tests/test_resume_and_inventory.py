@@ -432,6 +432,60 @@ def test_a_completed_clusterizing_receipt_is_reused_on_resume(
         result.close()
 
 
+def test_a_distancing_receipt_without_the_pair_count_resumes_to_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A receipt written before the count existed does not carry it, and resume must say so.
+
+    The stage is reused rather than recomputed, so the number cannot be recovered; reporting
+    a zero there would state that no pair is over the window, which is not what the run knows.
+    """
+    source = _csv(tmp_path)
+    output = tmp_path / "run"
+
+    def refusing_verification(
+        run_dir: Path,
+        normalization: NormalizationResult,
+        requested_communities: int | None,
+        actual_communities: int,
+    ) -> dict[str, bool]:
+        raise ArtifactValidationError("injected verification failure")
+
+    monkeypatch.setattr(api, "_verify_cross_artifacts", refusing_verification)
+    with pytest.raises(ArtifactValidationError, match="injected verification failure"):
+        run(
+            source,
+            output_dir=output,
+            compressor="zlib",
+            compression_level=6,
+            progress=False,
+            execution=_single_worker(),
+        )
+    monkeypatch.undo()
+
+    manifest = _read_json(output / "manifest.json")
+    metrics = manifest["stages"]["distancing"]["metrics"]
+    assert metrics.pop("pairs_over_window") == 0
+    _write_json(output / "manifest.json", manifest)
+
+    result = run(
+        source,
+        output_dir=output,
+        compressor="zlib",
+        compression_level=6,
+        progress=False,
+        execution=_single_worker(),
+    )
+    try:
+        assert result.report.status == "completed"
+        assert result.report.pairs_over_window is None
+        # The window itself is configuration, so a resumed run still reports it. `zlib`
+        # declares one, which `ppmd` does not, so this can tell reported from dropped.
+        assert result.report.compressor_window_bytes == 32_768
+    finally:
+        result.close()
+
+
 def test_a_stale_membership_is_deleted_when_clusterizing_reruns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

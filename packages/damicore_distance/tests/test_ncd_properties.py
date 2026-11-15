@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import bz2
 import hashlib
+import itertools
 import json
 import lzma
 import random
@@ -32,6 +33,7 @@ from damicore_distance import (
     PpmdCompressor,
     compute_distance_matrix,
 )
+from damicore_distance.api import _pairs_over_window
 from damicore_distance.compressor import compressed_size
 from damicore_distance.ncd import normalized_compression_distance
 
@@ -352,3 +354,88 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
     assert result.ncd_self_largest == normalized_compression_distance(
         sizes[largest], sizes[largest], doubled
     )
+
+
+# --- The compressor window, issue 59 ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("settings", "window"),
+    [
+        pytest.param(DeflateCompressor(), 32_768, id="zlib"),
+        pytest.param(DeflateCompressor(name="gzip"), 32_768, id="gzip"),
+        pytest.param(Bzip2Compressor(), 900_000, id="bzip2-default-block"),
+        pytest.param(Bzip2Compressor(bzip2_block_size_100k=1), 100_000, id="bzip2-smallest-block"),
+        pytest.param(LzmaCompressor(), 8_388_608, id="lzma-default-dictionary"),
+        pytest.param(LzmaCompressor(lzma_dictionary_bytes=4_096), 4_096, id="lzma-smallest"),
+        pytest.param(PpmdCompressor(), None, id="ppmd-declares-none"),
+    ],
+)
+def test_each_compressor_declares_what_it_can_match_across(
+    settings: CompressorSettings, window: int | None
+) -> None:
+    """The window is the compressor's own, and PPMd's is `None` rather than a number.
+
+    A model is not a window, and PPMd's `None` is the measured outcome rather than a gap:
+    the model's size does not decide what it finds across a pair, so there is no size to
+    gate on. The measurement is in [adr-0023].
+    """
+    assert settings.window_bytes == window
+
+
+def test_a_pair_the_window_cannot_hold_measures_as_unrelated(tmp_path: Path) -> None:
+    """The defect the gate exists for, shown rather than asserted.
+
+    Two objects that differ in 1 % of their bytes are 40 KiB each, so their concatenation is
+    past DEFLATE's 32 KiB window and the first is out of view while the second is
+    compressed. Under `zlib` they measure as nearly unrelated; under an LZMA dictionary that
+    holds the pair, the same two objects measure as the near-copies they are.
+    """
+    rng = random.Random(59)
+    vocabulary = [f"value-{index:05d}" for index in range(2_000)]
+    lines = [json.dumps(rng.choice(vocabulary)) for _ in range(2_600)]
+    left = ("\n".join(lines) + "\n").encode("utf-8")
+    perturbed = bytearray(left)
+    for index in range(0, len(perturbed), 100):
+        perturbed[index] = (perturbed[index] % 26) + 65
+    right = bytes(perturbed)
+    assert len(left) > 32_768
+
+    def ncd(settings: CompressorSettings) -> float:
+        config = DistanceConfig(compressor=settings)
+        paths: list[Path] = []
+        for name, payload in (("left", left), ("right", right)):
+            path = tmp_path / f"{name}-{settings.name}"
+            path.write_bytes(payload)
+            paths.append(path)
+        sizes = [compressed_size([path], config=config) for path in paths]
+        together = compressed_size(paths, config=config)
+        return normalized_compression_distance(sizes[0], sizes[1], together)
+
+    past_the_window = ncd(DeflateCompressor())
+    inside_it = ncd(LzmaCompressor())
+    assert past_the_window > 0.5
+    assert inside_it < 0.25
+    # The same pair, measured by two compressors: the difference is the window, not the data.
+    assert past_the_window > 2 * inside_it
+
+
+@given(
+    sizes=st.lists(st.integers(min_value=1, max_value=4_096), min_size=2, max_size=12),
+    window=st.integers(min_value=1, max_value=8_192),
+)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_the_over_window_count_matches_counting_every_pair(sizes: list[int], window: int) -> None:
+    """The two-pointer count against the definition it implements.
+
+    The loop is O(n) where the definition is O(n^2), and the cases that separate them are
+    equal sizes, every pair over the window and none over it, which a range of random size
+    lists and windows reaches.
+    """
+    expected = sum(1 for left, right in itertools.combinations(sizes, 2) if left + right > window)
+    assert _pairs_over_window(sizes, window) == expected
+
+
+def test_no_declared_window_means_no_pair_is_counted() -> None:
+    """`None` is not a window of zero: with nothing declared, nothing can be over it."""
+    assert _pairs_over_window([10_000, 20_000], None) == 0

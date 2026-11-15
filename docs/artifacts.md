@@ -42,6 +42,16 @@ schema, runtime fingerprint, receipts, and checkpoints remain compatible.
 records as the invocation that created the directory resolved them. See
 [ADR 0022](decisions/0022-execution-settings-are-not-run-identity.md).
 
+`report.json` carries `compressor_window_bytes` and `pairs_over_window` beside the NCD
+range: what the compressor declared it can match across, and how many of this run's pairs
+were longer than that. Both are `None` and zero for a compressor that declares no window,
+which is `ppmd` and is a measured fact rather than an omission; the factor the run was
+admitted under is `config.limits.max_pair_window_factor`, `None` on a run written before
+the gate existed. `pairs_over_window` is itself `None` when a resumed run reuses a distancing
+receipt written before the count existed: the stage is not recomputed, so the run does not
+know, and it says so rather than reporting a zero. See
+[ADR 0023](decisions/0023-the-compressor-window-is-a-correctness-gate.md).
+
 `partition.json`, written by `damicore_normalizer.partition_dataset` beside the
 subset files it describes, is a user-facing artifact rather than an
 inter-stage one: no stage reads it. It carries its own `schema_version` and

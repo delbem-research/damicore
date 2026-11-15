@@ -37,7 +37,10 @@ class ResourceEstimate(BaseModel):
     throughput it is the stage's time, and nothing gates on it. ``max_pair_bytes`` is the
     longest concatenation the compressor is given -- the two largest objects -- which is
     what a compressor's window or model memory has to hold for an NCD value to see across
-    the pair.
+    the pair. ``compressor_window_bytes`` is what that compressor declares it can match
+    across, and the ``compressor_window`` violation is raised when the first exceeds the
+    second times ``limits.max_pair_window_factor``: the run would measure, and report
+    nothing unusual about, a matrix the compressor could not see. See ADR 0023.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -60,6 +63,10 @@ class ResourceEstimate(BaseModel):
     # rather than a value nobody computed; every estimate this release makes sets both.
     compression_input_bytes: int | None = Field(default=None, ge=0)
     max_pair_bytes: int | None = Field(default=None, ge=0)
+    # `None` both for an estimate made before the window was declared and for a compressor
+    # that declares none. They are different facts, and the gate below tells them apart by
+    # reading the configuration rather than this field.
+    compressor_window_bytes: int | None = Field(default=None, ge=0)
     estimated_working_memory_bytes: int = Field(ge=0)
     estimated_final_metadata_bytes: int = Field(ge=0)
     estimated_diagnostic_bytes: int = Field(ge=0)
@@ -132,6 +139,9 @@ def preflight(
         * (2 * execution.compression_chunk_bytes + distance.compressor.stream_memory_bytes)
         + pairs_per_shard * 24,
     )
+    # Declared by the compressor, or `None` where there is none to declare: see
+    # `PpmdCompressor.window_bytes`. A missing window is not a window of zero.
+    window = distance.compressor.window_bytes
     existing = disk_target
     while not existing.exists() and existing != existing.parent:
         existing = existing.parent
@@ -142,6 +152,11 @@ def preflight(
         (matrix_bytes > execution.limits.max_matrix_bytes, "max_matrix_bytes"),
         (working_memory > execution.limits.max_working_memory_bytes, "max_working_memory_bytes"),
         (required_disk > available, "free_disk"),
+        (
+            window is not None
+            and max_pair_bytes > window * execution.limits.max_pair_window_factor,
+            "compressor_window",
+        ),
     ]
     violations = [name for failed, name in checks if failed]
     manifest_input = scan.manifest_input
@@ -162,6 +177,7 @@ def preflight(
         # the self-distance the stage reports.
         compression_input_bytes=objects * scan.total_bytes + 2 * max(object_sizes),
         max_pair_bytes=max_pair_bytes,
+        compressor_window_bytes=window,
         estimated_working_memory_bytes=working_memory,
         estimated_final_metadata_bytes=metadata_bytes,
         estimated_diagnostic_bytes=diagnostic_bytes,
