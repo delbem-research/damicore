@@ -131,7 +131,8 @@ jobs:
         run: |
           make wheels
           uv venv "$WHEEL_VENV" --python 3.12
-          uv pip install --python "$WHEEL_VENV/bin/python" --find-links dist damicore ipykernel
+          # matplotlib is the self-analysis notebook's own install, not a damicore dependency.
+          uv pip install --python "$WHEEL_VENV/bin/python" --find-links dist damicore ipykernel matplotlib
           "$WHEEL_VENV/bin/python" -m ipykernel install --user \
             --name "$DAMICORE_NOTEBOOK_KERNEL" --display-name "$DAMICORE_NOTEBOOK_KERNEL"
       - run: uv run pytest tests/notebooks -m notebook
