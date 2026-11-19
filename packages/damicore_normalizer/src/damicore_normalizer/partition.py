@@ -1,3 +1,17 @@
+"""Split a dataset into high and low subsets by a numeric column.
+
+The emitted files are delimited-text datasets that re-enter the pipeline as input, never as
+objects.
+
+References
+----------
+.. [adr-0014] Dataset partitioning is upstream of the source axis and emits datasets. The
+   record fixes where the capability lives, what its artifact is, and the rules that fix its
+   results, versioned as `partition_rule`. What this unit does not take from the record is
+   the choice of break points, which is `natural_breaks.py`'s and rests on published work
+   rather than on this decision.
+"""
+
 from __future__ import annotations
 
 import csv

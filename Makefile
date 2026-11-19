@@ -1,4 +1,4 @@
-.PHONY: help install check test coverage-critical build wheels clean
+.PHONY: help install check test coverage-critical build wheels clean ref references docs docs-check
 .PHONY: print-public-packages print-stage-packages print-aggregate-package
 
 # The publish allowlist. Deliberately explicit rather than derived from the workspace, so a
@@ -13,8 +13,18 @@ STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 # It publishes last, because it depends on the four that are.
 AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
 
-# Modules held to the 95% critical-coverage floor.
-CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks
+# Modules held to the 95% critical-coverage floor. This list is also the repository's census
+# of scientific code: a module here decides what a run reports, so it owes a basis, which
+# `tests/architecture/test_citations.py` enforces for every module its exemption list does
+# not name.
+#
+# The list is not maintained by hand alone. Every module under `packages/*/src` is either in
+# this census or named in that test's `NOT_SCIENTIFIC` list, and a module in neither fails
+# the suite by name -- which is how a module added later becomes a decision instead of an
+# omission.
+CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy natural_breaks tree_graph \
+	compressor numeric_column delimited_reader spreadsheet_reader table_split file_corpus \
+	partition
 
 DIST_DIR ?= dist
 
@@ -23,12 +33,16 @@ help:
 	@echo "  install               Install all workspace dependencies and git hooks"
 	@echo "  check                 Lint and type-check the workspace"
 	@echo "  test                  Run all tests with coverage gates"
+	@echo "  ref DOI=<doi>         Fetch one work into docs/refs.json and regenerate the bibliography"
+	@echo "  references            Regenerate docs/references.bib from docs/refs.json"
+	@echo "  docs                  Build the documentation site into docs/_build/html"
+	@echo "  docs-check            Build it strictly and verify the rendered public API"
 	@echo "  build                 Build sdist and wheel of the five public distributions"
 	@echo "  wheels                Build wheels only, for the smoke lanes"
 	@echo "  print-public-packages Print the publish allowlist"
 	@echo "  print-stage-packages  Print the allowlist without the orchestrator"
 	@echo "  print-aggregate-package Print the orchestrator distribution alone"
-	@echo "  clean                 Remove build artifacts and the shared .venv"
+	@echo "  clean                 Print what to remove by hand; it deletes nothing"
 
 install:
 	uv sync --all-packages --group dev
@@ -49,6 +63,35 @@ coverage-critical:
 		uv run coverage report --include="*/$$module.py" --fail-under=95 >/dev/null || \
 			{ echo "critical coverage below 95% for $$module.py"; exit 1; }; \
 	done
+
+# The only thing anyone ever types is a DOI. Every field of an entry is copied from a
+# resolver response, so a fabricated citation costs a DOI that must resolve rather than a
+# plausible sentence. The date is passed in rather than read by the script, which keeps the
+# script free of a clock and its output reproducible.
+ref:
+	@test -n "$(DOI)" || { echo "usage: make ref DOI=<doi>"; exit 2; }
+	uv run python .github/scripts/references.py add "$(DOI)" --today "$$(date -u +%F)"
+
+references:
+	uv run python .github/scripts/references.py render
+
+# Documentation dependencies stay out of the workspace: `--with-requirements` resolves them
+# for this command only, so `docs/` can be deleted without changing what anything installs.
+DOCS_RUN := uv run --with-requirements docs/requirements.txt
+
+docs:
+	$(DOCS_RUN) python -m sphinx -b html docs docs/_build/html
+
+# `-W` is the gate: an unresolved cross-reference is how a page comes to promise a symbol
+# that does not exist. check_reference.py then asserts the rendered API is exactly `__all__`.
+#
+# `-E` discards any saved environment. Without it Sphinx reuses one, skips the pages it
+# considers current, and the consistency checks -- a page in no toctree among them -- do not
+# re-run. The gate then passes or fails on whether `docs/_build` happens to be stale, which
+# is not a gate.
+docs-check:
+	$(DOCS_RUN) python -m sphinx -E -W --keep-going -b html docs docs/_build/html
+	$(DOCS_RUN) python docs/check_reference.py docs/_build/html/objects.inv
 
 build:
 	@set -e; mkdir -p $(DIST_DIR); \

@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
@@ -11,7 +12,6 @@ import damicore_distance
 import damicore_normalizer
 import damicore_tree_builder
 import pytest
-import tomllib
 from damicore.api import VERSION
 
 pytestmark = pytest.mark.contract
@@ -183,7 +183,12 @@ def test_public_exports_are_exact() -> None:
     ]
     assert damicore_distance.__all__ == [
         "compute_distance_matrix",
+        "codec_fingerprint",
         "DistanceConfig",
+        "PpmdCompressor",
+        "DeflateCompressor",
+        "Bzip2Compressor",
+        "LzmaCompressor",
         "DistanceResult",
         "DistanceMatrixView",
         "DistanceError",
@@ -301,6 +306,9 @@ def test_public_result_models_declare_the_specified_fields() -> None:
         "ncd_min",
         "ncd_max",
         "ncd_out_of_range_count",
+        "ncd_self_largest",
+        "compressor_window_bytes",
+        "pairs_over_window",
         "negative_branch_count",
         "modularity",
         "timings_seconds",
@@ -449,7 +457,7 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
             "pandas>=2.2,<4",
             "pydantic>=2.10,<3",
         },
-        "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
+        "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3", "pyppmd>=1.3.1,<1.4"},
         "damicore_tree_builder": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
         "damicore_clusterizer": {"igraph>=1.0,<1.1", "pydantic>=2.10,<3"},
         "damicore": {
@@ -550,8 +558,18 @@ def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
 
 
 def test_public_packages_support_the_specified_interpreter_range() -> None:
+    """Every package supports one range, and Ruff judges the code against its floor.
+
+    `target-version` restates the floor because the root, whose section every package copy
+    equals, has no `requires-python` for Ruff to infer it from. Held to it here, so raising the
+    floor cannot leave Ruff linting against an interpreter the packages no longer support.
+    """
     for package in sorted(PUBLIC):
         assert _project(package)["requires-python"] == ">=3.11,<3.15"
+    floor = re.match(r">=(\d+)\.(\d+),", str(_project("damicore")["requires-python"]))
+    assert floor is not None
+    target = cast("dict[str, object]", _tool(ROOT / "pyproject.toml")["ruff"])["target-version"]
+    assert target == f"py{floor[1]}{floor[2]}", target
 
 
 def test_publish_allowlist_matches_the_public_workspace_members() -> None:
@@ -706,7 +724,8 @@ def test_package_ruff_and_sdist_configuration_does_not_drift() -> None:
 
     tools = {member: _tool(ROOT / "packages" / member / "pyproject.toml") for member in members}
     # The root's rules must reach the code outside `packages/` too: with no section there,
-    # `tests/`, `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults.
+    # `tests/`, `benchmarks/`, `scripts/` and `.github/scripts` fall back to Ruff's built-in
+    # defaults.
     root_ruff = _tool(ROOT / "pyproject.toml").get("ruff")
     assert root_ruff is not None, "the repository root declares no [tool.ruff]"
 
@@ -841,3 +860,44 @@ def test_every_test_module_declares_a_registered_marker() -> None:
                 f"{path.relative_to(ROOT)}: marker {found.group(1)!r} is not registered"
             )
     assert not offenders, offenders
+
+
+def test_every_numpy_load_and_save_refuses_pickle() -> None:
+    """`allow_pickle=False` is an invariant `AGENTS.md` states and nothing held.
+
+    A `.npy` loaded with pickling enabled executes whatever the file says, so the flag is
+    what keeps a run directory from being a code path. Every call site passes it today; the
+    risk is the next one, and a grep for the flag would not see a call that simply omits it.
+    The call is read from the syntax tree instead, so a keyword split across lines counts
+    the same as one written inline.
+    """
+    offenders: list[str] = []
+    for package in sorted(PUBLIC | {"synthetic_data"}):
+        source = ROOT / "packages" / package / "src" / package
+        if not source.is_dir():
+            continue
+        for path in sorted(source.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                attribute = node.func
+                if not isinstance(attribute, ast.Attribute) or attribute.attr not in {
+                    "load",
+                    "save",
+                }:
+                    continue
+                # Only numpy's, by the name the import binds: `json.load` and a model's own
+                # `.save` are the same two attribute names and have nothing to do with this.
+                owner = attribute.value
+                if not isinstance(owner, ast.Name) or owner.id not in {"np", "numpy"}:
+                    continue
+                where = f"{path.relative_to(ROOT)}:{node.lineno}"
+                keywords = {word.arg: word.value for word in node.keywords}
+                if "allow_pickle" not in keywords:
+                    offenders.append(f"  {where}: np.{attribute.attr} without allow_pickle")
+                    continue
+                value = keywords["allow_pickle"]
+                if not (isinstance(value, ast.Constant) and value.value is False):
+                    offenders.append(f"  {where}: allow_pickle is not False")
+    assert not offenders, "\n".join(["these calls do not refuse pickled data:", *offenders])

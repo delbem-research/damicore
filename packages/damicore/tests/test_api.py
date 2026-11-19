@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+import pyppmd
 import pytest
 
 from damicore import (
@@ -16,6 +17,7 @@ from damicore import (
     load_result,
     run,
 )
+from damicore.api import _SCALE_GUIDANCE, _WINDOW_GUIDANCE, _guidance
 
 pytestmark = pytest.mark.unit
 
@@ -58,6 +60,25 @@ def test_complete_pipeline_reuse_save_and_load(tmp_path: Path, split: str) -> No
         execution=ExecutionConfig(workers=1, pairs_per_shard=1),
     )
     reused.close()
+
+
+def test_the_default_shard_size_is_resolved_from_the_pair_count_and_recorded(
+    tmp_path: Path,
+) -> None:
+    """The run records the shard size the distance stage actually used, not the "auto" it
+    was asked for, so the configuration hash names the layout of its checkpoints."""
+    output = tmp_path / "run"
+    result = run(
+        _csv(tmp_path), output_dir=output, progress=False, execution=ExecutionConfig(workers=1)
+    )
+    result.close()
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    shards = json.loads(
+        (output / "checkpoints" / "distance-shards.json").read_text(encoding="utf-8")
+    )
+    assert manifest["config"]["pairs_per_shard"] == 1
+    assert result.report.pairs_per_shard == 1
+    assert shards["shard_count"] == shards["pair_count"] == 3
 
 
 def test_limits_materialization_and_corruption(tmp_path: Path) -> None:
@@ -244,9 +265,9 @@ def test_save_rejects_a_tampered_inventory(tmp_path: Path, tamper: str, discrimi
     result.close()
 
 
-@pytest.mark.parametrize("compressor", ["zlib", "gzip"])
-def test_both_compressors_complete_a_run(tmp_path: Path, compressor: str) -> None:
-    """gzip is a documented public option that no test had ever executed."""
+@pytest.mark.parametrize("compressor", ["ppmd", "zlib", "gzip", "bzip2", "lzma"])
+def test_every_compressor_completes_a_run(tmp_path: Path, compressor: str) -> None:
+    """Each documented compressor is executed end to end, not only the default."""
     result = run(
         _csv(tmp_path),
         output_dir=tmp_path / compressor,
@@ -259,6 +280,132 @@ def test_both_compressors_complete_a_run(tmp_path: Path, compressor: str) -> Non
         assert result.distance_matrix.shape[0] == len(result.membership)
     finally:
         result.close()
+
+
+@pytest.mark.parametrize(
+    ("chosen", "recorded"),
+    [
+        pytest.param(
+            {},
+            {
+                "compressor": "ppmd",
+                "compression_level": None,
+                "ppmd_order": 6,
+                "ppmd_memory_bytes": 67_108_864,
+                "bzip2_block_size_100k": None,
+                "lzma_dictionary_bytes": None,
+            },
+            id="default",
+        ),
+        pytest.param(
+            {"compressor": "zlib"},
+            {
+                "compressor": "zlib",
+                "compression_level": 6,
+                "ppmd_order": None,
+                "ppmd_memory_bytes": None,
+                "bzip2_block_size_100k": None,
+                "lzma_dictionary_bytes": None,
+            },
+            id="zlib",
+        ),
+        pytest.param(
+            {"compressor": "bzip2"},
+            {
+                "compressor": "bzip2",
+                "compression_level": None,
+                "ppmd_order": None,
+                "ppmd_memory_bytes": None,
+                "bzip2_block_size_100k": 9,
+                "lzma_dictionary_bytes": None,
+            },
+            id="bzip2",
+        ),
+        pytest.param(
+            {"compressor": "lzma"},
+            {
+                "compressor": "lzma",
+                "compression_level": None,
+                "ppmd_order": None,
+                "ppmd_memory_bytes": None,
+                "bzip2_block_size_100k": None,
+                "lzma_dictionary_bytes": 8_388_608,
+            },
+            id="lzma",
+        ),
+    ],
+)
+def test_the_manifest_records_the_compressor_settings_in_force_and_only_those(
+    tmp_path: Path, chosen: dict[str, str], recorded: dict[str, object]
+) -> None:
+    """A setting the compressor does not read is recorded as `None`, so it neither enters
+    the configuration hash nor suggests a choice that had no effect."""
+    output = tmp_path / "run"
+    run(
+        _csv(tmp_path),
+        output_dir=output,
+        progress=False,
+        execution=ExecutionConfig(workers=1),
+        **chosen,  # pyright: ignore[reportArgumentType]
+    ).close()
+    config = json.loads((output / "manifest.json").read_text(encoding="utf-8"))["config"]
+    assert {name: config[name] for name in recorded} == recorded
+
+
+def test_the_report_states_how_far_the_largest_object_is_from_itself(tmp_path: Path) -> None:
+    """Computed here from the object bytes through pyppmd's one-shot entry point, so the
+    figure is checked against the codec rather than against the stage that reports it."""
+    output = tmp_path / "run"
+    result = run(
+        _csv(tmp_path),
+        output_dir=output,
+        keep_normalized=True,
+        progress=False,
+        execution=ExecutionConfig(workers=1),
+    )
+    result.close()
+    objects = sorted((output / "normalization" / "objects").iterdir())
+    largest = max(objects, key=lambda path: path.stat().st_size).read_bytes()
+
+    def size(payload: bytes) -> int:
+        return len(pyppmd.compress(payload, max_order=6, mem_size=67_108_864, variant="I"))
+
+    expected = (size(largest + largest) - size(largest)) / size(largest)
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["ncd_self_largest"] == result.report.ncd_self_largest == expected
+
+
+def test_ppmd_settings_are_part_of_the_run_identity(tmp_path: Path) -> None:
+    source = _csv(tmp_path)
+    hashes: list[str] = []
+    for order in (6, 8):
+        output = tmp_path / f"order-{order}"
+        run(
+            source,
+            output_dir=output,
+            ppmd_order=order,
+            progress=False,
+            execution=ExecutionConfig(workers=1),
+        ).close()
+        hashes.append(json.loads((output / "manifest.json").read_text())["config_hash"])
+    assert hashes[0] != hashes[1]
+
+
+def test_preflight_charges_each_compressor_stream_once_per_worker(tmp_path: Path) -> None:
+    """A stream can fill to its stated size on incompressible data, and every worker holds
+    one, so the projection charges that size per worker -- the PPMd model as configured,
+    DEFLATE's 256 KiB state -- and the default fits the default limit at the four workers
+    "auto" resolves to at most."""
+    source = _csv(tmp_path)
+    workers = ExecutionConfig(workers=4)
+    base = estimate(source, ppmd_memory_bytes=1 << 20, execution=workers)
+    grown = estimate(source, ppmd_memory_bytes=(1 << 20) + 1_000, execution=workers)
+    deflate = estimate(source, compressor="zlib", execution=workers)
+    assert grown.estimated_working_memory_bytes - base.estimated_working_memory_bytes == 4_000
+    assert base.estimated_working_memory_bytes - deflate.estimated_working_memory_bytes == 4 * (
+        (1 << 20) - 262_144
+    )
+    assert estimate(source, execution=workers).within_limits
 
 
 def test_diagnostics_are_written_when_requested(tmp_path: Path) -> None:
@@ -306,7 +453,27 @@ def test_an_unexpected_failure_names_its_cause_in_the_report(
 @pytest.mark.parametrize(
     ("kwargs", "discriminator"),
     [
-        pytest.param({"compressor": "bz2"}, "zlib' or 'gzip", id="unknown-compressor"),
+        pytest.param(
+            {"compressor": "bz2"},
+            "'ppmd', 'zlib', 'gzip', 'bzip2' or 'lzma'",
+            id="unknown-compressor",
+        ),
+        pytest.param(
+            {"lzma_dictionary_bytes": 4_096},
+            "lzma_dictionary_bytes does not apply to ppmd",
+            id="lzma-setting-for-ppmd",
+        ),
+        pytest.param(
+            {"compression_level": 9},
+            "compression_level does not apply to ppmd",
+            id="level-for-ppmd",
+        ),
+        pytest.param(
+            {"compressor": "zlib", "ppmd_order": 8},
+            "ppmd_order does not apply to zlib",
+            id="ppmd-setting-for-zlib",
+        ),
+        pytest.param({"ppmd_memory_bytes": 1}, "ppmd_memory_bytes", id="ppmd-memory-clamped"),
         pytest.param({"num_clusters": 0}, "num_clusters", id="cluster-count-below-one"),
         pytest.param({"split": "diagonal"}, "split", id="unknown-split"),
     ],
@@ -359,3 +526,104 @@ def test_a_platform_without_rusage_reports_no_peak_memory(
 
     monkeypatch.setattr(resource, "getrusage", refusing_getrusage)
     assert damicore_api._peak_rss() is None
+
+
+def _wide_csv(tmp_path: Path) -> Path:
+    """Two columns whose objects are 20 KiB each, so their pair is past DEFLATE's window."""
+    path = tmp_path / "wide.csv"
+    rows = ["a,b"]
+    for index in range(1_400):
+        rows.append(f"value-{index:05d},value-{index:05d}x")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return path
+
+
+def test_a_pair_past_the_compressor_window_is_reported_and_refused(tmp_path: Path) -> None:
+    """The gate of issue 59: preflight names it, `run` raises it, and raising the factor runs.
+
+    `zlib` is asked for a pair it cannot match across, which is the measurement defect
+    ADR 0023 records -- not a cost. The override is a limit like any other, and the run it
+    allows records the factor it ran under.
+    """
+    source = _wide_csv(tmp_path)
+    execution = ExecutionConfig(workers=1, limits=ResourceLimits())
+    preview = estimate(
+        source, split="columns", compressor="zlib", compression_level=6, execution=execution
+    )
+    assert preview.compressor_window_bytes == 32_768
+    assert preview.max_pair_bytes is not None
+    assert preview.max_pair_bytes > 32_768
+    assert preview.violations == ["compressor_window"]
+    assert not preview.within_limits
+
+    with pytest.raises(DamicoreError) as refused:
+        run(
+            source,
+            split="columns",
+            output_dir=tmp_path / "refused",
+            compressor="zlib",
+            compression_level=6,
+            progress=False,
+            execution=execution,
+        )
+    assert "compressor_window" in str(refused.value)
+
+    lifted = ExecutionConfig(
+        workers=1,
+        pairs_per_shard=1,
+        limits=ResourceLimits(max_pair_window_factor=8.0),
+    )
+    allowed = estimate(
+        source, split="columns", compressor="zlib", compression_level=6, execution=lifted
+    )
+    assert allowed.violations == []
+    result = run(
+        source,
+        split="columns",
+        output_dir=tmp_path / "allowed",
+        compressor="zlib",
+        compression_level=6,
+        progress=False,
+        execution=lifted,
+    )
+    assert result.report.compressor_window_bytes == 32_768
+    assert result.report.pairs_over_window == 1
+    manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["config"]["limits"]["max_pair_window_factor"] == 8.0
+    result.close()
+
+
+def test_the_refusal_advises_on_the_gates_it_actually_tripped(tmp_path: Path) -> None:
+    """The window is not a cost, so the advice for costs must not be the advice it gets.
+
+    Reshaping the source or raising a limit after reading the estimate does nothing for a pair
+    the compressor cannot match across, and the three outcomes -- the window alone, the window
+    beside a scale gate, and scale alone -- are what a caller reads in the error.
+    """
+    assert _guidance(["compressor_window"]) == _WINDOW_GUIDANCE
+    both = _guidance(["max_objects", "compressor_window"])
+    assert both.startswith(_SCALE_GUIDANCE)
+    assert both.endswith(_WINDOW_GUIDANCE)
+    assert _guidance(["max_objects"]) == _SCALE_GUIDANCE
+
+    source = _wide_csv(tmp_path)
+    with pytest.raises(DamicoreError) as refused:
+        run(
+            source,
+            split="columns",
+            output_dir=tmp_path / "advised",
+            compressor="zlib",
+            compression_level=6,
+            progress=False,
+            execution=ExecutionConfig(workers=1, limits=ResourceLimits()),
+        )
+    message = str(refused.value)
+    assert _WINDOW_GUIDANCE in message
+    assert _SCALE_GUIDANCE not in message
+
+
+def test_the_default_compressor_declares_no_window_and_is_not_gated(tmp_path: Path) -> None:
+    """PPMd has a model, not a window, so the same source it would gate on runs ungated."""
+    preview = estimate(_wide_csv(tmp_path), split="columns", execution=ExecutionConfig(workers=1))
+    assert preview.compressor_window_bytes is None
+    assert "compressor_window" not in preview.violations

@@ -23,8 +23,10 @@ from damicore import (
     CheckpointMismatchError,
     ExecutionConfig,
     InputValidationError,
+    MaterializationError,
     OutputDirectoryConflictError,
     ResourceEstimate,
+    ResourceLimits,
     load_result,
     run,
 )
@@ -155,6 +157,7 @@ def test_a_directory_holding_another_configuration_is_refused(tmp_path: Path) ->
     first = run(
         source,
         output_dir=output,
+        compressor="zlib",
         compression_level=6,
         progress=False,
         execution=_single_worker(),
@@ -164,10 +167,59 @@ def test_a_directory_holding_another_configuration_is_refused(tmp_path: Path) ->
         run(
             source,
             output_dir=output,
+            compressor="zlib",
             compression_level=9,
             progress=False,
             execution=_single_worker(),
         )
+
+
+def test_execution_settings_do_not_change_which_run_a_directory_belongs_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Execution settings change cost and recovery, never the result, so an interrupted run
+    resumes under any of them -- on a machine with another CPU count, for instance -- and keeps
+    the identity it was created with. See ADR 0022."""
+    output = tmp_path / "run"
+    source = _incomplete_run(tmp_path, monkeypatch, output)
+    recorded = _read_json(output / "manifest.json")
+    other = ExecutionConfig(
+        workers=2,
+        csv_chunk_rows=1,
+        compression_chunk_bytes=1,
+        pairs_per_shard=1,
+        pandas_materialization_limit_bytes=1,
+        limits=ResourceLimits(max_objects=100),
+    )
+    result = run(source, output_dir=output, progress=False, execution=other)
+    try:
+        assert result.report.status == "completed"
+        resumed = _read_json(output / "manifest.json")
+        assert (resumed["run_id"], resumed["config_hash"]) == (
+            recorded["run_id"],
+            recorded["config_hash"],
+        )
+        # The manifest keeps the settings of the invocation that created the directory, and
+        # the returned view still obeys the caller's own materialization limit.
+        assert resumed["config"] == recorded["config"]
+        with pytest.raises(MaterializationError):
+            result.distance_matrix.to_pandas()
+    finally:
+        result.close()
+
+
+def test_auto_workers_name_the_same_default_directory_on_any_cpu_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``workers="auto"`` resolves from ``os.cpu_count()``; a second machine must reuse the
+    completed run rather than compute the same result into a second directory."""
+    source = _csv(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    run(source, progress=False).close()
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    run(source, progress=False).close()
+    assert len(list((tmp_path / "damicore-results").iterdir())) == 1
 
 
 def test_an_incomplete_run_is_refused_when_resume_is_disabled(
@@ -199,6 +251,35 @@ def test_an_incomplete_run_from_another_runtime_is_refused(
     _write_json(manifest_path, manifest)
     with pytest.raises(CheckpointMismatchError, match="different runtime fingerprint"):
         run(source, output_dir=output, progress=False, execution=_single_worker())
+
+
+def test_a_completed_run_from_another_runtime_is_refused(tmp_path: Path) -> None:
+    """Reuse returns a result this build did not compute, so it needs the same runtime gate
+    resume has. The input hash and the config hash say what was asked for, never which code
+    answered: a later release that redefines a stage would otherwise hand back the earlier
+    release's science under its own name, silently and with a passing verification."""
+    source = _csv(tmp_path)
+    output = tmp_path / "run"
+    run(source, output_dir=output, progress=False, execution=_single_worker()).close()
+    manifest_path = output / "manifest.json"
+    manifest = _read_json(manifest_path)
+    manifest["runtime"]["python"] = "0.0.0"
+    _write_json(manifest_path, manifest)
+    with pytest.raises(OutputDirectoryConflictError, match="different runtime fingerprint"):
+        run(source, output_dir=output, progress=False, execution=_single_worker())
+
+
+def test_a_completed_run_from_this_runtime_is_still_reused(tmp_path: Path) -> None:
+    """The gate must not cost the reuse it guards: an untouched completed run still loads."""
+    source = _csv(tmp_path)
+    output = tmp_path / "run"
+    first = run(source, output_dir=output, progress=False, execution=_single_worker())
+    first.close()
+    second = run(source, output_dir=output, progress=False, execution=_single_worker())
+    second.close()
+    # Equal reports, timings included, is what distinguishes a reused run from a recomputed
+    # one: a second computation cannot reproduce the first one's measured seconds.
+    assert second.report == first.report
 
 
 def test_a_partial_normalization_directory_is_rebuilt_on_resume(
@@ -261,6 +342,7 @@ def test_normalization_bytes_differing_from_preflight_stop_the_run(
         object_source: ObjectSource,
         save_diagnostics: bool,
         execution: ExecutionConfig,
+        distance: DistanceConfig,
         disk_target: Path,
     ) -> ResourceEstimate:
         preview = real_preflight(
@@ -268,6 +350,7 @@ def test_normalization_bytes_differing_from_preflight_stop_the_run(
             object_source=object_source,
             save_diagnostics=save_diagnostics,
             execution=execution,
+            distance=distance,
             disk_target=disk_target,
         )
         return preview.model_copy(update={"normalized_bytes": preview.normalized_bytes + 1})
@@ -345,6 +428,60 @@ def test_a_completed_clusterizing_receipt_is_reused_on_resume(
         assert result.report.community_count == metrics["community_count"]
         assert result.report.cluster_count == metrics["cluster_count"]
         assert result.report.modularity == metrics["modularity"]
+    finally:
+        result.close()
+
+
+def test_a_distancing_receipt_without_the_pair_count_resumes_to_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A receipt written before the count existed does not carry it, and resume must say so.
+
+    The stage is reused rather than recomputed, so the number cannot be recovered; reporting
+    a zero there would state that no pair is over the window, which is not what the run knows.
+    """
+    source = _csv(tmp_path)
+    output = tmp_path / "run"
+
+    def refusing_verification(
+        run_dir: Path,
+        normalization: NormalizationResult,
+        requested_communities: int | None,
+        actual_communities: int,
+    ) -> dict[str, bool]:
+        raise ArtifactValidationError("injected verification failure")
+
+    monkeypatch.setattr(api, "_verify_cross_artifacts", refusing_verification)
+    with pytest.raises(ArtifactValidationError, match="injected verification failure"):
+        run(
+            source,
+            output_dir=output,
+            compressor="zlib",
+            compression_level=6,
+            progress=False,
+            execution=_single_worker(),
+        )
+    monkeypatch.undo()
+
+    manifest = _read_json(output / "manifest.json")
+    metrics = manifest["stages"]["distancing"]["metrics"]
+    assert metrics.pop("pairs_over_window") == 0
+    _write_json(output / "manifest.json", manifest)
+
+    result = run(
+        source,
+        output_dir=output,
+        compressor="zlib",
+        compression_level=6,
+        progress=False,
+        execution=_single_worker(),
+    )
+    try:
+        assert result.report.status == "completed"
+        assert result.report.pairs_over_window is None
+        # The window itself is configuration, so a resumed run still reports it. `zlib`
+        # declares one, which `ppmd` does not, so this can tell reported from dropped.
+        assert result.report.compressor_window_bytes == 32_768
     finally:
         result.close()
 
@@ -535,3 +672,64 @@ def test_a_completed_manifest_without_a_completion_time_is_rejected(tmp_path: Pa
     manifest["completed_at"] = None
     with pytest.raises(ValidationError, match="lacks completion metadata or objects"):
         RunManifest.model_validate_json(json.dumps(manifest))
+
+
+def test_a_run_records_the_rule_in_force_at_every_stage(tmp_path: Path) -> None:
+    """A run directory outlives the release that wrote it, so it carries its own provenance.
+
+    The rules are constant for this release, which is exactly why recording them matters: a
+    reader a year from now cannot ask the release what it implemented, and a rule that is
+    constant today is a variant after any roadmap issue lands.
+    """
+    manifest = _completed_manifest(tmp_path)
+    method = manifest["method"]
+    assert set(method) == {"objects", "distance", "tree", "clusters"}
+    assert method["distance"] == {"name": "ncd-max/v1", "refs": ["cilibrasi2005"]}
+    assert all(rule["refs"] for rule in method.values())
+
+
+def test_a_manifest_written_before_provenance_still_loads(tmp_path: Path) -> None:
+    """The block is additive, so no run directory was invalidated to add it.
+
+    A manifest from a release that recorded no method is schema v2 like this one; it simply
+    does not carry the key. `None` is the honest reading -- that run does not say which
+    rules produced it -- rather than a default that would invent them.
+    """
+    manifest = _completed_manifest(tmp_path)
+    del manifest["method"]
+    loaded = RunManifest.model_validate_json(json.dumps(manifest))
+    assert loaded.method is None
+    assert loaded.schema_version == 2
+
+
+def test_a_manifest_written_before_ppmd_still_loads(tmp_path: Path) -> None:
+    """A 0.3 run used DEFLATE and recorded a level and no PPMd settings; the two settings
+    are additive, so that manifest reads back with them absent."""
+    manifest = _completed_manifest(tmp_path)
+    manifest["config"].update({"compressor": "zlib", "compression_level": 6})
+    for setting in (
+        "ppmd_order",
+        "ppmd_memory_bytes",
+        "bzip2_block_size_100k",
+        "lzma_dictionary_bytes",
+    ):
+        del manifest["config"][setting]
+    loaded = RunManifest.model_validate_json(json.dumps(manifest))
+    assert (loaded.config.compressor, loaded.config.compression_level) == ("zlib", 6)
+    assert loaded.config.ppmd_order is None
+    assert loaded.config.ppmd_memory_bytes is None
+    assert loaded.config.bzip2_block_size_100k is None
+    assert loaded.config.lzma_dictionary_bytes is None
+
+
+def test_a_manifest_written_before_the_compression_estimate_still_loads(tmp_path: Path) -> None:
+    """The estimate is persisted, so its two compression figures are additive like `method`:
+    a 0.3 run never measured them, and `None` says so instead of inventing a value."""
+    manifest = _completed_manifest(tmp_path)
+    assert manifest["estimate"]["compression_input_bytes"] > 0
+    assert manifest["estimate"]["max_pair_bytes"] > 0
+    del manifest["estimate"]["compression_input_bytes"]
+    del manifest["estimate"]["max_pair_bytes"]
+    loaded = RunManifest.model_validate_json(json.dumps(manifest))
+    assert loaded.estimate.compression_input_bytes is None
+    assert loaded.estimate.max_pair_bytes is None

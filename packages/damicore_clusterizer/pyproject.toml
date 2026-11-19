@@ -1,6 +1,6 @@
 [project]
 name = "damicore-clusterizer"
-version = "0.3.0"
+version = "0.5.0"
 description = "FastGreedy clustering stage for the DAMICORE pipeline."
 readme = "README.md"
 license = "Apache-2.0"
@@ -24,11 +24,11 @@ keywords = ["damicore", "clustering", "community-detection", "fastgreedy", "modu
 dependencies = ["igraph>=1.0,<1.1", "pydantic>=2.10,<3"]
 
 [project.urls]
-Homepage = "https://github.com/Delbem-Research-and-Innovation/damicore"
-Repository = "https://github.com/Delbem-Research-and-Innovation/damicore"
-Issues = "https://github.com/Delbem-Research-and-Innovation/damicore/issues"
-Documentation = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/quickstart.md"
-Changelog = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/delbem-research/damicore"
+Repository = "https://github.com/delbem-research/damicore"
+Issues = "https://github.com/delbem-research/damicore/issues"
+Documentation = "https://delbem-research.github.io/damicore/"
+Changelog = "https://github.com/delbem-research/damicore/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling>=1.31.0,<2"]
@@ -50,7 +50,8 @@ exclude = ["Makefile", "pyrightconfig.json", "tests"]
 # modules stay first party. Held equal to the other members by tests/architecture.
 [tool.ruff]
 line-length = 100
+target-version = "py311"
 exclude = [".venv", "dist", "__pycache__"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "PGH", "RUF100", "TID", "UP"]
+select = ["E", "ERA", "F", "FIX", "I", "PGH", "RUF100", "TID", "UP"]

@@ -1,3 +1,16 @@
+"""Resolve files into an ordered corpus whose objects are the user's bytes unchanged.
+
+References
+----------
+.. [adr-0006] The object source is an axis owned by the normalizer. This unit is the half
+   where the files already are the objects, so nothing is split and nothing is re-encoded.
+.. [adr-0007] A run directory is self-contained: adopted files are copied into it rather
+   than referenced where they live. What this unit takes from the record is the copy and
+   the containment it protects, which `load_result`, `DamicoreResult.save` and every hash
+   re-verification assume. What it does not take is any claim about the bytes themselves --
+   they are the user's, and `raw-bytes/1` is the honest name for that.
+"""
+
 from __future__ import annotations
 
 import hashlib

@@ -103,9 +103,10 @@ def test_an_input_that_cannot_be_read_is_a_typed_input_validation_error(
     assert json.loads(capsys.readouterr().err)["code"] == "input_validation_error"
 
 
-def test_workers_below_one_is_rejected() -> None:
-    with pytest.raises(ValueError, match="at least one"):
-        ExecutionConfig(workers=0)
+@pytest.mark.parametrize("field", ["workers", "pairs_per_shard"])
+def test_an_execution_count_below_one_is_rejected(field: str) -> None:
+    with pytest.raises(ValueError, match=f"{field} must be at least one"):
+        ExecutionConfig.model_validate({field: 0})
 
 
 def test_estimate_rejects_a_path_that_is_not_a_regular_file(tmp_path: Path) -> None:

@@ -11,11 +11,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-
-import tomllib
 
 SCHEMA_VERSION = 1
 HASH_ALGORITHM = "SHA-512"

@@ -61,6 +61,10 @@ class ManifestResourceLimits(BaseModel):
     max_matrix_bytes: int = Field(gt=0)
     max_working_memory_bytes: int = Field(gt=0)
     required_free_disk_factor: float = Field(ge=1.0, allow_inf_nan=False)
+    # `None` on a run written before the window gate existed, which is the honest reading:
+    # that run was admitted without it, and a default of 1.0 here would say it passed a gate
+    # nobody applied. See ADR 0023.
+    max_pair_window_factor: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 class RunConfig(BaseModel):
@@ -76,8 +80,15 @@ class RunConfig(BaseModel):
     sheet: str | None
     recursive: bool | None
     include_hidden: bool | None
-    compressor: Literal["zlib", "gzip"]
-    compression_level: int = Field(ge=0, le=9)
+    compressor: Literal["ppmd", "zlib", "gzip", "bzip2", "lzma"]
+    # Each compressor's settings are recorded only where it reads them, `None` elsewhere. The
+    # settings added after 0.3 default to `None`, because a run written before them records
+    # none.
+    compression_level: int | None = Field(ge=0, le=9)
+    ppmd_order: int | None = Field(default=None, ge=2, le=64)
+    ppmd_memory_bytes: int | None = Field(default=None, ge=2_048, le=4_294_967_259)
+    bzip2_block_size_100k: int | None = Field(default=None, ge=1, le=9)
+    lzma_dictionary_bytes: int | None = Field(default=None, ge=4_096, le=1_610_612_736)
     num_clusters: int | None = Field(default=None, ge=1)
     keep_normalized: bool
     save_diagnostics: bool
@@ -99,6 +110,52 @@ class StageReceipt(BaseModel):
     inputs: tuple[ArtifactRecord, ...]
     outputs: tuple[ArtifactRecord, ...]
     metrics: dict[str, int | float | str | bool]
+
+
+class MethodRule(BaseModel):
+    """One named, versioned rule, and the works that are its basis.
+
+    A rule is a name rather than a parameter value because a citation, a manifest field and
+    a method page can all carry a name and none of them can carry one branch of a `Literal`.
+    The parameters a run chose within a rule -- which compressor, how many clusters -- stay
+    in `config`, where the configuration hash already covers them.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9-]*/v[0-9]+$")
+    refs: tuple[str, ...] = Field(min_length=1)
+
+
+class RunMethod(BaseModel):
+    """The rule in force at each stage, so a run directory can still say what produced it.
+
+    Constant for a given release today, and recorded per run anyway: a constant now is a
+    variant later, and a directory from a year ago cannot be asked which release wrote it
+    once the release is gone. ADR 0008 set this pattern for `object_encoding`; this extends
+    it to the stages that had no name at all.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    objects: MethodRule
+    distance: MethodRule
+    tree: MethodRule
+    clusters: MethodRule
+
+
+# The rules this release implements. Every key here must resolve in `docs/refs.json` or name
+# an ADR, which `tests/architecture/test_citations.py` holds: a typo would otherwise reach a
+# run directory as provenance pointing nowhere.
+RUN_METHOD = RunMethod(
+    objects=MethodRule(name="canonical-json-lines/v1", refs=("adr-0001", "adr-0008", "adr-0010")),
+    distance=MethodRule(name="ncd-max/v1", refs=("cilibrasi2005",)),
+    tree=MethodRule(name="neighbor-joining-q/v1", refs=("saitou1987", "studier1988", "adr-0017")),
+    clusters=MethodRule(
+        name="fastgreedy-modularity/v1",
+        refs=("clauset2004", "newman2004", "csardi2006", "adr-0016"),
+    ),
+)
 
 
 class RunManifest(BaseModel):
@@ -128,6 +185,9 @@ class RunManifest(BaseModel):
     config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     estimate: ResourceEstimate
     runtime: dict[str, str]
+    # Absent on a run written before provenance was recorded, which is the honest reading of
+    # `None`: that run does not say which rules produced it, and nothing can infer them.
+    method: RunMethod | None = None
     stages: dict[str, StageReceipt]
     artifacts: dict[str, FinalArtifactRecord]
     warnings: tuple[str, ...]

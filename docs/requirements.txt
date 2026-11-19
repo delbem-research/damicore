@@ -1,0 +1,9 @@
+# Documentation-only dependencies. They are deliberately not part of the uv workspace and
+# not a package extra: `tests/architecture/test_boundaries.py` asserts the runtime
+# dependency set, and deleting `docs/` must not change what any distribution installs.
+#
+# myst-nb is not here. It exists to execute notebooks, and no page executes one yet; add it
+# with the first page that does, rather than carrying a build dependency for nothing.
+Sphinx>=8.2,<10
+myst-parser>=4,<5
+furo>=2024.8.6,<2027

@@ -59,7 +59,16 @@ if __name__ == "__main__":
 ```
 
 `estimate` reports the exact cost of a run — objects, pairs, matrix bytes, working
-memory, free disk — without creating anything. Call it before raising a limit.
+memory, free disk, and the bytes the compressor will read — without creating anything.
+Call it before raising a limit.
+
+The compressor is part of the distance, so choosing it changes the result. The default,
+`compressor="ppmd"`, is PPMd variant I, the original DAMICORE compressor, which keeps the
+shared distribution of large objects. `"lzma"` finds shared content at any size its
+dictionary holds, `"bzip2"` sees both within its 900 kB block, and `"zlib"` and `"gzip"`
+see 32 KiB, past which objects look unrelated. Each compressor takes only its own
+settings — `ppmd_order`, `lzma_dictionary_bytes` and the like — and a setting written for
+another compressor is rejected.
 
 ## Command line
 
@@ -68,6 +77,7 @@ damicore estimate dataset.csv --json
 damicore run dataset.csv --split columns --output-dir ./results
 damicore run dataset.xlsx --source xlsx --sheet measurements --split rows
 damicore run ./corpus --source files --no-recursive
+damicore run dataset.csv --compressor lzma --lzma-dictionary-bytes 67108864
 damicore run one.bin two.bin three.bin --source files
 damicore --version
 ```
@@ -109,10 +119,10 @@ preflight rather than after hours of work.
 
 Call `estimate` before raising a limit — it reports the exact cost without
 creating anything. The complexity behind the gates is documented in
-[scalability](https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/scalability.md).
+[scalability](https://github.com/delbem-research/damicore/blob/main/docs/scalability.md).
 
 ## Links
 
 - Source, issues and full documentation:
-  <https://github.com/Delbem-Research-and-Innovation/damicore>
+  <https://github.com/delbem-research/damicore>
 - Licensed under Apache-2.0.

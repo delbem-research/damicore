@@ -46,7 +46,7 @@ jobs:
       # before the first write reports the crash alone.
       - name: Publish the measurements
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: benchmark-measurements-${{ inputs.select }}
           path: /tmp/damicore-measurements/*.json

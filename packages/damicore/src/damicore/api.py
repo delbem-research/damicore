@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import numpy as np
 import pandas as pd
@@ -20,10 +20,14 @@ from damicore_clusterizer import (
     cluster_tree,
 )
 from damicore_distance import (
+    Bzip2Compressor,
+    DeflateCompressor,
     DistanceConfig,
     DistanceError,
     DistanceMatrixView,
     DistanceResult,
+    LzmaCompressor,
+    PpmdCompressor,
     compute_distance_matrix,
 )
 from damicore_normalizer import (
@@ -68,6 +72,7 @@ from damicore.errors import (
 )
 from damicore.estimate import ResourceEstimate, preflight
 from damicore.manifest import (
+    RUN_METHOD,
     ClustersArtifact,
     LabelsArtifact,
     RunManifest,
@@ -110,6 +115,30 @@ _SCALE_GUIDANCE = (
 )
 
 
+# `compressor_window` is the one violation that is not about cost: the run would fit and
+# would finish, and what it would produce is a matrix the compressor could not see across.
+# Scale advice -- reshape the source, raise a limit after reading the estimate -- is
+# unactionable for it, so it gets the two moves that do apply.
+_WINDOW_GUIDANCE = (
+    "A pair longer than the window its compressor declares is compressed with one object out "
+    "of view, so C(xy) approaches C(x) + C(y) and every distance moves toward 1 while still "
+    "looking like a measurement. Choose a compressor whose window holds the pair -- `ppmd`, "
+    "the default, declares none, and `lzma` matches across its dictionary -- or raise "
+    "ResourceLimits.max_pair_window_factor (--max-pair-window-factor) to measure anyway; the "
+    "run records the factor it was admitted under, and report.json counts the pairs above the "
+    "window. See ADR 0023."
+)
+
+
+def _guidance(violations: list[str]) -> str:
+    """The advice that applies to the gates a run actually tripped."""
+    if violations == ["compressor_window"]:
+        return _WINDOW_GUIDANCE
+    if "compressor_window" in violations:
+        return f"{_SCALE_GUIDANCE} {_WINDOW_GUIDANCE}"
+    return _SCALE_GUIDANCE
+
+
 def _execution(execution: ExecutionConfig | None) -> ExecutionConfig:
     try:
         return execution or ExecutionConfig()
@@ -129,12 +158,60 @@ def _validated_split(split: str) -> Literal["columns", "rows"]:
     raise ConfigurationError("split must be exactly 'columns' or 'rows'")
 
 
-def _validated_compressor(compressor: str) -> Literal["zlib", "gzip"]:
-    if compressor == "zlib":
-        return "zlib"
-    if compressor == "gzip":
-        return "gzip"
-    raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
+# Which settings each compressor reads, derived from the models that define them, as the
+# source arguments below are. The public signature is flat, so one written for a compressor
+# that does not read it is refused here by name rather than left to the stage, whose error
+# would name a field path the caller never wrote.
+_COMPRESSOR_SETTINGS: dict[str, frozenset[str]] = {
+    tag: frozenset(model.model_fields) - {"name"}
+    for model in (PpmdCompressor, DeflateCompressor, Bzip2Compressor, LzmaCompressor)
+    for tag in get_args(model.model_fields["name"].annotation)
+}
+
+
+def _distance_config(
+    compressor: str,
+    *,
+    compression_level: int | None,
+    ppmd_order: int | None,
+    ppmd_memory_bytes: int | None,
+    bzip2_block_size_100k: int | None,
+    lzma_dictionary_bytes: int | None,
+    execution: ExecutionConfig,
+    save_diagnostics: bool,
+) -> DistanceConfig:
+    if compressor not in _COMPRESSOR_SETTINGS:
+        *others, last = (repr(tag) for tag in _COMPRESSOR_SETTINGS)
+        raise ConfigurationError(f"compressor must be exactly {', '.join(others)} or {last}")
+    # Only the settings the caller wrote are passed on, so the compressor model defaults the
+    # rest.
+    written = {
+        name: value
+        for name, value in (
+            ("compression_level", compression_level),
+            ("ppmd_order", ppmd_order),
+            ("ppmd_memory_bytes", ppmd_memory_bytes),
+            ("bzip2_block_size_100k", bzip2_block_size_100k),
+            ("lzma_dictionary_bytes", lzma_dictionary_bytes),
+        )
+        if value is not None
+    }
+    foreign = sorted(written.keys() - _COMPRESSOR_SETTINGS[compressor])
+    if foreign:
+        raise ConfigurationError(f"{', '.join(foreign)} does not apply to {compressor}")
+    try:
+        return DistanceConfig.model_validate(
+            {
+                "compressor": {"name": compressor, **written},
+                "compression_chunk_bytes": execution.compression_chunk_bytes,
+                "workers": execution.effective_workers,
+                "pairs_per_shard": execution.pairs_per_shard,
+                "resume": execution.resume,
+                "save_diagnostics": save_diagnostics,
+            }
+        )
+    except ValidationError as exc:
+        raise ConfigurationError(str(exc)) from exc
 
 
 # Which arguments belong to which source, derived from the models that define them rather
@@ -217,6 +294,12 @@ def estimate(
     sheet: str | None = None,
     recursive: bool | None = None,
     include_hidden: bool | None = None,
+    compressor: str = "ppmd",
+    compression_level: int | None = None,
+    ppmd_order: int | None = None,
+    ppmd_memory_bytes: int | None = None,
+    bzip2_block_size_100k: int | None = None,
+    lzma_dictionary_bytes: int | None = None,
     keep_normalized: bool = False,
     save_diagnostics: bool = False,
     execution: ExecutionConfig | None = None,
@@ -240,6 +323,12 @@ def estimate(
         Exactly ``"columns"`` or ``"rows"``, defaulting to ``"columns"``. It decides what one
         object is for a dataset, and therefore the object count that every resource gate is
         quadratic or cubic in. It does not apply to ``"files"``, where each file is an object.
+    compressor, compression_level, ppmd_order, ppmd_memory_bytes
+        As for :func:`run`, and validated the same way. The compressor decides the memory
+        every worker's stream holds, which the working-memory projection charges once per
+        worker.
+    bzip2_block_size_100k, lzma_dictionary_bytes
+        As for :func:`run`, and validated the same way.
     keep_normalized
         Accepted for parity with :func:`run` and deliberately ignored: object bytes exist on
         disk while a run is in progress either way, so they are always counted.
@@ -277,12 +366,23 @@ def estimate(
         include_hidden=include_hidden,
     )
     _normalization_config(object_source, settings)
+    distance_config = _distance_config(
+        compressor,
+        compression_level=compression_level,
+        ppmd_order=ppmd_order,
+        ppmd_memory_bytes=ppmd_memory_bytes,
+        bzip2_block_size_100k=bzip2_block_size_100k,
+        lzma_dictionary_bytes=lzma_dictionary_bytes,
+        execution=settings,
+        save_diagnostics=save_diagnostics,
+    )
     del keep_normalized
     return preflight(
         source,
         object_source=object_source,
         save_diagnostics=save_diagnostics,
         execution=settings,
+        distance=distance_config,
         disk_target=Path.cwd() / "damicore-results",
     )
 
@@ -290,18 +390,19 @@ def estimate(
 def _config_payload(
     *,
     object_source: ObjectSource,
-    compressor: str,
-    compression_level: int,
+    distance: DistanceConfig,
     num_clusters: int | None,
     keep_normalized: bool,
     save_diagnostics: bool,
     execution: ExecutionConfig,
+    pairs_per_shard: int,
 ) -> dict[str, object]:
     # Flattened from the source model rather than restated: the union owns which settings
     # exist for which kind, and a setting that does not apply records `None` instead of a
     # default that was never in force. That keeps the configuration hash honest, so two runs
     # differing only in source cannot collide onto the same run directory.
     described = object_source.model_dump(mode="json")
+    compressor = distance.compressor.model_dump(mode="json")
     return {
         "source_kind": described["kind"],
         "split": described.get("split"),
@@ -310,22 +411,44 @@ def _config_payload(
         "sheet": described.get("sheet"),
         "recursive": described.get("recursive"),
         "include_hidden": described.get("include_hidden"),
-        "compressor": compressor,
-        "compression_level": compression_level,
+        # A setting the compressor does not read is recorded as None, so it neither enters
+        # the hash nor reads as a choice that had an effect.
+        "compressor": compressor["name"],
+        "compression_level": compressor.get("compression_level"),
+        "ppmd_order": compressor.get("ppmd_order"),
+        "ppmd_memory_bytes": compressor.get("ppmd_memory_bytes"),
+        "bzip2_block_size_100k": compressor.get("bzip2_block_size_100k"),
+        "lzma_dictionary_bytes": compressor.get("lzma_dictionary_bytes"),
         "num_clusters": num_clusters,
         "keep_normalized": keep_normalized,
         "save_diagnostics": save_diagnostics,
         "workers": execution.effective_workers,
         "csv_chunk_rows": execution.csv_chunk_rows,
         "compression_chunk_bytes": execution.compression_chunk_bytes,
-        "pairs_per_shard": execution.pairs_per_shard,
+        "pairs_per_shard": pairs_per_shard,
         "pandas_materialization_limit_bytes": execution.pandas_materialization_limit_bytes,
         "limits": execution.limits.model_dump(mode="json"),
     }
 
 
+# Execution settings change cost, admission and recovery, never the result, so `config`
+# records them and the hash that names the run leaves them out (ADR 0022). The set names what
+# is excluded rather than what enters, so a new field is identity until someone classifies it.
+_OPERATIONAL_CONFIG_KEYS = frozenset(
+    {
+        "workers",
+        "csv_chunk_rows",
+        "compression_chunk_bytes",
+        "pairs_per_shard",
+        "pandas_materialization_limit_bytes",
+        "limits",
+    }
+)
+
+
 def _identity(input_hash: str, config: dict[str, object]) -> tuple[str, str]:
-    encoded = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    semantic = {key: value for key, value in config.items() if key not in _OPERATIONAL_CONFIG_KEYS}
+    encoded = json.dumps(semantic, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     config_hash = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     run_hash = hashlib.sha256(f"{input_hash}{config_hash}{SCHEMA_VERSION}".encode()).hexdigest()
     return config_hash, run_hash[:16]
@@ -420,6 +543,7 @@ def _write_failure(
     error: BaseException,
     *,
     interrupted: bool,
+    pairs_per_shard: int,
 ) -> None:
     status = "interrupted" if interrupted else "failed"
     code = getattr(error, "code", type(error).__name__)
@@ -434,6 +558,7 @@ def _write_failure(
         object_count=preview.object_count,
         pair_count=preview.pair_count,
         effective_workers=preview.effective_workers,
+        pairs_per_shard=pairs_per_shard,
         matrix_bytes=preview.matrix_bytes,
         required_free_disk_bytes=preview.required_free_disk_bytes,
         peak_rss_bytes=_peak_rss(),
@@ -551,6 +676,15 @@ def _artifact_inventory(run_dir: Path) -> dict[str, dict[str, object]]:
     }
 
 
+def _optional_int(value: int | float | str | bool | None) -> int | None:
+    """A receipt metric read back as an integer, or `None` where the receipt has no such key.
+
+    A receipt written before a metric existed does not carry it, and a reused stage is not
+    re-run to produce it, so the honest value is `None` rather than a zero nobody measured.
+    """
+    return None if value is None else int(value)
+
+
 def run(
     source: str | Path | Sequence[str | Path],
     *,
@@ -561,8 +695,12 @@ def run(
     sheet: str | None = None,
     recursive: bool | None = None,
     include_hidden: bool | None = None,
-    compressor: str = "zlib",
-    compression_level: int = 6,
+    compressor: str = "ppmd",
+    compression_level: int | None = None,
+    ppmd_order: int | None = None,
+    ppmd_memory_bytes: int | None = None,
+    bzip2_block_size_100k: int | None = None,
+    lzma_dictionary_bytes: int | None = None,
     num_clusters: int | None = None,
     output_dir: str | Path | None = None,
     keep_normalized: bool = False,
@@ -608,8 +746,23 @@ def run(
         How a ``"files"`` source is enumerated. Both are recorded in the manifest, so a corpus
         can be reconstructed from the run rather than from the command that produced it.
     compressor
-        Exactly ``"zlib"`` or ``"gzip"``. NCD values are compressor-dependent, so changing it
-        changes the run identity and the results, not merely their cost.
+        Exactly ``"ppmd"``, the default, ``"zlib"``, ``"gzip"``, ``"bzip2"`` or ``"lzma"``.
+        NCD values are compressor-dependent, so changing it changes the run identity and the
+        results, not merely their cost. ``"ppmd"`` is PPMd variant I, the original DAMICORE
+        compressor, and keeps a shared distribution across large objects; ``"lzma"`` finds
+        shared content at any size its dictionary holds; ``"bzip2"`` sees both within its
+        900 kB block; ``"zlib"`` and ``"gzip"`` see a 32 KiB window, past which objects look
+        unrelated whatever they are. See ADRs 0020 and 0021.
+    compression_level, ppmd_order, ppmd_memory_bytes, bzip2_block_size_100k, lzma_dictionary_bytes
+        The settings of the chosen compressor: ``compression_level`` (0 to 9, default 6) for
+        ``"zlib"`` and ``"gzip"``; ``ppmd_order`` (2 to 64, default 6) and
+        ``ppmd_memory_bytes`` (2048 to 4294967259, default 67108864) for ``"ppmd"``;
+        ``bzip2_block_size_100k`` (1 to 9, default 9) for ``"bzip2"``; and
+        ``lzma_dictionary_bytes`` (4096 to 1610612736, default 8388608) for ``"lzma"``.
+        ``None`` uses the default. A setting for a compressor that does not read it is a
+        ``ConfigurationError``, never ignored, and every setting in force enters the run
+        identity. Each worker holds one compressor stream, and preflight charges its stated
+        memory per worker against ``max_working_memory_bytes``.
     num_clusters
         ``None`` lets FastGreedy choose the cut. Otherwise the upper bound is the object count
         this source produces, which is only known after preflight, so an oversized value is
@@ -648,8 +801,9 @@ def run(
         Preflight projected the run outside ``execution.limits``.
     OutputDirectoryConflictError
         ``output_dir`` is not a directory, holds no readable DAMICORE manifest, belongs to a
-        different input or configuration, or holds a compatible run that ``reuse_completed``
-        or ``resume`` forbids continuing.
+        different input or configuration, holds a compatible run that ``reuse_completed``
+        or ``resume`` forbids continuing, or holds a completed run that a different runtime
+        produced, which is never returned as this build's result.
     CheckpointMismatchError
         An incomplete run in ``output_dir`` exists but cannot be trusted to resume.
     CompressionError
@@ -680,18 +834,18 @@ def run(
         recursive=recursive,
         include_hidden=include_hidden,
     )
-    checked_compressor = _validated_compressor(compressor)
     normalization_config = _normalization_config(object_source, settings)
+    distance_config = _distance_config(
+        compressor,
+        compression_level=compression_level,
+        ppmd_order=ppmd_order,
+        ppmd_memory_bytes=ppmd_memory_bytes,
+        bzip2_block_size_100k=bzip2_block_size_100k,
+        lzma_dictionary_bytes=lzma_dictionary_bytes,
+        execution=settings,
+        save_diagnostics=save_diagnostics,
+    )
     try:
-        distance_config = DistanceConfig(
-            compressor=checked_compressor,
-            compression_level=compression_level,
-            compression_chunk_bytes=settings.compression_chunk_bytes,
-            workers=settings.effective_workers,
-            pairs_per_shard=settings.pairs_per_shard,
-            resume=settings.resume,
-            save_diagnostics=save_diagnostics,
-        )
         cluster_config = ClusterConfig(num_clusters=num_clusters)
         tree_config = TreeBuildConfig()
     except ValidationError as exc:
@@ -705,6 +859,7 @@ def run(
         object_source=object_source,
         save_diagnostics=save_diagnostics,
         execution=settings,
+        distance=distance_config,
         disk_target=target_hint,
     )
     logger.info(
@@ -713,7 +868,8 @@ def run(
     )
     if not preview.within_limits:
         raise ResourceLimitError(
-            f"Resource limits exceeded: {', '.join(preview.violations)}. {_SCALE_GUIDANCE}",
+            f"Resource limits exceeded: {', '.join(preview.violations)}. "
+            f"{_guidance(preview.violations)}",
             estimate=preview,
         )
     # The upper bound on num_clusters is part of the argument contract, but it is expressed
@@ -724,14 +880,15 @@ def run(
             f"num_clusters must be between 1 and the {preview.object_count} objects this "
             f"{source_kind} source produces; got {num_clusters}"
         )
+    pairs_per_shard = settings.effective_pairs_per_shard(preview.pair_count)
     config = _config_payload(
         object_source=object_source,
-        compressor=compressor,
-        compression_level=compression_level,
+        distance=distance_config,
         num_clusters=num_clusters,
         keep_normalized=keep_normalized,
         save_diagnostics=save_diagnostics,
         execution=settings,
+        pairs_per_shard=pairs_per_shard,
     )
     config_hash, run_id = _identity(preview.input_sha256, config)
     run_dir = (
@@ -761,18 +918,30 @@ def run(
         )
         if not compatible:
             raise OutputDirectoryConflictError("Output directory belongs to another run")
-        if existing_manifest.get("status") == "completed":
-            if settings.reuse_completed:
-                return load_result(run_dir)
-            raise OutputDirectoryConflictError("Completed output reuse is disabled")
-        if not settings.resume:
-            raise OutputDirectoryConflictError("Incomplete output resume is disabled")
         recorded_runtime = {
             key: str(item) for key, item in json_mapping(existing_manifest.get("runtime")).items()
         }
-        if not recorded_runtime or resume_fingerprint(recorded_runtime) != resume_fingerprint(
-            runtime_fingerprint()
-        ):
+        # The input and config hashes above say what was asked for, never which code answered.
+        # Reuse and resume both hand back bytes this build did not produce, so both are gated
+        # here: a release that redefines a stage would otherwise return the earlier release's
+        # science under its own name, and the cross-artifact verification would still pass,
+        # because the artifacts are internally consistent -- just not this build's.
+        same_runtime = bool(recorded_runtime) and resume_fingerprint(
+            recorded_runtime
+        ) == resume_fingerprint(runtime_fingerprint())
+        if existing_manifest.get("status") == "completed":
+            if not settings.reuse_completed:
+                raise OutputDirectoryConflictError("Completed output reuse is disabled")
+            if not same_runtime:
+                raise OutputDirectoryConflictError(
+                    "Completed run was created by a different runtime fingerprint"
+                )
+            return _load_result(
+                run_dir, materialization_limit_bytes=settings.pandas_materialization_limit_bytes
+            )
+        if not settings.resume:
+            raise OutputDirectoryConflictError("Incomplete output resume is disabled")
+        if not same_runtime:
             raise CheckpointMismatchError(
                 "Incomplete run was created by a different runtime fingerprint"
             )
@@ -800,6 +969,9 @@ def run(
         "config_hash": config_hash,
         "estimate": preview.model_dump(mode="json"),
         "runtime": runtime_fingerprint(),
+        # Recorded per run rather than inferred from the version: a directory outlives the
+        # release that wrote it, and a rule that is constant today is a variant later.
+        "method": RUN_METHOD.model_dump(mode="json"),
         "stages": {},
         "artifacts": {},
         "warnings": [],
@@ -866,6 +1038,11 @@ def run(
                 ncd_min=float(metrics["ncd_min"]),
                 ncd_max=float(metrics["ncd_max"]),
                 ncd_out_of_range_count=int(metrics["ncd_out_of_range_count"]),
+                ncd_self_largest=float(metrics["ncd_self_largest"]),
+                # A receipt written before this count existed does not carry it, and a
+                # reused stage is not recomputed to find out: `None` says the run does not
+                # know, which is what it does not know.
+                pairs_over_window=_optional_int(metrics.get("pairs_over_window")),
             )
         else:
             for stale in (run_dir / "tree.json", run_dir / "tree.nwk", run_dir / "tree-work.npy"):
@@ -896,17 +1073,25 @@ def run(
                 distance_outputs.extend(
                     path for path in diagnostics_dir.iterdir() if path.is_file()
                 )
+            # The window is not here: it is a property of the configuration, which a resumed
+            # run already holds. Only what this stage measured is recorded.
+            distance_metrics: dict[str, int | float | str | bool] = {
+                "object_count": distance.object_count,
+                "pair_count": distance.pair_count,
+                "ncd_min": distance.ncd_min,
+                "ncd_max": distance.ncd_max,
+                "ncd_out_of_range_count": distance.ncd_out_of_range_count,
+                "ncd_self_largest": distance.ncd_self_largest,
+            }
+            # A stage that ran counted its pairs, so this is written rather than defaulted:
+            # recording a zero where the count is absent would be a measurement nobody made.
+            if distance.pairs_over_window is not None:
+                distance_metrics["pairs_over_window"] = distance.pairs_over_window
             journal.stage_completed(
                 "distancing",
                 started,
                 distance_outputs,
-                {
-                    "object_count": distance.object_count,
-                    "pair_count": distance.pair_count,
-                    "ncd_min": distance.ncd_min,
-                    "ncd_max": distance.ncd_max,
-                    "ncd_out_of_range_count": distance.ncd_out_of_range_count,
-                },
+                distance_metrics,
             )
 
         current_stage = "tree_building"
@@ -994,13 +1179,16 @@ def run(
             effective_workers=settings.effective_workers,
             csv_chunk_rows=settings.csv_chunk_rows,
             compression_chunk_bytes=settings.compression_chunk_bytes,
-            pairs_per_shard=settings.pairs_per_shard,
+            pairs_per_shard=pairs_per_shard,
             matrix_bytes=preview.matrix_bytes,
             required_free_disk_bytes=preview.required_free_disk_bytes,
             peak_rss_bytes=_peak_rss(),
             ncd_min=distance.ncd_min,
             ncd_max=distance.ncd_max,
             ncd_out_of_range_count=distance.ncd_out_of_range_count,
+            ncd_self_largest=distance.ncd_self_largest,
+            compressor_window_bytes=distance_config.compressor.window_bytes,
+            pairs_over_window=distance.pairs_over_window,
             negative_branch_count=tree.negative_branch_count,
             modularity=clustered.modularity,
             timings_seconds=timings,
@@ -1024,7 +1212,9 @@ def run(
         atomic_json(manifest_path, manifest)
         logger.info("verification_completed", extra={"run_id": run_id})
         logger.info("run_completed", extra={"run_id": run_id})
-        return load_result(run_dir)
+        return _load_result(
+            run_dir, materialization_limit_bytes=settings.pandas_materialization_limit_bytes
+        )
     except KeyboardInterrupt as exc:
         _write_failure(
             journal,
@@ -1032,15 +1222,30 @@ def run(
             current_stage,
             exc,
             interrupted=True,
+            pairs_per_shard=pairs_per_shard,
         )
         raise
     except DamicoreError as exc:
         logger.error("run_failed", extra={"run_id": run_id, "stage": current_stage})
-        _write_failure(journal, preview, current_stage, exc, interrupted=False)
+        _write_failure(
+            journal,
+            preview,
+            current_stage,
+            exc,
+            interrupted=False,
+            pairs_per_shard=pairs_per_shard,
+        )
         raise
     except (NormalizerError, DistanceError, TreeBuilderError, ClusterizerError) as exc:
         translated = _translated_stage_error(exc, current_stage)
-        _write_failure(journal, preview, current_stage, translated, interrupted=False)
+        _write_failure(
+            journal,
+            preview,
+            current_stage,
+            translated,
+            interrupted=False,
+            pairs_per_shard=pairs_per_shard,
+        )
         logger.error("stage_failed", extra={"run_id": run_id, "stage": current_stage})
         raise translated from exc
     except Exception as exc:
@@ -1049,7 +1254,14 @@ def run(
         translated = DamicoreError(
             f"Pipeline failed during {current_stage}: {type(exc).__name__}: {exc}"
         )
-        _write_failure(journal, preview, current_stage, translated, interrupted=False)
+        _write_failure(
+            journal,
+            preview,
+            current_stage,
+            translated,
+            interrupted=False,
+            pairs_per_shard=pairs_per_shard,
+        )
         raise translated from exc
 
 
@@ -1079,6 +1291,14 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
         wrong-version manifest or report; a hash or size mismatch; a path that escapes the
         run directory; or a membership, cluster, or Newick artifact that does not parse.
     """
+    return _load_result(output_dir, materialization_limit_bytes=None)
+
+
+def _load_result(
+    output_dir: str | Path, *, materialization_limit_bytes: int | None
+) -> DamicoreResult:
+    # `run` passes its caller's limit: a reused or resumed directory records the limit of the
+    # invocation that created it, which is operational and no longer part of its identity.
     run_dir = Path(output_dir).resolve()
     paths = artifact_paths(run_dir)
     try:
@@ -1129,7 +1349,11 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
     view = DistanceMatrixView(
         paths.distance_matrix,
         list(labels_payload.labels),
-        materialization_limit_bytes=manifest.config.pandas_materialization_limit_bytes,
+        materialization_limit_bytes=(
+            manifest.config.pandas_materialization_limit_bytes
+            if materialization_limit_bytes is None
+            else materialization_limit_bytes
+        ),
         materialization_error=MaterializationError,
     )
     return DamicoreResult(

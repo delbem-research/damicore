@@ -3,11 +3,15 @@
 [![PyPI](https://img.shields.io/pypi/v/damicore)](https://pypi.org/project/damicore/)
 [![Python versions](https://img.shields.io/pypi/pyversions/damicore)](https://pypi.org/project/damicore/)
 [![License](https://img.shields.io/pypi/l/damicore)](LICENSE)
-[![CI](https://github.com/Delbem-Research-and-Innovation/damicore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Delbem-Research-and-Innovation/damicore/actions/workflows/ci.yml)
+[![Documentation](https://img.shields.io/badge/docs-delbem--research.github.io-blue)](https://delbem-research.github.io/damicore/)
+[![CI](https://github.com/delbem-research/damicore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/delbem-research/damicore/actions/workflows/ci.yml)
 
 DAMICORE clusters local files, or the rows or columns of a local dataset,
 through canonical serialization, exact Normalized Compression Distance (NCD),
-deterministic Neighbor Joining, and FastGreedy community detection.
+deterministic Neighbor Joining, and FastGreedy community detection. What each
+of those four stages computes, where the definition comes from, and what this
+implementation does not take from its source, is stated stage by stage under
+[the method](https://delbem-research.github.io/damicore/method/index.html).
 
 Objects come from one of two sources. A **dataset** is split by column or by
 row: delimited text (`.csv`, `.tsv`, `.txt`, any single-character delimiter) or
@@ -68,6 +72,10 @@ The five public distributions are `damicore`, `damicore-normalizer`,
 Stage packages do not import one another. `synthetic-data` is workspace-only
 and is never published.
 
+What the library does not implement yet, and the audited evidence behind that list, are
+[docs/roadmap.md](docs/roadmap.md) and
+[docs/method/evidence.md](docs/method/evidence.md).
+
 For Colab, process and checkpoint on local `/content`, then use `result.save`
 to copy completed artifacts to a mounted Drive destination. DAMICORE never
 imports `google.colab`, accesses the network, or uploads data.
@@ -77,7 +85,7 @@ imports `google.colab`, accesses the network, or uploads data.
 If you use this code in scientific works, please cite:
 
 > Lopes, E. P., Tokuda, E. K., & Delbem, A. C. B. (2026). *DAMICORE*
-> (Version 0.2.0) [Computer software].
+> (Version 0.5.0) [Computer software].
 > https://pypi.org/project/damicore/
 
 The DAMICORE methodology was originally introduced in:

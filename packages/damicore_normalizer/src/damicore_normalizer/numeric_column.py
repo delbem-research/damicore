@@ -1,3 +1,17 @@
+"""Decide whether a column is numeric, and which decimal separator produced it.
+
+The separator is detected by falsification against every cell rather than guessed from the
+first, so a column that two separators could explain is refused instead of resolved.
+
+References
+----------
+.. [adr-0014] Dataset partitioning is upstream of the source axis and emits datasets. The
+   resolved separator is part of what `partition_rule` fixes, and the manifest records it,
+   because the same column read with the other separator is a different ordering and
+   therefore a different partition. What this unit does not take from the record is the
+   partition itself; it only decides what a number is.
+"""
+
 from __future__ import annotations
 
 import re

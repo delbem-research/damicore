@@ -2,10 +2,18 @@
 members = ["packages/*"]
 
 [tool.uv]
-constraint-dependencies = ["tornado==6.5.8"]
+# tornado reaches the lock only through nbclient, whose own range is wide enough to resolve a
+# version with known advisories against it. The constraint raises that floor so `pip-audit`
+# passes. It is stated as a minimum rather than as `==`: an equality pin fixes today's
+# advisory and becomes tomorrow's ceiling, which is exactly how 6.5.8 came to block the
+# 6.6 that fixes CVE-2026-116577, CVE-2026-115927 and CVE-2026-116578.
+constraint-dependencies = ["tornado>=6.6"]
 
 [dependency-groups]
 dev = [
+    "pypdf>=5.9,<7",
+    "reportlab>=4.4,<5",
+    "bibtexparser>=2,<3",
     "build>=1.2,<2",
     "hypothesis>=6,<7",
     "nbclient>=0.10,<1",
@@ -28,11 +36,12 @@ damicore-clusterizer = { workspace = true }
 
 # Ruff resolves its configuration per file, walking up to the nearest pyproject that declares
 # this section, so a package's copy governs that package and nothing above it. This one is what
-# `tests`, `benchmarks` and `.github/scripts` are linted by; without it they fall back to Ruff's
-# defaults and `make check` checks them against rules this repository never chose. Held equal to
-# the package sections by tests/architecture/test_boundaries.py.
+# `tests`, `benchmarks`, `scripts` and `.github/scripts` are linted by; without it they fall
+# back to Ruff's defaults and `make check` checks them against rules this repository never
+# chose. Held equal to the package sections by tests/architecture/test_boundaries.py.
 [tool.ruff]
 line-length = 100
+target-version = "py311"
 exclude = [".venv", "dist", "__pycache__"]
 
 # PGH and TID close two rules this file states in prose and nothing else checked: a
@@ -41,7 +50,7 @@ exclude = [".venv", "dist", "__pycache__"]
 # the whole tree the moment they were added, so they ratchet existing discipline rather
 # than asking for a cleanup.
 [tool.ruff.lint]
-select = ["E", "F", "I", "PGH", "RUF100", "TID", "UP"]
+select = ["E", "ERA", "F", "FIX", "I", "PGH", "RUF100", "TID", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "tests"]
@@ -53,7 +62,6 @@ markers = [
     "contract: cross-package contract tests",
     "e2e: complete pipeline tests",
     "notebook: executable notebook tests",
-    "slow: stress and benchmark-adjacent tests",
 ]
 
 [tool.coverage.run]

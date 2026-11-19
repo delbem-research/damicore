@@ -1,3 +1,14 @@
+"""Split a dataset into objects, by column or by row.
+
+References
+----------
+.. [adr-0006] The object source is an axis owned by the normalizer. A dataset is split into
+   objects and files already are them; this unit is the first half of that axis. What it
+   does not take from the record is the second half: a corpus of files is `file_corpus.py`'s,
+   and the two must not grow a shared special case, which is what made the axis a record
+   rather than a pair of code paths.
+"""
+
 from __future__ import annotations
 
 import hashlib

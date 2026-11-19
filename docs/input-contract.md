@@ -4,6 +4,11 @@ DAMICORE measures bytes. Objects reach the distance stage from one of two
 sources, and the source decides which of the settings below apply at all. A
 setting that does not apply is rejected, never ignored.
 
+A source's kind is the value a caller passes as `kind` and the run records as
+`source_kind`: `delimited` or `xlsx` for the two dataset formats, `files` for a
+corpus. The kind decides the object encoding, so it is part of what a distance
+means rather than a detail of how the input was read.
+
 ## Dataset sources
 
 A dataset is one existing regular local file, split into objects by column or by

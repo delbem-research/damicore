@@ -34,8 +34,8 @@ updates:
       actions:
         patterns: ["*"]
 
-  # Nothing else moves the pre-commit hook revisions, so without this they drift out of the
-  # workspace's ruff range until the hook and `make check` disagree about the same file.
+  # Nothing else moves the pre-commit hook revisions. Ruff is not among them: its hook runs
+  # the workspace's own version, which the uv entry above moves.
   - package-ecosystem: pre-commit
     directory: /
     schedule:

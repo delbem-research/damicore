@@ -87,13 +87,13 @@ The decimal separator of the column is detected by testing `.` and `,`
 against every cell, or declared with `decimal=`; a column that fits neither
 is refused naming the offending rows, never guessed. Every rule the files
 depend on is versioned as `partition_rule` v1 and specified in the
-[partitioning specification](https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/dataset-partitioning.md).
+[partitioning specification](https://github.com/delbem-research/damicore/blob/main/docs/dataset-partitioning.md).
 
 ## Links
 
-- Repository: <https://github.com/Delbem-Research-and-Innovation/damicore>
-- Issues: <https://github.com/Delbem-Research-and-Innovation/damicore/issues>
+- Repository: <https://github.com/delbem-research/damicore>
+- Issues: <https://github.com/delbem-research/damicore/issues>
 - Documentation:
-  <https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/quickstart.md>
+  <https://github.com/delbem-research/damicore/blob/main/docs/quickstart.md>
 
 Licensed under Apache-2.0.

@@ -63,6 +63,16 @@ class RunReport(BaseModel):
     ncd_min: float | None = None
     ncd_max: float | None = None
     ncd_out_of_range_count: int = 0
+    # `None` on a report that predates the figure and on one for a run that stopped: a
+    # failure report states no measurement it did not take from a finished stage.
+    ncd_self_largest: float | None = None
+    # What the compressor declared it can match across, and how many of this run's pairs are
+    # longer than that. The window is `None` on a report that predates the gate, on a stopped
+    # run, and on a compressor that declares none -- ADR 0023 says why the last of those is
+    # not a number. The count is `None` when a reused stage's receipt predates it. A run
+    # above the gate is one whose `max_pair_window_factor` was raised.
+    compressor_window_bytes: int | None = None
+    pairs_over_window: int | None = None
     negative_branch_count: int = 0
     modularity: float | None = None
     timings_seconds: dict[str, float] = Field(default_factory=dict)
