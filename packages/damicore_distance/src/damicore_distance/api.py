@@ -556,7 +556,11 @@ def compute_distance_matrix(
 
         # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
         # defers it until it is read after the last shard.
-        largest = max(range(len(paths)), key=lambda index: paths[index].stat().st_size)
+        # Ties in size go to the higher digest, so the object -- and the value -- is chosen by
+        # content and not by input order, like the pairs [adr-0024].
+        largest = max(
+            range(len(paths)), key=lambda index: (paths[index].stat().st_size, digests[index])
+        )
         doubled: list[SizeArguments] = [((str(paths[largest]),) * 2, settings)]
         self_size = (
             map(_size_worker, doubled) if executor is None else executor.map(_size_worker, doubled)

@@ -365,7 +365,11 @@ def test_the_report_states_how_far_the_largest_object_is_from_itself(tmp_path: P
     )
     result.close()
     objects = sorted((output / "normalization" / "objects").iterdir())
-    largest = max(objects, key=lambda path: path.stat().st_size).read_bytes()
+    # The largest object, ties to the higher SHA-256 (ADR 0024), as the stage chooses it.
+    largest = max(
+        (path.read_bytes() for path in objects),
+        key=lambda payload: (len(payload), hashlib.sha256(payload).hexdigest()),
+    )
 
     def size(payload: bytes) -> int:
         return len(pyppmd.compress(payload, max_order=6, mem_size=67_108_864, variant="I"))

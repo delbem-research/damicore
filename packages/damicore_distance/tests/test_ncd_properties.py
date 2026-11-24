@@ -353,8 +353,11 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
             expected = normalized_compression_distance(sizes[left], sizes[right], joined)
             assert float(matrix[left, right]) == expected
 
-    # The first of the longest objects, compressed after itself: C(xx) against C(x).
-    largest = max(range(count), key=lambda index: len(payloads[index]))
+    # The longest object, ties to the higher digest, compressed after itself: C(xx) against C(x).
+    largest = max(
+        range(count),
+        key=lambda index: (len(payloads[index]), hashlib.sha256(payloads[index]).digest()),
+    )
     doubled = _direct_size(payloads[largest], payloads[largest], config=config)
     assert result.ncd_self_largest == normalized_compression_distance(
         sizes[largest], sizes[largest], doubled
@@ -382,24 +385,45 @@ def test_reordering_the_objects_reorders_the_matrix_and_changes_no_value(
     No compressor here is symmetric, so a pair compressed in input order measures a value
     that moves when the objects are reordered -- and that was enough to change the partition
     of the same corpus (issue 131). Metamorphic: the same payloads in a shuffled order must
-    give the same matrix with its rows and columns shuffled alike, bit for bit.
+    give the same matrix with its rows and columns shuffled alike, bit for bit, and the same
+    ``ncd_self_largest``, whose object is chosen by content when sizes tie.
     """
     order = list(range(len(payloads)))
     random.Random(seed).shuffle(order)
     directory = tmp_path_factory.mktemp("order")
 
-    def matrix(
+    def measured(
         name: str, objects: list[bytes]
-    ) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
+    ) -> tuple[np.ndarray[tuple[int, int], np.dtype[np.float64]], float]:
         manifest_path = _normalization_manifest(directory / name / "normalized", objects)
         result = compute_distance_matrix(
             manifest_path, directory / name / "run", config=_named(compressor)
         )
-        return np.load(result.matrix_path, allow_pickle=False)
+        return np.load(result.matrix_path, allow_pickle=False), result.ncd_self_largest
 
-    reference = matrix("reference", payloads)
-    shuffled = matrix("shuffled", [payloads[index] for index in order])
+    reference, reference_self = measured("reference", payloads)
+    shuffled, shuffled_self = measured("shuffled", [payloads[index] for index in order])
     assert np.array_equal(shuffled, reference[np.ix_(order, order)])  # pyright: ignore[reportUnknownMemberType]
+    assert shuffled_self == reference_self
+
+
+def test_the_largest_object_is_chosen_by_content_when_sizes_tie(tmp_path: Path) -> None:
+    """`ncd_self_largest` compresses one object after itself. When two objects share the
+    largest size the choice used to fall to input order, so the reported value moved with it;
+    a repetitive object and a random one of equal length read far apart."""
+    repetitive = b"damicore " * 400
+    noise = random.Random(7).randbytes(len(repetitive))
+
+    def self_largest(name: str, payloads: list[bytes]) -> float:
+        manifest_path = _normalization_manifest(tmp_path / name / "normalized", payloads)
+        result = compute_distance_matrix(
+            manifest_path, tmp_path / name / "run", config=_named("zlib")
+        )
+        return result.ncd_self_largest
+
+    assert self_largest("forward", [repetitive, noise]) == self_largest(
+        "reverse", [noise, repetitive]
+    )
 
 
 # --- The compressor window, issue 59 ----------------------------------------------------

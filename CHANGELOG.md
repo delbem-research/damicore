@@ -14,7 +14,9 @@ carries anything else, a date included, matches neither and fails the release.
   first in `C(xy)`, so reordering the columns of a table or renaming files changed distances
   -- and, measured on DAMICORE's own modules and on a 12-column table, the partition (#131).
   The object whose SHA-256 is lower now goes first, so the matrix is a function of the
-  objects and a reordered input returns it reordered alike with every value unchanged. Every
+  objects and a reordered input returns it reordered alike with every value unchanged; when
+  objects tie for the largest size, `ncd_self_largest` likewise takes the one with the higher
+  digest instead of the first in the input. Every
   value whose pair was compressed in the other order changes. The distance rule in the
   manifest's `method` block is `ncd-max/v2`, and a distance checkpoint written before this
   release is refused on resume rather than mixed with new shards. ADR 0024.

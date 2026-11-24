@@ -38,7 +38,10 @@ where the order cannot matter.
 The matrix is then a function of the set of objects: reordered, it comes back with rows and
 columns reordered alike and every value bitwise equal, which a metamorphic property test
 holds for every compressor. The rule is `ncd-max/v2` in the manifest's `method` block
-[adr-0018], and the distance checkpoint's identity moves to schema version 2, so a shard
+[adr-0018]. The same rule settles the one other choice the stage made by position: when
+several objects share the largest size, `ncd_self_largest` compresses the one whose digest is
+higher, where it used to take the first in the input. The distance checkpoint's identity
+moves to schema version 2, so a shard
 measured in input order is refused on resume rather than mixed with shards measured in digest
 order.
 
