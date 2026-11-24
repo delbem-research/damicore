@@ -149,7 +149,7 @@ class RunMethod(BaseModel):
 # run directory as provenance pointing nowhere.
 RUN_METHOD = RunMethod(
     objects=MethodRule(name="canonical-json-lines/v1", refs=("adr-0001", "adr-0008", "adr-0010")),
-    distance=MethodRule(name="ncd-max/v1", refs=("cilibrasi2005",)),
+    distance=MethodRule(name="ncd-max/v2", refs=("cilibrasi2005", "adr-0024")),
     tree=MethodRule(name="neighbor-joining-q/v1", refs=("saitou1987", "studier1988", "adr-0017")),
     clusters=MethodRule(
         name="fastgreedy-modularity/v1",

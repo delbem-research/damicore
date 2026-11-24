@@ -30,7 +30,7 @@ from damicore_distance.ncd import normalized_compression_distance
 pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
-WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[str], list[int], DistanceConfig]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 
 
@@ -728,6 +728,23 @@ def test_a_compressed_size_checkpoint_from_another_run_is_rejected(tmp_path: Pat
     assert raised.value.code == "checkpoint_mismatch_error"
 
 
+def test_a_checkpoint_written_in_input_pair_order_is_rejected(tmp_path: Path) -> None:
+    """Before pairs went in digest order (ADR 0024) a shard held values measured in input
+    order; resuming one would put both orders into one matrix, which no check downstream
+    could tell apart from a clean run."""
+    manifest, output = _completed_run(tmp_path)
+    for name in ("compressed-sizes.json", "distance-shards.json"):
+        _rewrite(
+            output / "checkpoints" / name,
+            lambda payload: payload["identity"].update(schema_version=1),
+        )
+    with pytest.raises(DistanceError, match="incompatible") as raised:
+        compute_distance_matrix(
+            manifest, output, config=DistanceConfig(workers=1, pairs_per_shard=1)
+        )
+    assert raised.value.code == "checkpoint_mismatch_error"
+
+
 def test_a_truncated_compressed_size_checkpoint_is_rejected(tmp_path: Path) -> None:
     manifest, output = _completed_run(tmp_path)
     _rewrite(
@@ -932,9 +949,11 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
     limit = 3
     no_pairs: list[tuple[int, int]] = []
     no_paths: list[str] = []
+    no_digests: list[str] = []
     no_sizes: list[int] = []
     shards: list[distance_api.WorkerArguments] = [
-        (index, no_pairs, no_paths, no_sizes, DistanceConfig()) for index in range(total)
+        (index, no_pairs, no_paths, no_digests, no_sizes, DistanceConfig())
+        for index in range(total)
     ]
     arguments: Iterator[distance_api.WorkerArguments] = iter(shards)
     results = distance_api._bounded_submit(

@@ -69,7 +69,7 @@ def _sha256(path: Path, chunk_bytes: int = 4_194_304) -> str:
     return digest.hexdigest()
 
 
-def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]]:
+def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path], list[str]]:
     try:
         manifest = NormalizationManifest.model_validate_json(
             manifest_path.read_text(encoding="utf-8")
@@ -82,6 +82,7 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
     object_ids: list[str] = []
     labels: list[str] = []
     paths: list[Path] = []
+    digests: list[str] = []
     root = manifest_path.parent.resolve()
     for raw in manifest.objects:
         relative = Path(raw.relative_path)
@@ -108,6 +109,7 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
         object_ids.append(raw.object_id)
         labels.append(raw.label)
         paths.append(candidate)
+        digests.append(raw.sha256)
     if (
         len(object_ids) < 2
         or len(set(object_ids)) != len(object_ids)
@@ -117,11 +119,12 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
             "Normalization manifest must contain at least two unique objects and labels",
             code="artifact_validation_error",
         )
-    return object_ids, labels, paths
+    return object_ids, labels, paths, digests
 
 
-# One shard's work: its index, its pairs, and the run-wide inputs a worker process needs.
-WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
+# One shard's work: its index, its pairs, and the run-wide inputs a worker process needs --
+# each object's path, its SHA-256 and its compressed size.
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[str], list[int], DistanceConfig]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 # One stream's work: the paths it compresses in order and the run's settings -- one path for
 # C(x), the largest object twice for C(xx).
@@ -134,13 +137,17 @@ def _size_worker(arguments: SizeArguments) -> int:
 
 
 def _worker(arguments: WorkerArguments) -> WorkerResult:
-    shard_index, pairs, raw_paths, sizes, config = arguments
+    shard_index, pairs, raw_paths, digests, sizes, config = arguments
     paths = [Path(path) for path in raw_paths]
     left: list[int] = []
     right: list[int] = []
     values: list[float] = []
     for i, j in pairs:
-        cxy = compressed_size((paths[i], paths[j]), config=config)
+        # No compressor here is symmetric, so the pair goes in the order of its contents'
+        # digests, never of the input: a reordered input then measures the same value. Equal
+        # digests are equal bytes, where the order cannot matter [adr-0024].
+        first, second = (i, j) if digests[i] <= digests[j] else (j, i)
+        cxy = compressed_size((paths[first], paths[second]), config=config)
         left.append(i)
         right.append(j)
         values.append(normalized_compression_distance(sizes[i], sizes[j], cxy))
@@ -279,7 +286,9 @@ def _checkpoint_identity(
     object_ids: list[str],
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        # 2 since pairs are compressed in digest order [adr-0024]: a shard written in input
+        # order holds other values, and resuming it would mix the two in one matrix.
+        "schema_version": 2,
         "normalization_manifest_sha256": _sha256(manifest_path),
         "object_ids": object_ids,
         # These settings change cost or control flow, never a stored size or shard value, so a
@@ -489,6 +498,10 @@ def compute_distance_matrix(
     and ``ncd_out_of_range_count`` on the result, and the largest object is compressed once
     more after itself for ``ncd_self_largest``.
 
+    Each pair is compressed as one concatenation, the object whose SHA-256 is lower first, so
+    the matrix is a function of the objects and not of their order in the manifest: reordered,
+    it comes back with its rows and columns reordered alike and no value changed [adr-0024].
+
     Pairs are computed shard by shard straight into the memory map, and each finished shard
     is checkpointed with a digest, so an interrupted run resumes from the shards already
     done. With ``config.resume`` disabled, existing outputs are a conflict instead of a
@@ -520,7 +533,7 @@ def compute_distance_matrix(
     checkpoints = destination / "checkpoints"
     checkpoints.mkdir(exist_ok=True)
     manifest_path = Path(normalization_manifest).resolve()
-    object_ids, labels, paths = _load_objects(manifest_path)
+    object_ids, labels, paths, digests = _load_objects(manifest_path)
     identity = _checkpoint_identity(manifest_path, settings, object_ids)
     # One pool serves both phases, so neither the per-object sizes nor the pairs run
     # serially in this process while the workers wait.
@@ -574,7 +587,7 @@ def compute_distance_matrix(
                 completed_pairs += len(shard)
         raw_paths = [str(path) for path in paths]
         arguments: Iterator[WorkerArguments] = (
-            (index, shard, raw_paths, sizes, settings)
+            (index, shard, raw_paths, digests, sizes, settings)
             for index, shard in iter_pair_shards(len(paths), pairs_per_shard)
             if index not in completed_shards
         )

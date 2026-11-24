@@ -344,7 +344,12 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
     sizes = [_direct_size(payload, config=config) for payload in payloads]
     for left in range(count):
         for right in range(left + 1, count):
-            joined = _direct_size(payloads[left], payloads[right], config=config)
+            # The pair is compressed in the order of its contents' digests [adr-0024].
+            first, second = sorted(
+                (payloads[left], payloads[right]),
+                key=lambda payload: hashlib.sha256(payload).digest(),
+            )
+            joined = _direct_size(first, second, config=config)
             expected = normalized_compression_distance(sizes[left], sizes[right], joined)
             assert float(matrix[left, right]) == expected
 
@@ -354,6 +359,47 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
     assert result.ncd_self_largest == normalized_compression_distance(
         sizes[largest], sizes[largest], doubled
     )
+
+
+@given(
+    payloads=st.lists(PAYLOAD, min_size=2, max_size=5),
+    compressor=COMPRESSOR,
+    seed=st.integers(min_value=0, max_value=2**32 - 1),
+)
+@settings(
+    max_examples=60,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_reordering_the_objects_reorders_the_matrix_and_changes_no_value(
+    tmp_path_factory: pytest.TempPathFactory,
+    payloads: list[bytes],
+    compressor: CompressorName,
+    seed: int,
+) -> None:
+    """The matrix is a function of the objects, not of where they sit in the input.
+
+    No compressor here is symmetric, so a pair compressed in input order measures a value
+    that moves when the objects are reordered -- and that was enough to change the partition
+    of the same corpus (issue 131). Metamorphic: the same payloads in a shuffled order must
+    give the same matrix with its rows and columns shuffled alike, bit for bit.
+    """
+    order = list(range(len(payloads)))
+    random.Random(seed).shuffle(order)
+    directory = tmp_path_factory.mktemp("order")
+
+    def matrix(
+        name: str, objects: list[bytes]
+    ) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
+        manifest_path = _normalization_manifest(directory / name / "normalized", objects)
+        result = compute_distance_matrix(
+            manifest_path, directory / name / "run", config=_named(compressor)
+        )
+        return np.load(result.matrix_path, allow_pickle=False)
+
+    reference = matrix("reference", payloads)
+    shuffled = matrix("shuffled", [payloads[index] for index in order])
+    assert np.array_equal(shuffled, reference[np.ix_(order, order)])  # pyright: ignore[reportUnknownMemberType]
 
 
 # --- The compressor window, issue 59 ----------------------------------------------------

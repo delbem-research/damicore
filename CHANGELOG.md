@@ -5,6 +5,20 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## 0.6.0
+
+### Breaking
+
+- **Each pair is compressed in the order of its contents' digests, not of the input.** No
+  compressor here is symmetric, and until now the object that came first in the input came
+  first in `C(xy)`, so reordering the columns of a table or renaming files changed distances
+  -- and, measured on DAMICORE's own modules and on a 12-column table, the partition (#131).
+  The object whose SHA-256 is lower now goes first, so the matrix is a function of the
+  objects and a reordered input returns it reordered alike with every value unchanged. Every
+  value whose pair was compressed in the other order changes. The distance rule in the
+  manifest's `method` block is `ncd-max/v2`, and a distance checkpoint written before this
+  release is refused on resume rather than mixed with new shards. ADR 0024.
+
 ## 0.5.0
 
 ### Breaking

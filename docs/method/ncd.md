@@ -16,7 +16,10 @@ more. Checked against the implementation: `C(x)=100`, `C(y)=140`, `C(xy)=180` gi
 fed the object's bytes, from `damicore_distance.compressor.compressed_size`: a single
 stream is opened, every chunk of every path is pushed through it, and the returned total is
 the sum of the compressed output plus the final flush. `C(xy)` is the same call given two
-paths in order, so the concatenation is never materialised on disk.
+paths, so the concatenation is never materialised on disk. Which of the two goes first is
+fixed by content: the object whose SHA-256 is lower, as the normalization manifest records it
+[adr-0024]. The matrix is therefore a function of the objects, not of their order in the
+input -- reordered, it comes back reordered alike with every value unchanged.
 
 The compressor and its settings are part of the value, and each compressor reads only its
 own; a setting for another compressor is refused, not ignored. `damicore` takes them as
@@ -95,6 +98,9 @@ it.
 
 - **No symmetrisation.** The matrix is symmetric because each unordered pair is computed
   once and written to both triangles, not because `C(xy) = C(yx)` was checked or enforced.
+  The asymmetry is still in every value; what is fixed is its direction, which the digest
+  order ties to the objects' contents instead of their position in the input, after the
+  position was measured changing the partition of the same corpus [adr-0024].
 - **No normality check.** Nothing measures idempotency, monotonicity, symmetry or
   distributivity for the configured compressor on the data at hand. The paper's guarantees
   are conditional on them; this code does not establish the condition.
@@ -159,3 +165,5 @@ it.
   `zlib` and with the original DAMICORE implementation on the same objects.
 - [adr-0021] — why bzip2 and LZMA are offered, what each measures at which size, and the
   memory each stream is charged.
+- [adr-0024] — why each pair is compressed in the order of its contents' digests, with the
+  measurement of what input order did to the partition.
