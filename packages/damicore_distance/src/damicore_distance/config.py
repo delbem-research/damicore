@@ -48,14 +48,15 @@ class DeflateCompressor(BaseModel):
 
 class PpmdCompressor(BaseModel):
     """PPMd variant I with model restart, at ``ppmd_order`` with ``ppmd_memory_bytes`` of
-    model [adr-0020]. The bounds are the codec's own: pyppmd would clamp a value outside them
-    without saying so."""
+    model [adr-0020]. The bounds are the codec's own -- pyppmd would clamp a value outside them
+    without saying so -- except the lower memory bound, which is twice the codec's: the stage
+    checks every object against half the model, and half must still be a model [adr-0025]."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: Literal["ppmd"] = "ppmd"
     ppmd_order: int = Field(default=6, ge=2, le=64)
-    ppmd_memory_bytes: int = Field(default=67_108_864, ge=2_048, le=4_294_967_259)
+    ppmd_memory_bytes: int = Field(default=67_108_864, ge=4_096, le=4_294_967_259)
 
     @property
     def stream_memory_bytes(self) -> int:
@@ -70,10 +71,10 @@ class PpmdCompressor(BaseModel):
     def window_bytes(self) -> None:
         """PPMd declares no window, because it has none to declare [adr-0023].
 
-        Its reach across a pair is a property of the content, not a byte count: the model's
-        size does not decide what it finds, which is measured in that record. What it loses
-        with size is the copy, not the distribution [adr-0020], and
-        ``DistanceResult.ncd_self_largest`` is where that shows.
+        Its reach across a pair is set by the model memory together with the content, not by
+        a byte count: the model restarts when it fills, and how fast it fills depends on how
+        varied the data is. The stage therefore measures it per object instead of gating it
+        by size [adr-0025].
         """
         return None
 
@@ -147,8 +148,13 @@ class DistanceConfig(BaseModel):
     """What the distance stage measures with, and how it schedules the work.
 
     ``compressor`` and its settings change every NCD value; everything else changes only
-    cost and recovery. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA, and
-    ``docs/method/ncd.md`` for what each compressor computes.
+    cost, recovery or admission. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA,
+    and ``docs/method/ncd.md`` for what each compressor computes.
+
+    ``allow_model_restart`` lifts the one admission check this stage makes itself: under
+    PPMd, an object that fills half the model memory is refused before any pair is
+    computed, because a pair starting with it would be coded with it forgotten [adr-0025].
+    Setting it measures anyway, and skips the check.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -159,6 +165,7 @@ class DistanceConfig(BaseModel):
     pairs_per_shard: int | Literal["auto"] = "auto"
     resume: bool = True
     save_diagnostics: bool = False
+    allow_model_restart: bool = False
 
     @field_validator("compressor", mode="before")
     @classmethod

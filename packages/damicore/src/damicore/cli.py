@@ -133,7 +133,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--ppmd-memory-bytes",
             type=int,
-            help="PPMd model memory per worker, from 2048 to 4294967259 bytes; changes the "
+            help="PPMd model memory per worker, from 4096 to 4294967259 bytes; changes the "
             "distances and is charged once per worker against the memory limit "
             "(default: 67108864)",
         )
@@ -189,7 +189,16 @@ def _parser() -> argparse.ArgumentParser:
                 "declares; above it the compressor cannot match across the pair and every "
                 "distance moves toward 1 "
                 f"(default: {_DEFAULT_LIMITS.max_pair_window_factor}; `ppmd` declares no "
-                "window and is never gated)"
+                "window and is checked per object instead, see --allow-model-restart)"
+            ),
+        )
+        command.add_argument(
+            "--allow-model-restart",
+            action="store_true",
+            help=(
+                "measure under `ppmd` even when an object fills half the model memory, where "
+                "a pair starting with it is coded with it forgotten; without it the run is "
+                "refused and asks for a larger --ppmd-memory-bytes"
             ),
         )
         command.add_argument(
@@ -235,6 +244,7 @@ def _execution_from_arguments(arguments: argparse.Namespace) -> ExecutionConfig:
         max_matrix_bytes=arguments.max_matrix_bytes,
         max_working_memory_bytes=arguments.max_working_memory_bytes,
         max_pair_window_factor=arguments.max_pair_window_factor,
+        allow_model_restart=arguments.allow_model_restart,
     )
     # "auto" is a literal in the config contract, so branch rather than widen to int | str.
     if requested is None:

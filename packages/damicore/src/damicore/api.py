@@ -208,6 +208,7 @@ def _distance_config(
                 "pairs_per_shard": execution.pairs_per_shard,
                 "resume": execution.resume,
                 "save_diagnostics": save_diagnostics,
+                "allow_model_restart": execution.limits.allow_model_restart,
             }
         )
     except ValidationError as exc:
@@ -614,6 +615,8 @@ _STAGE_TRANSLATIONS: tuple[
             "artifact_validation_error": ArtifactValidationError,
             "compression_error": CompressionError,
             "distance_matrix_validation_error": DistanceMatrixValidationError,
+            # The stage's own admission check (ADR 0025), lifted through ResourceLimits.
+            "model_capacity_error": ResourceLimitError,
         },
         DistanceComputationError,
     ),
@@ -756,7 +759,7 @@ def run(
     compression_level, ppmd_order, ppmd_memory_bytes, bzip2_block_size_100k, lzma_dictionary_bytes
         The settings of the chosen compressor: ``compression_level`` (0 to 9, default 6) for
         ``"zlib"`` and ``"gzip"``; ``ppmd_order`` (2 to 64, default 6) and
-        ``ppmd_memory_bytes`` (2048 to 4294967259, default 67108864) for ``"ppmd"``;
+        ``ppmd_memory_bytes`` (4096 to 4294967259, default 67108864) for ``"ppmd"``;
         ``bzip2_block_size_100k`` (1 to 9, default 9) for ``"bzip2"``; and
         ``lzma_dictionary_bytes`` (4096 to 1610612736, default 8388608) for ``"lzma"``.
         ``None`` uses the default. A setting for a compressor that does not read it is a

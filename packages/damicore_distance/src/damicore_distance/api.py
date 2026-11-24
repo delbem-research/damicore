@@ -29,7 +29,7 @@ from damicore_distance.artifacts import (
     NormalizationManifest,
 )
 from damicore_distance.compressor import codec_fingerprint, compressed_size
-from damicore_distance.config import DistanceConfig
+from damicore_distance.config import DistanceConfig, PpmdCompressor
 from damicore_distance.errors import DistanceError
 from damicore_distance.matrix import DistanceResult
 from damicore_distance.ncd import normalized_compression_distance
@@ -296,7 +296,13 @@ def _checkpoint_identity(
         # layout the shards are indexed by (ADR 0022).
         "config": settings.model_dump(
             mode="json",
-            exclude={"workers", "compression_chunk_bytes", "resume", "save_diagnostics"},
+            exclude={
+                "workers",
+                "compression_chunk_bytes",
+                "resume",
+                "save_diagnostics",
+                "allow_model_restart",
+            },
         ),
         "runtime": _runtime_fingerprint(),
     }
@@ -347,6 +353,52 @@ def _load_or_compute_sizes(
     checkpoint = CompressedSizesCheckpoint(identity=identity, sizes=tuple(sizes))
     _atomic_json(checkpoint_path, checkpoint.model_dump(mode="json"))
     return sizes
+
+
+def _refuse_model_restart(
+    paths: list[Path],
+    sizes: list[int],
+    settings: DistanceConfig,
+    executor: ProcessPoolExecutor | None,
+) -> None:
+    """Refuse a PPMd run in which an object fills half the model memory [adr-0025].
+
+    PPMd restarts its model from nothing when the memory fills, and until then it codes
+    identically whatever the memory is, so an object compressed under half the model gives
+    the size it gave under all of it exactly when neither restarted. Two objects that each fit
+    half the model do not fill all of it together; one that does not would be forgotten
+    before the other is coded, and the pair would measure near 1 whatever the two share.
+    """
+    compressor = settings.compressor
+    if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
+        return
+    half = settings.model_copy(
+        update={
+            "compressor": compressor.model_copy(
+                update={"ppmd_memory_bytes": compressor.ppmd_memory_bytes // 2}
+            )
+        }
+    )
+    arguments: list[SizeArguments] = [((str(path),), half) for path in paths]
+    results = (
+        map(_size_worker, arguments) if executor is None else executor.map(_size_worker, arguments)
+    )
+    over = [
+        index
+        for index, half_size in enumerate(_typed_results(results))
+        if half_size != sizes[index]
+    ]
+    if over:
+        largest = max(paths[index].stat().st_size for index in over)
+        raise DistanceError(
+            f"PPMd's model of {compressor.ppmd_memory_bytes} bytes restarts within "
+            f"{len(over)} of {len(paths)} objects (the largest of them {largest} bytes): a pair "
+            "starting with one of them is coded with it forgotten, and its distance nears 1 "
+            "whatever the two share. Raise ppmd_memory_bytes until every object fits in half "
+            "of it -- each worker is charged that memory -- or set allow_model_restart to "
+            "measure anyway. See ADR 0025.",
+            code="model_capacity_error",
+        )
 
 
 def _open_matrix(path: Path, size: int, *, resume: bool) -> np.memmap[Any, Any]:
@@ -553,6 +605,8 @@ def compute_distance_matrix(
             settings,
             executor,
         )
+
+        _refuse_model_restart(paths, sizes, settings, executor)
 
         # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
         # defers it until it is read after the last shard.

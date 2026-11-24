@@ -29,6 +29,7 @@ from damicore_distance import (
     Bzip2Compressor,
     DeflateCompressor,
     DistanceConfig,
+    DistanceError,
     LzmaCompressor,
     PpmdCompressor,
     compute_distance_matrix,
@@ -424,6 +425,91 @@ def test_the_largest_object_is_chosen_by_content_when_sizes_tie(tmp_path: Path) 
     assert self_largest("forward", [repetitive, noise]) == self_largest(
         "reverse", [noise, repetitive]
     )
+
+
+# --- PPMd's model capacity, issue 132 ---------------------------------------------------
+
+# A model small enough that the cases below show at tens of KiB. 256 KiB of random bytes
+# fills half of it; 256 KiB of a 200-word vocabulary does not come close.
+SMALL_MODEL = PpmdCompressor(ppmd_memory_bytes=1_048_576)
+
+
+def _restarting_object() -> bytes:
+    return random.Random(5).randbytes(262_144)
+
+
+def test_an_object_that_fills_half_the_ppmd_model_is_refused_before_any_pair(
+    tmp_path: Path,
+) -> None:
+    """PPMd restarts its model from nothing when its memory fills, so a pair whose first
+    object fills it is coded with that object forgotten and measures near 1 whatever the two
+    share (ADR 0025). The stage refuses before computing a pair, not after."""
+    payloads = [_restarting_object(), _column(1, 10, 262_144)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    with pytest.raises(DistanceError) as raised:
+        compute_distance_matrix(
+            manifest_path,
+            tmp_path / "run",
+            config=DistanceConfig(compressor=SMALL_MODEL, workers=1),
+        )
+    assert raised.value.code == "model_capacity_error"
+    assert "ppmd_memory_bytes" in str(raised.value)
+    assert not (tmp_path / "run" / "distance.npy").exists()
+
+
+def test_a_caller_who_allows_the_restart_gets_the_measurement(tmp_path: Path) -> None:
+    payloads = [_restarting_object(), _column(1, 10, 262_144)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    result = compute_distance_matrix(
+        manifest_path,
+        tmp_path / "run",
+        config=DistanceConfig(compressor=SMALL_MODEL, workers=1, allow_model_restart=True),
+    )
+    assert result.matrix_path.exists()
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["vocabulary", "numeric", "integers", "random bytes"],
+)
+def test_when_no_object_is_refused_no_pair_restarts_the_model(kind: str) -> None:
+    """What the gate rests on. Until the model fills, PPMd codes identically whatever its
+    memory, so an object compressed under half the model and under all of it gives equal
+    sizes exactly when neither restarted -- and two objects that each fit half the model
+    never fill all of it together. Checked against a model sixteen times larger, which none
+    of these sizes fills: wherever both objects pass at half the model, the pair compresses
+    under the model exactly as under the reference."""
+    model = 262_144
+    reference = 16 * model
+
+    def payload(seed: int, size: int) -> bytes:
+        draws = random.Random(seed)
+        match kind:
+            case "vocabulary":
+                return _column(seed, seed + 9, size)
+            case "numeric":
+                return "".join(
+                    f"{draws.gauss(seed * 7, 10):.6f}\n" for _ in range(size // 8)
+                ).encode()[:size]
+            case "integers":
+                return "".join(f"{draws.randrange(10**9)}\n" for _ in range(size // 4)).encode()[
+                    :size
+                ]
+            case _:
+                return draws.randbytes(size)
+
+    def size(memory: int, *parts: bytes) -> int:
+        config = DistanceConfig(compressor=PpmdCompressor(ppmd_memory_bytes=memory))
+        return _direct_size(*parts, config=config)
+
+    checked = 0
+    for kib in (4, 16, 64, 128, 256):
+        x, y = payload(1, kib << 10), payload(2, kib << 10)
+        if all(size(model // 2, part) == size(model, part) for part in (x, y)):
+            checked += 1
+            assert size(model, x, y) == size(reference, x, y), kib
+    # The claim is vacuous if no size passed: at least the smallest must.
+    assert checked >= 1
 
 
 # --- The compressor window, issue 59 ----------------------------------------------------

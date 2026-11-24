@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import random
 from pathlib import Path
 
 import pyppmd
@@ -12,6 +13,7 @@ from damicore import (
     DamicoreError,
     ExecutionConfig,
     MaterializationError,
+    ResourceLimitError,
     ResourceLimits,
     estimate,
     load_result,
@@ -594,6 +596,44 @@ def test_a_pair_past_the_compressor_window_is_reported_and_refused(tmp_path: Pat
     assert result.report.pairs_over_window == 1
     manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["config"]["limits"]["max_pair_window_factor"] == 8.0
+    result.close()
+
+
+def _restarting_corpus(directory: Path) -> Path:
+    """Two files of random bytes that each fill half of a 1 MiB PPMd model."""
+    directory.mkdir()
+    for seed in (1, 2):
+        (directory / f"object_{seed}.bin").write_bytes(random.Random(seed).randbytes(262_144))
+    return directory
+
+
+def test_a_ppmd_model_an_object_fills_is_refused_and_can_be_lifted(tmp_path: Path) -> None:
+    """ADR 0025: under PPMd the stage refuses a run in which an object fills half the model,
+    before any pair; ResourceLimits.allow_model_restart measures anyway and is recorded."""
+    corpus = _restarting_corpus(tmp_path / "corpus")
+    with pytest.raises(ResourceLimitError) as refused:
+        run(
+            corpus,
+            source_kind="files",
+            ppmd_memory_bytes=1_048_576,
+            output_dir=tmp_path / "refused",
+            progress=False,
+            execution=ExecutionConfig(workers=1),
+        )
+    assert refused.value.code == "resource_limit_error"
+    assert "ppmd_memory_bytes" in str(refused.value)
+    assert not (tmp_path / "refused" / "distance.npy").exists()
+
+    result = run(
+        corpus,
+        source_kind="files",
+        ppmd_memory_bytes=1_048_576,
+        output_dir=tmp_path / "allowed",
+        progress=False,
+        execution=ExecutionConfig(workers=1, limits=ResourceLimits(allow_model_restart=True)),
+    )
+    manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["config"]["limits"]["allow_model_restart"] is True
     result.close()
 
 

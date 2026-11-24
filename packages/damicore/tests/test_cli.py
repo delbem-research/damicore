@@ -1,6 +1,7 @@
 import inspect
 import json
 import os
+import random
 import subprocess
 import sys
 from importlib import metadata
@@ -110,6 +111,32 @@ def test_the_window_factor_flag_reaches_the_limits_the_run_is_admitted_under(
     assert lifted["within_limits"]
     # The same corpus, admitted rather than reshaped: the pair is still over the window.
     assert lifted["max_pair_bytes"] == gated["max_pair_bytes"]
+
+
+def test_the_model_restart_flag_reaches_the_resource_limits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--allow-model-restart is ResourceLimits.allow_model_restart: without it a corpus whose
+    objects fill half the PPMd model is refused, with it the same call runs (ADR 0025)."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    for seed in (1, 2):
+        (corpus / f"object_{seed}.bin").write_bytes(random.Random(seed).randbytes(262_144))
+    arguments = [
+        "run",
+        str(corpus),
+        "--source",
+        "files",
+        "--ppmd-memory-bytes",
+        "1048576",
+        "--workers",
+        "1",
+        "--no-progress",
+    ]
+    assert main([*arguments, "--output-dir", str(tmp_path / "refused")]) == 3
+    assert json.loads(capsys.readouterr().err)["code"] == "resource_limit_error"
+    allowed = [*arguments, "--output-dir", str(tmp_path / "allowed"), "--allow-model-restart"]
+    assert main(allowed) == 0
 
 
 def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

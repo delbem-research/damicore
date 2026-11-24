@@ -20,6 +20,18 @@ carries anything else, a date included, matches neither and fails the release.
   value whose pair was compressed in the other order changes. The distance rule in the
   manifest's `method` block is `ncd-max/v2`, and a distance checkpoint written before this
   release is refused on resume rather than mixed with new shards. ADR 0024.
+- **Under PPMd, a run in which an object fills half the model memory is refused before any
+  pair is computed.** PPMd restarts its model from nothing when the memory fills, so a pair
+  starting with such an object is coded with it forgotten and measures near 1 whatever the
+  two share: on numeric columns with six decimals the default 64 MiB model was already
+  losing the separation between distributions at 32 MiB per column. ADR 0023 had exempted
+  PPMd on data whose model barely fills (#132). The distance stage now compresses each object
+  again under half the model -- one compression per object -- and refuses if a size differs,
+  which is exactly when the model restarted; the refusal is a `ResourceLimitError` asking for
+  a larger `ppmd_memory_bytes`. `ResourceLimits.allow_model_restart`
+  (`--allow-model-restart`) measures anyway and is recorded in the manifest.
+  `ppmd_memory_bytes` now starts at 4096, twice the codec's minimum, so that half the model
+  is still a model. ADR 0025.
 
 ## 0.5.0
 

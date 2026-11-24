@@ -65,6 +65,9 @@ class ManifestResourceLimits(BaseModel):
     # that run was admitted without it, and a default of 1.0 here would say it passed a gate
     # nobody applied. See ADR 0023.
     max_pair_window_factor: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    # `None` on a run written before the PPMd model check existed, for the same reason: that
+    # run was admitted without it. See ADR 0025.
+    allow_model_restart: bool | None = None
 
 
 class RunConfig(BaseModel):

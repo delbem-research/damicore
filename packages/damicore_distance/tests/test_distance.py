@@ -379,9 +379,9 @@ def test_every_compression_runs_on_the_pool_when_there_is_one(
     compute_distance_matrix(
         normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
     )
-    # Three objects, three pairs and the largest object after itself: every one of the seven
-    # compressions ran in the pool.
-    assert placements == [True] * 7
+    # Three objects, each again under half the PPMd model (ADR 0025), three pairs and the
+    # largest object after itself: every one of the ten compressions ran in the pool.
+    assert placements == [True] * 10
 
 
 def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:
@@ -399,7 +399,8 @@ def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> 
     [
         ("ppmd", "ppmd_order", 1, 2),
         ("ppmd", "ppmd_order", 65, 64),
-        ("ppmd", "ppmd_memory_bytes", 2_047, 2_048),
+        # Twice the codec's 2,048: the stage checks objects against half the model.
+        ("ppmd", "ppmd_memory_bytes", 4_095, 4_096),
         ("ppmd", "ppmd_memory_bytes", 4_294_967_260, 4_294_967_259),
         ("bzip2", "bzip2_block_size_100k", 0, 1),
         ("bzip2", "bzip2_block_size_100k", 10, 9),

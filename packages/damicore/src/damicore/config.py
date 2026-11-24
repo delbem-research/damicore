@@ -26,6 +26,11 @@ class ResourceLimits(BaseModel):
     in the manifest, so a run says which gate it ran under -- or choose a compressor whose
     window holds the pair. A compressor that declares no window, which is PPMd, is not
     gated here at all. See ADR 0023.
+    ``allow_model_restart`` lifts the gate PPMd gets instead, which preflight cannot apply
+    because it needs the object bytes: once the objects exist, the distance stage refuses the
+    run if any of them fills half the PPMd model, since a pair starting with it would be coded
+    with it forgotten. Raise ``ppmd_memory_bytes`` until every object fits, or set this to
+    measure anyway; the value is recorded in the manifest. See ADR 0025.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -36,6 +41,7 @@ class ResourceLimits(BaseModel):
     max_working_memory_bytes: int = Field(default=536_870_912, gt=0)
     required_free_disk_factor: float = Field(default=1.25, ge=1.0)
     max_pair_window_factor: float = Field(default=1.0, gt=0)
+    allow_model_restart: bool = False
 
 
 class ExecutionConfig(BaseModel):
