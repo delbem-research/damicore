@@ -49,14 +49,14 @@ class DeflateCompressor(BaseModel):
 class PpmdCompressor(BaseModel):
     """PPMd variant I with model restart, at ``ppmd_order`` with ``ppmd_memory_bytes`` of
     model [adr-0020]. The bounds are the codec's own -- pyppmd would clamp a value outside them
-    without saying so -- except the lower memory bound, which is twice the codec's: the stage
-    checks every object against half the model, and half must still be a model [adr-0025]."""
+    without saying so -- except the lower memory bound, four times the codec's: the stage checks
+    every object against a quarter of the model, which must still be a model [adr-0025]."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: Literal["ppmd"] = "ppmd"
     ppmd_order: int = Field(default=6, ge=2, le=64)
-    ppmd_memory_bytes: int = Field(default=67_108_864, ge=4_096, le=4_294_967_259)
+    ppmd_memory_bytes: int = Field(default=67_108_864, ge=8_192, le=4_294_967_259)
 
     @property
     def stream_memory_bytes(self) -> int:
@@ -152,8 +152,8 @@ class DistanceConfig(BaseModel):
     and ``docs/method/ncd.md`` for what each compressor computes.
 
     ``allow_model_restart`` lifts the one admission check this stage makes itself: under
-    PPMd, an object that fills half the model memory is refused before any pair is
-    computed, because a pair starting with it would be coded with it forgotten [adr-0025].
+    PPMd, an object that fills a quarter of the model memory is refused before any pair is
+    computed, because past that a pair can fill the model and restart it [adr-0025].
     Setting it measures anyway, and skips the check.
     """
 

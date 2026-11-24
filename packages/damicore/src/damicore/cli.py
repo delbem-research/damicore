@@ -133,7 +133,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--ppmd-memory-bytes",
             type=int,
-            help="PPMd model memory per worker, from 4096 to 4294967259 bytes; changes the "
+            help="PPMd model memory per worker, from 8192 to 4294967259 bytes; changes the "
             "distances and is charged once per worker against the memory limit "
             "(default: 67108864)",
         )
@@ -196,8 +196,8 @@ def _parser() -> argparse.ArgumentParser:
             "--allow-model-restart",
             action="store_true",
             help=(
-                "measure under `ppmd` even when an object fills half the model memory, where "
-                "a pair starting with it is coded with it forgotten; without it the run is "
+                "measure under `ppmd` even when an object fills a quarter of the model memory, "
+                "past which a pair can restart the model; without it the run is "
                 "refused and asks for a larger --ppmd-memory-bytes"
             ),
         )

@@ -759,7 +759,7 @@ def run(
     compression_level, ppmd_order, ppmd_memory_bytes, bzip2_block_size_100k, lzma_dictionary_bytes
         The settings of the chosen compressor: ``compression_level`` (0 to 9, default 6) for
         ``"zlib"`` and ``"gzip"``; ``ppmd_order`` (2 to 64, default 6) and
-        ``ppmd_memory_bytes`` (4096 to 4294967259, default 67108864) for ``"ppmd"``;
+        ``ppmd_memory_bytes`` (8192 to 4294967259, default 67108864) for ``"ppmd"``;
         ``bzip2_block_size_100k`` (1 to 9, default 9) for ``"bzip2"``; and
         ``lzma_dictionary_bytes`` (4096 to 1610612736, default 8388608) for ``"lzma"``.
         ``None`` uses the default. A setting for a compressor that does not read it is a
@@ -1085,6 +1085,11 @@ def run(
                 "ncd_max": distance.ncd_max,
                 "ncd_out_of_range_count": distance.ncd_out_of_range_count,
                 "ncd_self_largest": distance.ncd_self_largest,
+                # Written by the invocation that ran the stage, so it is true even when the run
+                # directory was created by an earlier one whose limits manifest.json keeps: a
+                # refused run resumed with the check lifted says here that it was not applied.
+                "ppmd_model_checked": isinstance(distance_config.compressor, PpmdCompressor)
+                and not distance_config.allow_model_restart,
             }
             # A stage that ran counted its pairs, so this is written rather than defaulted:
             # recording a zero where the count is absent would be a measurement nobody made.

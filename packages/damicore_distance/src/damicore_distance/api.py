@@ -355,31 +355,37 @@ def _load_or_compute_sizes(
     return sizes
 
 
+# Every object must fit in this fraction of the PPMd model [adr-0025]. At a half, two objects
+# that each fit were found filling the whole model together; at a quarter, an adversarial
+# search at the limit found none. A measured margin, held by a test, not a proof.
+MODEL_MARGIN = 4
+
+
 def _refuse_model_restart(
     paths: list[Path],
     sizes: list[int],
     settings: DistanceConfig,
     executor: ProcessPoolExecutor | None,
 ) -> None:
-    """Refuse a PPMd run in which an object fills half the model memory [adr-0025].
+    """Refuse a PPMd run in which an object fills a fraction of the model memory [adr-0025].
 
     PPMd restarts its model from nothing when the memory fills, and until then it codes
-    identically whatever the memory is, so an object compressed under half the model gives
-    the size it gave under all of it exactly when neither restarted. Two objects that each fit
-    half the model do not fill all of it together; one that does not would be forgotten
-    before the other is coded, and the pair would measure near 1 whatever the two share.
+    identically whatever the memory is, so an object compressed under a fraction of the model
+    gives the size it gave under all of it exactly when that object alone does not fill the
+    fraction. A pair of objects past it can fill the model and restart it, and whatever is
+    coded after the restart is coded with the first object forgotten.
     """
     compressor = settings.compressor
     if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
         return
-    half = settings.model_copy(
+    reduced = settings.model_copy(
         update={
             "compressor": compressor.model_copy(
-                update={"ppmd_memory_bytes": compressor.ppmd_memory_bytes // 2}
+                update={"ppmd_memory_bytes": compressor.ppmd_memory_bytes // MODEL_MARGIN}
             )
         }
     )
-    arguments: list[SizeArguments] = [((str(path),), half) for path in paths]
+    arguments: list[SizeArguments] = [((str(path),), reduced) for path in paths]
     results = (
         map(_size_worker, arguments) if executor is None else executor.map(_size_worker, arguments)
     )
@@ -391,12 +397,13 @@ def _refuse_model_restart(
     if over:
         largest = max(paths[index].stat().st_size for index in over)
         raise DistanceError(
-            f"PPMd's model of {compressor.ppmd_memory_bytes} bytes restarts within "
-            f"{len(over)} of {len(paths)} objects (the largest of them {largest} bytes): a pair "
-            "starting with one of them is coded with it forgotten, and its distance nears 1 "
-            "whatever the two share. Raise ppmd_memory_bytes until every object fits in half "
-            "of it -- each worker is charged that memory -- or set allow_model_restart to "
-            "measure anyway. See ADR 0025.",
+            f"{len(over)} of {len(paths)} objects (the largest of them {largest} bytes) fill "
+            f"more than 1/{MODEL_MARGIN} of PPMd's {compressor.ppmd_memory_bytes}-byte model: "
+            "a pair with one of them can fill the model and restart it, coding the rest with the "
+            "first object forgotten, so its distance moves toward 1 whatever the two share. "
+            f"Raise ppmd_memory_bytes until every object fits in 1/{MODEL_MARGIN} of it -- each "
+            "worker is charged that memory -- or set allow_model_restart to measure anyway. "
+            "See ADR 0025.",
             code="model_capacity_error",
         )
 

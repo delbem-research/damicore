@@ -3,6 +3,7 @@ import json
 import os
 import random
 from pathlib import Path
+from typing import Any
 
 import pyppmd
 import pytest
@@ -600,7 +601,7 @@ def test_a_pair_past_the_compressor_window_is_reported_and_refused(tmp_path: Pat
 
 
 def _restarting_corpus(directory: Path) -> Path:
-    """Two files of random bytes that each fill half of a 1 MiB PPMd model."""
+    """Two files of random bytes that each fill more than a quarter of a 1 MiB PPMd model."""
     directory.mkdir()
     for seed in (1, 2):
         (directory / f"object_{seed}.bin").write_bytes(random.Random(seed).randbytes(262_144))
@@ -608,7 +609,7 @@ def _restarting_corpus(directory: Path) -> Path:
 
 
 def test_a_ppmd_model_an_object_fills_is_refused_and_can_be_lifted(tmp_path: Path) -> None:
-    """ADR 0025: under PPMd the stage refuses a run in which an object fills half the model,
+    """ADR 0025: under PPMd the stage refuses a run in which an object fills a quarter of the model,
     before any pair; ResourceLimits.allow_model_restart measures anyway and is recorded."""
     corpus = _restarting_corpus(tmp_path / "corpus")
     with pytest.raises(ResourceLimitError) as refused:
@@ -634,7 +635,36 @@ def test_a_ppmd_model_an_object_fills_is_refused_and_can_be_lifted(tmp_path: Pat
     )
     manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["config"]["limits"]["allow_model_restart"] is True
+    assert manifest["stages"]["distancing"]["metrics"]["ppmd_model_checked"] is False
     result.close()
+
+
+def test_a_refused_run_resumed_with_the_check_lifted_says_it_was_not_applied(
+    tmp_path: Path,
+) -> None:
+    """The refusal leaves the run directory behind, and manifest.json keeps the limits of the
+    invocation that created it. The distance receipt is written by the invocation that ran the
+    stage, so it is the record of whether the check applied (ADR 0025)."""
+    corpus = _restarting_corpus(tmp_path / "corpus")
+    output = tmp_path / "run"
+    arguments: dict[str, Any] = {
+        "source_kind": "files",
+        "ppmd_memory_bytes": 1_048_576,
+        "output_dir": output,
+        "progress": False,
+    }
+    with pytest.raises(ResourceLimitError):
+        run(corpus, execution=ExecutionConfig(workers=1), **arguments)
+    lifted = ExecutionConfig(workers=1, limits=ResourceLimits(allow_model_restart=True))
+    result = run(corpus, execution=lifted, **arguments)
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stages"]["distancing"]["metrics"]["ppmd_model_checked"] is False
+    result.close()
+
+    checked = run(_csv(tmp_path), output_dir=tmp_path / "checked", progress=False)
+    manifest = json.loads((tmp_path / "checked" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stages"]["distancing"]["metrics"]["ppmd_model_checked"] is True
+    checked.close()
 
 
 def test_the_refusal_advises_on_the_gates_it_actually_tripped(tmp_path: Path) -> None:

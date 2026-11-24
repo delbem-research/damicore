@@ -28,7 +28,7 @@ one line per record, saying what it settles rather than what it is about.
 | [0022](../decisions/0022-execution-settings-are-not-run-identity.md) | `config_hash` leaves out the execution settings, which `config` still records, so a run resumes and is reused on any machine and under any worker count |
 | [0023](../decisions/0023-the-compressor-window-is-a-correctness-gate.md) | A pair longer than the window its compressor declares is refused by preflight, under a factor that lifts it; PPMd declares none, and ADR 0025 revises why |
 | [0024](../decisions/0024-a-pair-is-compressed-in-digest-order.md) | Each pair is compressed with the object whose SHA-256 is lower first, so the matrix is a function of the objects and not of their order in the input |
-| [0025](../decisions/0025-ppmd-is-checked-per-object-against-half-its-model.md) | Under PPMd the distance stage refuses, before any pair, a run in which an object fills half the model, which is exactly when the model would restart; `allow_model_restart` lifts it |
+| [0025](../decisions/0025-ppmd-is-checked-per-object-against-a-quarter-of-its-model.md) | Under PPMd the distance stage refuses, before any pair, a run in which an object fills a quarter of the model, a margin measured against pairs that fill it together; `allow_model_restart` lifts it |
 
 ```{toctree}
 :maxdepth: 1
@@ -54,5 +54,5 @@ one line per record, saying what it settles rather than what it is about.
 /decisions/0022-execution-settings-are-not-run-identity
 /decisions/0023-the-compressor-window-is-a-correctness-gate
 /decisions/0024-a-pair-is-compressed-in-digest-order
-/decisions/0025-ppmd-is-checked-per-object-against-half-its-model
+/decisions/0025-ppmd-is-checked-per-object-against-a-quarter-of-its-model
 ```

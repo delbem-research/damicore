@@ -117,7 +117,7 @@ def test_the_model_restart_flag_reaches_the_resource_limits(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """--allow-model-restart is ResourceLimits.allow_model_restart: without it a corpus whose
-    objects fill half the PPMd model is refused, with it the same call runs (ADR 0025)."""
+    objects fill a quarter of the PPMd model is refused, with it the same call runs (ADR 0025)."""
     corpus = tmp_path / "corpus"
     corpus.mkdir()
     for seed in (1, 2):
