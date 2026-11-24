@@ -28,9 +28,10 @@ carries anything else, a date included, matches neither and fails the release.
   barely fills (#132). The distance stage now compresses each object again under a quarter of
   the model -- one compression per object -- and refuses if a size differs. A quarter and not
   a half: at a half, two objects that each fit were found restarting the model together; at a
-  quarter an adversarial search found none. The check is conservative: under the default
-  model it refuses objects of high-entropy content from about 1.2 to 1.7 MB, some of which
-  would have measured well. The refusal is a `ResourceLimitError` asking for a larger
+  quarter a search over dissimilar objects found none. It does not bound a pair of
+  near-duplicates, which can restart the model while each passes (#132 stays open for that).
+  Under the default model it refuses objects of high-entropy content from about 1.2 to 1.7 MB,
+  some of which would have measured well. The refusal is a `ResourceLimitError` asking for a larger
   `ppmd_memory_bytes`; `ResourceLimits.allow_model_restart` (`--allow-model-restart`)
   measures anyway, and the distance stage's receipt records `ppmd_model_checked`.
   `ppmd_memory_bytes` now starts at 8192, four times the codec's minimum. ADR 0025.

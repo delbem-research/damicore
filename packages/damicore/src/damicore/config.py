@@ -29,7 +29,8 @@ class ResourceLimits(BaseModel):
     ``allow_model_restart`` lifts the gate PPMd gets instead, which preflight cannot apply
     because it needs the object bytes: once the objects exist, the distance stage refuses the
     run if any of them fills a quarter of the PPMd model, past which a pair can fill the model
-    and restart it, coding the rest with the first object forgotten. Raise
+    and restart it, coding the rest with the first object forgotten. Below it a pair of
+    near-duplicates can still restart it; the check does not see pairs. Raise
     ``ppmd_memory_bytes`` until every object fits, or set this to measure anyway; the value is
     recorded in the manifest. See ADR 0025.
     """

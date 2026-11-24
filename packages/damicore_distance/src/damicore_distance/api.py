@@ -355,9 +355,10 @@ def _load_or_compute_sizes(
     return sizes
 
 
-# Every object must fit in this fraction of the PPMd model [adr-0025]. At a half, two objects
-# that each fit were found filling the whole model together; at a quarter, an adversarial
-# search at the limit found none. A measured margin, held by a test, not a proof.
+# Every object must fit in this fraction of the PPMd model [adr-0025]. At a half, two
+# dissimilar objects that each fit were found filling the whole model together; at a quarter a
+# search at the limit found none. Near-duplicates can still fill it together at any fraction:
+# the memory a pair needs grows with what the two share, which a per-object check cannot see.
 MODEL_MARGIN = 4
 
 

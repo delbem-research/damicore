@@ -49,8 +49,21 @@ that passes at half the model and compressed every pair of them: 33 of 726 pairs
 256 KiB model, and two random-byte objects of 2.66 MB each, both passing, restarted the
 default 64 MiB model together. **At a quarter no pair did**: the same search found none in 726
 pairs under a 256 KiB model and 600 under a 1 MiB one, and none in 72 under the default 64
-MiB model in a reduced search over six kinds. That is a measured margin, not a proof, and a test holds
-it the same way -- at the limit, where the half failed -- so a change that breaks it is seen.
+MiB model in a reduced search over six kinds. A test holds that the same way -- at the limit,
+where the half failed -- so a change that breaks it is seen.
+
+**It does not hold for near-duplicates, at any margin this check can set.** A second
+fresh-context verification paired objects with copies of themselves, 0.1 to 1 % mutants and
+rotations, which the search above never did: under the default 64 MiB model, 1.4 MB of random
+bytes and a copy with 0.1 % of its bytes changed each pass the quarter, and together restart
+the model -- the run is admitted, records `ppmd_model_checked: true`, and reports a distance
+of 0.198 where a model that does not fill gives 0.006. The same held from an 8 KiB model to
+the default, for random, base64, CJK text and Markov content. PPMd builds the deeper contexts
+of shared content only when the second object revisits it, so the memory a pair needs depends
+on how alike the two are, which no check of one object at a time can see. The check therefore
+catches an object that fills the model alone, and the pairs of dissimilar objects the search
+covered; it does not bound pairs of similar objects, which are the pairs NCD exists to find.
+That gap is issue 132's, which stays open: closing it needs a check that sees the pair.
 
 So, under PPMd, the distance stage compresses every object a second time under a quarter of
 the model -- one compression per object, on the same pool, against the pairs' quadratic count
@@ -73,16 +86,15 @@ times the codec's own minimum.
 
 ## What it costs
 
-The check is conservative, and the cost is refusals of runs that would have measured well.
-Under the default model the largest passing object is about 1.2 to 1.7 MB of high-entropy
+It costs refusals of runs that would have measured well, without guaranteeing the runs it
+admits. Under the default model the largest passing object is about 1.2 to 1.7 MB of high-entropy
 content -- random bytes, integers, numbers with decimals, free text -- while the numeric
 columns above still separated as well as under a 256 MiB model at 8 MiB, and had lost most of
 it only at 32 MiB. Such a run now has to raise the model, at four times its largest object's
 fill per worker, or lift the check knowingly. Low-entropy content -- categories, small
 vocabularies -- fills the model slowly and is rarely refused. A margin set from where the
 measurement degrades rather than from where a restart can occur would refuse less; nothing
-measured here says where that is for content in general, and a restart in a pair is the
-defect this record refuses.
+measured here says where that is for content in general.
 
 ## What was not chosen
 
@@ -97,7 +109,8 @@ defect this record refuses.
 ## Status
 
 This revises ADR 0023's exemption of PPMd, not its gate: the windowed compressors are gated as
-before, and PPMd is now checked by measurement instead of not at all. Runs under PPMd whose
+before, and PPMd is now checked by measurement instead of not at all, with the near-duplicate
+gap above left open. Runs under PPMd whose
 objects fill a quarter of the model, which completed under 0.5, are refused until the model is
 raised or the check is lifted. Interleaved pairing would let a pair be measured past the model
 without the memory to hold it; that remains issue 62, and revisiting the margin needs a search

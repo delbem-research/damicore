@@ -196,9 +196,9 @@ def _parser() -> argparse.ArgumentParser:
             "--allow-model-restart",
             action="store_true",
             help=(
-                "measure under `ppmd` even when an object fills a quarter of the model memory, "
-                "past which a pair can restart the model; without it the run is "
-                "refused and asks for a larger --ppmd-memory-bytes"
+                "measure under `ppmd` even when an object fills a quarter of the model memory; "
+                "without it such a run is refused and asks for a larger --ppmd-memory-bytes "
+                "(pairs of near-duplicates can restart the model below that, see ADR 0025)"
             ),
         )
         command.add_argument(

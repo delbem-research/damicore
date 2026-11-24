@@ -121,9 +121,11 @@ it.
   object again under a quarter of the model and refuses the run, before any pair, if a size
   differs, which is exactly when that object alone fills the quarter. The quarter, not half,
   is because two objects that each fit half the model were found filling all of it together;
-  at a quarter no pair did, in an adversarial search at the limit -- a measured margin, not a
-  proof. `ResourceLimits.allow_model_restart` lifts it [adr-0025]. Correcting the measurement for oversized objects -- interleaved pairing -- is
-  still open work.
+  at a quarter no pair of dissimilar objects did, in a search at the limit. It does not bound
+  a pair of near-duplicates: the memory a pair needs grows with what the two share, and such a
+  pair can restart the model while each object passes. `ResourceLimits.allow_model_restart`
+  lifts it [adr-0025]. Correcting the measurement for oversized objects -- interleaved pairing
+  -- is still open work.
 - **Idempotency is measured once, not established.** The largest object is compressed a
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is
