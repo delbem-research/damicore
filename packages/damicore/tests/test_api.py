@@ -601,7 +601,7 @@ def test_a_pair_past_the_compressor_window_is_reported_and_refused(tmp_path: Pat
 
 
 def _restarting_corpus(directory: Path) -> Path:
-    """Two files of random bytes that each fill more than a quarter of a 1 MiB PPMd model."""
+    """Two files of random bytes that each fill a 1 MiB PPMd model on their own."""
     directory.mkdir()
     for seed in (1, 2):
         (directory / f"object_{seed}.bin").write_bytes(random.Random(seed).randbytes(262_144))
@@ -609,8 +609,8 @@ def _restarting_corpus(directory: Path) -> Path:
 
 
 def test_a_ppmd_model_an_object_fills_is_refused_and_can_be_lifted(tmp_path: Path) -> None:
-    """ADR 0025: under PPMd the stage refuses a run in which an object fills a quarter of the model,
-    before any pair; ResourceLimits.allow_model_restart measures anyway and is recorded."""
+    """ADR 0025: under PPMd the stage refuses a run in which an object fills the model, before
+    any pair; ResourceLimits.allow_model_restart measures anyway and is recorded."""
     corpus = _restarting_corpus(tmp_path / "corpus")
     with pytest.raises(ResourceLimitError) as refused:
         run(

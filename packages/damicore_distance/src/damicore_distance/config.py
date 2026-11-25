@@ -49,14 +49,15 @@ class DeflateCompressor(BaseModel):
 class PpmdCompressor(BaseModel):
     """PPMd variant I with model restart, at ``ppmd_order`` with ``ppmd_memory_bytes`` of
     model [adr-0020]. The bounds are the codec's own -- pyppmd would clamp a value outside them
-    without saying so -- except the lower memory bound, four times the codec's: the stage checks
-    every object against a quarter of the model, which must still be a model [adr-0025]."""
+    without saying so -- except the lower memory bound, twice the codec's: the stage checks
+    every measurement again under half the model, which must still be one the codec takes
+    [adr-0025]."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: Literal["ppmd"] = "ppmd"
     ppmd_order: int = Field(default=6, ge=2, le=64)
-    ppmd_memory_bytes: int = Field(default=67_108_864, ge=8_192, le=4_294_967_259)
+    ppmd_memory_bytes: int = Field(default=67_108_864, ge=4_096, le=4_294_967_259)
 
     @property
     def stream_memory_bytes(self) -> int:
@@ -73,8 +74,8 @@ class PpmdCompressor(BaseModel):
 
         Its reach across a pair is set by the model memory together with the content, not by
         a byte count: the model restarts when it fills, and how fast it fills depends on how
-        varied the data is. The stage therefore measures it per object instead of gating it
-        by size [adr-0025].
+        varied the data is and on what the two objects share. The stage therefore checks each
+        measurement instead of gating it by size [adr-0025].
         """
         return None
 
@@ -152,9 +153,10 @@ class DistanceConfig(BaseModel):
     and ``docs/method/ncd.md`` for what each compressor computes.
 
     ``allow_model_restart`` lifts the one admission check this stage makes itself: under
-    PPMd, an object that fills a quarter of the model memory is refused before any pair is
-    computed, because past that a pair can fill the model and restart it [adr-0025].
-    Setting it measures anyway, and skips the check.
+    PPMd, every object and every pair is compressed again under half the model, and the run
+    is refused if a size differs: only a stream that fits half the model is known to be coded
+    without a restart under all of it [adr-0025]. An object is checked before any pair, a pair
+    as it is computed. Setting it measures anyway, and skips the check and its cost.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

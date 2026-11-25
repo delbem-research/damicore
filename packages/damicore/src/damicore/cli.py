@@ -133,7 +133,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--ppmd-memory-bytes",
             type=int,
-            help="PPMd model memory per worker, from 8192 to 4294967259 bytes; changes the "
+            help="PPMd model memory per worker, from 4096 to 4294967259 bytes; changes the "
             "distances and is charged once per worker against the memory limit "
             "(default: 67108864)",
         )
@@ -189,16 +189,17 @@ def _parser() -> argparse.ArgumentParser:
                 "declares; above it the compressor cannot match across the pair and every "
                 "distance moves toward 1 "
                 f"(default: {_DEFAULT_LIMITS.max_pair_window_factor}; `ppmd` declares no "
-                "window and is checked per object instead, see --allow-model-restart)"
+                "window and is checked per measurement instead, see --allow-model-restart)"
             ),
         )
         command.add_argument(
             "--allow-model-restart",
             action="store_true",
             help=(
-                "measure under `ppmd` even when an object fills a quarter of the model memory; "
-                "without it such a run is refused and asks for a larger --ppmd-memory-bytes "
-                "(pairs of near-duplicates can restart the model below that, see ADR 0025)"
+                "measure under `ppmd` without checking each object and pair again under half "
+                "the model memory; without it a run in which one fills more than half the model "
+                "is refused and asks for a larger --ppmd-memory-bytes, and the check doubles "
+                "the cost of the pairs (ADR 0025)"
             ),
         )
         command.add_argument(

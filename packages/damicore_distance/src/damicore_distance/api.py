@@ -125,7 +125,9 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
 # One shard's work: its index, its pairs, and the run-wide inputs a worker process needs --
 # each object's path, its SHA-256 and its compressed size.
 WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[str], list[int], DistanceConfig]
-WorkerResult = tuple[int, list[int], list[int], list[float]]
+# The shard's values, or the first pair whose PPMd model restarted [adr-0025]. Returned rather
+# than raised: an exception crosses the pool without its code.
+WorkerResult = tuple[int, list[int], list[int], list[float], tuple[int, int] | None]
 # One stream's work: the paths it compresses in order and the run's settings -- one path for
 # C(x), the largest object twice for C(xx).
 SizeArguments = tuple[tuple[str, ...], DistanceConfig]
@@ -136,8 +138,28 @@ def _size_worker(arguments: SizeArguments) -> int:
     return compressed_size(tuple(Path(path) for path in raw_paths), config=config)
 
 
+def _model_check(settings: DistanceConfig) -> DistanceConfig | None:
+    """The same settings with half the PPMd model, or ``None`` when no check applies.
+
+    PPMd codes identically whatever its memory until the memory fills, and then restarts its
+    model from nothing. A stream that gives the same size under half the model therefore
+    gives, under the whole model, the size it would give under any larger one: the measured
+    value is the objects' own, unless both models restarted and still coded the same number
+    of bytes, a coincidence no test has produced [adr-0025]. Half and not twice, so the check
+    never needs more memory than the run already declares; the price is refusing a stream that
+    fills more than half the model and less than all of it, which a larger
+    ``ppmd_memory_bytes`` admits.
+    """
+    compressor = settings.compressor
+    if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
+        return None
+    halved = compressor.model_copy(update={"ppmd_memory_bytes": compressor.ppmd_memory_bytes // 2})
+    return settings.model_copy(update={"compressor": halved})
+
+
 def _worker(arguments: WorkerArguments) -> WorkerResult:
     shard_index, pairs, raw_paths, digests, sizes, config = arguments
+    check = _model_check(config)
     paths = [Path(path) for path in raw_paths]
     left: list[int] = []
     right: list[int] = []
@@ -147,11 +169,14 @@ def _worker(arguments: WorkerArguments) -> WorkerResult:
         # digests, never of the input: a reordered input then measures the same value. Equal
         # digests are equal bytes, where the order cannot matter [adr-0024].
         first, second = (i, j) if digests[i] <= digests[j] else (j, i)
-        cxy = compressed_size((paths[first], paths[second]), config=config)
+        pair = (paths[first], paths[second])
+        cxy = compressed_size(pair, config=config)
+        if check is not None and compressed_size(pair, config=check) != cxy:
+            return shard_index, left, right, values, (i, j)
         left.append(i)
         right.append(j)
         values.append(normalized_compression_distance(sizes[i], sizes[j], cxy))
-    return shard_index, left, right, values
+    return shard_index, left, right, values, None
 
 
 def _bounded_submit(
@@ -355,57 +380,42 @@ def _load_or_compute_sizes(
     return sizes
 
 
-# Every object must fit in this fraction of the PPMd model [adr-0025]. At a half, two
-# dissimilar objects that each fit were found filling the whole model together; at a quarter a
-# search at the limit found none. Near-duplicates can still fill it together at any fraction:
-# the memory a pair needs grows with what the two share, which a per-object check cannot see.
-MODEL_MARGIN = 4
+def _model_capacity_error(subject: str) -> DistanceError:
+    return DistanceError(
+        f"{subject} more than half the PPMd model, past which the model can fill, "
+        "restart and code the rest with what it had read forgotten, so the distance would not be "
+        "the one the objects have. Raise ppmd_memory_bytes -- each worker is charged that "
+        "memory -- or set allow_model_restart to measure anyway. See ADR 0025.",
+        code="model_capacity_error",
+    )
 
 
 def _refuse_model_restart(
     paths: list[Path],
+    labels: list[str],
     sizes: list[int],
     settings: DistanceConfig,
     executor: ProcessPoolExecutor | None,
 ) -> None:
-    """Refuse a PPMd run in which an object fills a fraction of the model memory [adr-0025].
+    """Refuse, before any pair, a PPMd run in which an object alone fills more than half the
+    model [adr-0025].
 
-    PPMd restarts its model from nothing when the memory fills, and until then it codes
-    identically whatever the memory is, so an object compressed under a fraction of the model
-    gives the size it gave under all of it exactly when that object alone does not fill the
-    fraction. A pair of objects past it can fill the model and restart it, and whatever is
-    coded after the restart is coded with the first object forgotten.
+    Every pair with it holds it, so no pair needs computing to know the run cannot be
+    admitted: one compression per object here spares the pairs.
     """
-    compressor = settings.compressor
-    if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
+    check = _model_check(settings)
+    if check is None:
         return
-    reduced = settings.model_copy(
-        update={
-            "compressor": compressor.model_copy(
-                update={"ppmd_memory_bytes": compressor.ppmd_memory_bytes // MODEL_MARGIN}
-            )
-        }
-    )
-    arguments: list[SizeArguments] = [((str(path),), reduced) for path in paths]
+    arguments: list[SizeArguments] = [((str(path),), check) for path in paths]
     results = (
         map(_size_worker, arguments) if executor is None else executor.map(_size_worker, arguments)
     )
     over = [
-        index
-        for index, half_size in enumerate(_typed_results(results))
-        if half_size != sizes[index]
+        index for index, checked in enumerate(_typed_results(results)) if checked != sizes[index]
     ]
     if over:
-        largest = max(paths[index].stat().st_size for index in over)
-        raise DistanceError(
-            f"{len(over)} of {len(paths)} objects (the largest of them {largest} bytes) fill "
-            f"more than 1/{MODEL_MARGIN} of PPMd's {compressor.ppmd_memory_bytes}-byte model: "
-            "a pair with one of them can fill the model and restart it, coding the rest with the "
-            "first object forgotten, so its distance moves toward 1 whatever the two share. "
-            f"Raise ppmd_memory_bytes until every object fits in 1/{MODEL_MARGIN} of it -- each "
-            "worker is charged that memory -- or set allow_model_restart to measure anyway. "
-            "See ADR 0025.",
-            code="model_capacity_error",
+        raise _model_capacity_error(
+            f"{len(over)} of {len(paths)} objects, among them {labels[over[0]]!r}, each fill"
         )
 
 
@@ -614,7 +624,7 @@ def compute_distance_matrix(
             executor,
         )
 
-        _refuse_model_restart(paths, sizes, settings, executor)
+        _refuse_model_restart(paths, labels, sizes, settings, executor)
 
         # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
         # defers it until it is read after the last shard.
@@ -666,7 +676,10 @@ def compute_distance_matrix(
             # submission, small enough that the queued payload stays proportional to the pool.
             else _bounded_submit(executor, arguments, settings.effective_workers * 2)
         )
-        for shard_index, left, right, values in _typed_results(results):
+        for shard_index, left, right, values, restarted in _typed_results(results):
+            if restarted is not None:
+                i, j = restarted
+                raise _model_capacity_error(f"The pair {labels[i]!r} and {labels[j]!r} fills")
             if len(left) != len(values) or not all(math.isfinite(value) for value in values):
                 raise DistanceError(
                     "Worker returned an invalid shard",

@@ -29,9 +29,9 @@ flat arguments; `damicore_distance` takes one settings model per compressor --
 
 - `compressor="ppmd"`, the default, is PPMd variant I through `pyppmd`, restarting its
   model from scratch when the model memory fills. `ppmd_order` (2 to 64, default 6) and
-  `ppmd_memory_bytes` (8192 to 4294967259, default 67108864) set it; the bounds are the
+  `ppmd_memory_bytes` (4096 to 4294967259, default 67108864) set it; the bounds are the
   codec's own, outside which it would clamp without saying so, except the lower memory bound,
-  four times the codec's so that a quarter of the model is still a model [adr-0025]. It has no window:
+  twice the codec's so that half the model is still a model [adr-0025]. It has no window:
   what it keeps across a pair is the statistics of what it has read, until its memory fills
   and it restarts from nothing.
 - `compressor="zlib"` and `compressor="gzip"` are DEFLATE through `zlib.compressobj`, with
@@ -117,15 +117,16 @@ it.
   configuration declares, so a run admitted that way says how much of its matrix was
   measured with one object out of view. PPMd declares no window, because how fast its model
   fills depends on the content as much as on the size, so no byte count would be true for
-  every column. It is checked by measurement instead: the distance stage compresses each
-  object again under a quarter of the model and refuses the run, before any pair, if a size
-  differs, which is exactly when that object alone fills the quarter. The quarter, not half,
-  is because two objects that each fit half the model were found filling all of it together;
-  at a quarter no pair of dissimilar objects did, in a search at the limit. It does not bound
-  a pair of near-duplicates: the memory a pair needs grows with what the two share, and such a
-  pair can restart the model while each object passes. `ResourceLimits.allow_model_restart`
-  lifts it [adr-0025]. Correcting the measurement for oversized objects -- interleaved pairing
-  -- is still open work.
+  every column, nor even per object: the memory a pair needs grows with what the two share,
+  so near-duplicates can fill a model each of them fits. Each measurement is checked instead:
+  the distance stage compresses every object, before any pair, and every pair, as it is
+  computed, again under half the model, and refuses the run if a size differs. A stream that
+  fits half the model was not changed by a restart under all of it, so an admitted size is the
+  objects' own; one that needs between half and all of the model is refused although it
+  measured correctly, and a larger `ppmd_memory_bytes` admits it with the same values. The
+  pairs then cost twice the time and no more memory. `ResourceLimits.allow_model_restart`
+  lifts the check [adr-0025]. Measuring objects past the model -- interleaved pairing -- is
+  still open work.
 - **Idempotency is measured once, not established.** The largest object is compressed a
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is
@@ -142,7 +143,7 @@ it.
 |---|---|
 | Available | `ppmd` through `pyppmd`; `zlib` and `gzip` through `zlib.compressobj`; `bzip2` and `lzma` through the standard library; exact (every pair computed) |
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
-| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result. Under PPMd, an object that fills a quarter of the model, refused by the distance stage before any pair unless `allow_model_restart` ([adr-0025]) |
+| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result. Under PPMd, an object or a pair that needs more than half the model, refused by the distance stage -- an object before any pair -- unless `allow_model_restart` ([adr-0025]) |
 | Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a compressor stream that cannot be allocated, raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
 
@@ -176,5 +177,5 @@ it.
   memory each stream is charged.
 - [adr-0024] — why each pair is compressed in the order of its contents' digests, with the
   measurement of what input order did to the partition.
-- [adr-0025] — why PPMd is checked per object against a quarter of its model, with the measurement
-  that revised ADR 0023's exemption.
+- [adr-0025] — why every PPMd measurement is checked against half the model, with the
+  measurements that revised ADR 0023's exemption and refuted a check per object.

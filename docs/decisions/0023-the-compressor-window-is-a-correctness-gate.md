@@ -124,4 +124,4 @@ place for the gate, which no corpus measured here shows.
 
 The exemption of PPMd is revised by [adr-0025]: the measurement above was taken on data whose
 model barely fills, and on data that fills it the model's restart is a limit after all. PPMd
-still declares no window; it is checked per object instead.
+still declares no window; each of its measurements is checked instead.

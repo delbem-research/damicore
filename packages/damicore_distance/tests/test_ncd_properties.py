@@ -25,7 +25,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-import damicore_distance.api as distance_api
 from damicore_distance import (
     Bzip2Compressor,
     DeflateCompressor,
@@ -430,21 +429,47 @@ def test_the_largest_object_is_chosen_by_content_when_sizes_tie(tmp_path: Path) 
 
 # --- PPMd's model capacity, issue 132 ---------------------------------------------------
 
-# A model small enough that the cases below show at tens of KiB. 256 KiB of random bytes
-# fills more than a quarter of it.
+# A model small enough that the cases below show at tens of KiB, the half the stage checks it
+# against, and one sixteen times larger that none of them fills: the oracle for what the small
+# one would measure if it never restarted.
 SMALL_MODEL = PpmdCompressor(ppmd_memory_bytes=1_048_576)
+HALF_MODEL = PpmdCompressor(ppmd_memory_bytes=524_288)
+UNFILLED_MODEL = PpmdCompressor(ppmd_memory_bytes=16 * 1_048_576)
 
 
 def _restarting_object() -> bytes:
+    """Random bytes that fill the small model on their own."""
     return random.Random(5).randbytes(262_144)
 
 
-def test_an_object_that_fills_a_quarter_of_the_ppmd_model_is_refused_before_any_pair(
+def _near_duplicate(payload: bytes, seed: int) -> bytes:
+    """``payload`` with one byte in a thousand replaced."""
+    draws = random.Random(seed)
+    mutated = bytearray(payload)
+    for index in draws.sample(range(len(mutated)), max(1, len(mutated) // 1_000)):
+        mutated[index] = draws.randrange(256)
+    return bytes(mutated)
+
+
+def _matrix(
+    manifest_path: Path, output: Path, compressor: PpmdCompressor, *, allow_model_restart: bool
+) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
+    result = compute_distance_matrix(
+        manifest_path,
+        output,
+        config=DistanceConfig(
+            compressor=compressor, workers=1, allow_model_restart=allow_model_restart
+        ),
+    )
+    return np.load(result.matrix_path, allow_pickle=False)
+
+
+def test_an_object_that_restarts_the_ppmd_model_alone_is_refused_before_any_pair(
     tmp_path: Path,
 ) -> None:
-    """PPMd restarts its model from nothing when its memory fills, so a pair whose first
-    object fills it is coded with that object forgotten and measures near 1 whatever the two
-    share (ADR 0025). The stage refuses before computing a pair, not after."""
+    """PPMd restarts its model from nothing when its memory fills, so an object that fills it
+    alone has a compressed size, and a distance to everything, measured with part of itself
+    forgotten (ADR 0025). That needs no pair to see, so the stage refuses before any pair."""
     payloads = [_restarting_object(), _column(1, 10, 262_144)]
     manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
     with pytest.raises(DistanceError) as raised:
@@ -456,6 +481,35 @@ def test_an_object_that_fills_a_quarter_of_the_ppmd_model_is_refused_before_any_
     assert raised.value.code == "model_capacity_error"
     assert "ppmd_memory_bytes" in str(raised.value)
     assert not (tmp_path / "run" / "distance.npy").exists()
+
+
+def test_a_pair_of_near_duplicates_that_restarts_the_model_is_refused(tmp_path: Path) -> None:
+    """The case no per-object check can see (ADR 0025): the memory a pair needs grows with what
+    the two objects share, so a near-duplicate pair fills a model each object alone fits in.
+    Measured anyway, it reads as far apart; the stage refuses it instead."""
+    original = random.Random(16).randbytes(16_000)
+    payloads = [original, _near_duplicate(original, 16)]
+
+    def size(compressor: PpmdCompressor, *parts: bytes) -> int:
+        return _direct_size(*parts, config=DistanceConfig(compressor=compressor))
+
+    # The scenario, established by the codec alone: each object fits half the model, so a
+    # per-object check admits it, and the pair does not fit the whole model, so measuring it
+    # would be wrong.
+    for payload in payloads:
+        assert size(HALF_MODEL, payload) == size(UNFILLED_MODEL, payload)
+    assert size(SMALL_MODEL, *payloads) != size(UNFILLED_MODEL, *payloads)
+
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    with pytest.raises(DistanceError) as raised:
+        compute_distance_matrix(
+            manifest_path,
+            tmp_path / "run",
+            config=DistanceConfig(compressor=SMALL_MODEL, workers=1),
+        )
+    assert raised.value.code == "model_capacity_error"
+    assert "ppmd_memory_bytes" in str(raised.value)
+    assert "label_000001" in str(raised.value) and "label_000002" in str(raised.value)
 
 
 def test_a_caller_who_allows_the_restart_gets_the_measurement(tmp_path: Path) -> None:
@@ -500,42 +554,42 @@ def _kind(kind: str, seed: int, size: int) -> bytes:
 KINDS = ["vocabulary", "numeric", "integers", "text", "four letters", "doubles", "mixed", "random"]
 
 
-def test_when_no_object_is_refused_no_pair_restarts_the_model() -> None:
-    """What the gate rests on, tested where it can fail: at the limit.
+@pytest.mark.parametrize("kind", KINDS)
+def test_an_admitted_ppmd_run_measures_what_an_unfilled_model_measures(
+    tmp_path: Path, kind: str
+) -> None:
+    """The guarantee, tested where it can fail: around the sizes at which the small model
+    starts to fill, for every kind of content, with a near-duplicate and an unrelated object.
 
-    Until the model fills, PPMd codes identically whatever its memory, so an object
-    compressed under a fraction of the model gives the size it gave under all of it exactly
-    when neither restarted. For every kind of content, the largest object that still passes
-    the stage's check is found by search, and every pair of such objects, in both orders,
-    must compress under the model exactly as under a model sixteen times larger that none of
-    them fills. At half the model this failed on 33 of 726 such pairs (ADR 0025); the stage
-    checks against a quarter."""
-    model = 262_144
-    reference = 16 * model
-    fraction = model // distance_api.MODEL_MARGIN
-
-    def size(memory: int, *parts: bytes) -> int:
-        return _direct_size(
-            *parts, config=DistanceConfig(compressor=PpmdCompressor(ppmd_memory_bytes=memory))
+    A run the stage admits must return, bit for bit, the matrix a model none of the objects
+    fills returns; a margin per object admitted near-duplicates that broke this (ADR 0025). A
+    run it refuses must be one that half the model measures wrongly: the stage refuses within
+    a factor of two of where the model fills, never further from it.
+    """
+    outcomes: list[bool] = []
+    for size in (4_000, 12_000, 24_000, 40_000):
+        original = _kind(kind, 1, size)
+        payloads = [original, _near_duplicate(original, size), _kind(kind, 2, size)]
+        case = tmp_path / str(size)
+        manifest_path = _normalization_manifest(case / "normalized", payloads)
+        expected = _matrix(
+            manifest_path, case / "unfilled", UNFILLED_MODEL, allow_model_restart=True
         )
-
-    def passes(payload: bytes) -> bool:
-        return size(fraction, payload) == size(model, payload)
-
-    def largest_passing(kind: str, seed: int) -> bytes:
-        low, high = 64, 128
-        while passes(_kind(kind, seed, high)):
-            low, high = high, high * 2
-        while high - low > max(16, low // 100):
-            middle = (low + high) // 2
-            low, high = (middle, high) if passes(_kind(kind, seed, middle)) else (low, middle)
-        return _kind(kind, seed, low)
-
-    edges = {kind: (largest_passing(kind, 1), largest_passing(kind, 2)) for kind in KINDS}
-    for left, right in itertools.product(KINDS, KINDS):
-        x, y = edges[left][0], edges[right][1]
-        for first, second in ((x, y), (y, x)):
-            assert size(model, first, second) == size(reference, first, second), (left, right)
+        try:
+            measured = _matrix(
+                manifest_path, case / "checked", SMALL_MODEL, allow_model_restart=False
+            )
+        except DistanceError as refused:
+            assert refused.code == "model_capacity_error"
+            anyway = _matrix(manifest_path, case / "anyway", HALF_MODEL, allow_model_restart=True)
+            assert anyway.tolist() != expected.tolist(), (kind, size)
+            outcomes.append(False)
+        else:
+            assert measured.tolist() == expected.tolist(), (kind, size)
+            outcomes.append(True)
+    if kind == "random":
+        # Both sides of the edge are reached, so neither half above is vacuous.
+        assert True in outcomes and False in outcomes
 
 
 # --- The compressor window, issue 59 ----------------------------------------------------

@@ -31,7 +31,7 @@ pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
 WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[str], list[int], DistanceConfig]
-WorkerResult = tuple[int, list[int], list[int], list[float]]
+WorkerResult = tuple[int, list[int], list[int], list[float], tuple[int, int] | None]
 
 
 def _normalized(tmp_path: Path) -> NormalizationResult:
@@ -379,9 +379,9 @@ def test_every_compression_runs_on_the_pool_when_there_is_one(
     compute_distance_matrix(
         normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
     )
-    # Three objects, each again under a quarter of the PPMd model (ADR 0025), three pairs and the
-    # largest object after itself: every one of the ten compressions ran in the pool.
-    assert placements == [True] * 10
+    # Three objects and three pairs, each again under half the PPMd model (ADR 0025), and the
+    # largest object after itself: every one of the thirteen compressions ran in the pool.
+    assert placements == [True] * 13
 
 
 def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:
@@ -399,8 +399,8 @@ def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> 
     [
         ("ppmd", "ppmd_order", 1, 2),
         ("ppmd", "ppmd_order", 65, 64),
-        # Four times the codec's 2,048: the stage checks objects against a quarter of the model.
-        ("ppmd", "ppmd_memory_bytes", 8_191, 8_192),
+        # Twice the codec's 2,048: the stage checks every size again under half the model.
+        ("ppmd", "ppmd_memory_bytes", 4_095, 4_096),
         ("ppmd", "ppmd_memory_bytes", 4_294_967_260, 4_294_967_259),
         ("bzip2", "bzip2_block_size_100k", 0, 1),
         ("bzip2", "bzip2_block_size_100k", 10, 9),
@@ -665,6 +665,7 @@ def test_a_worker_returning_a_non_finite_shard_is_rejected(
             [i for i, _ in pairs],
             [j for _, j in pairs],
             [float("nan")] * len(pairs),
+            None,
         )
 
     monkeypatch.setattr(distance_api, "_worker", broken_worker)
@@ -943,7 +944,7 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
         ) -> Future[distance_api.WorkerResult]:
             submitted.append(argument[0])
             future: Future[distance_api.WorkerResult] = Future()
-            future.set_result((argument[0], [], [], []))
+            future.set_result((argument[0], [], [], [], None))
             return future
 
     total = 10

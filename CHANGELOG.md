@@ -20,21 +20,23 @@ carries anything else, a date included, matches neither and fails the release.
   value whose pair was compressed in the other order changes. The distance rule in the
   manifest's `method` block is `ncd-max/v2`, and a distance checkpoint written before this
   release is refused on resume rather than mixed with new shards. ADR 0024.
-- **Under PPMd, a run in which an object fills a quarter of the model memory is refused
-  before any pair is computed.** PPMd restarts its model from nothing when the memory fills,
-  so whatever a pair codes after the restart is coded with the first object forgotten: on
-  numeric columns with six decimals the default 64 MiB model had lost most of the separation
-  between distributions at 32 MiB per column. ADR 0023 had exempted PPMd on data whose model
-  barely fills (#132). The distance stage now compresses each object again under a quarter of
-  the model -- one compression per object -- and refuses if a size differs. A quarter and not
-  a half: at a half, two objects that each fit were found restarting the model together; at a
-  quarter a search over dissimilar objects found none. It does not bound a pair of
-  near-duplicates, which can restart the model while each passes (#132 stays open for that).
-  Under the default model it refuses objects of high-entropy content from about 1.2 to 1.7 MB,
-  some of which would have measured well. The refusal is a `ResourceLimitError` asking for a larger
+- **Under PPMd, a run in which an object or a pair needs more than half the model memory is
+  refused.** PPMd restarts its model from nothing when the memory fills, so whatever a pair
+  codes after the restart is coded with the first object forgotten: on numeric columns with
+  six decimals the default 64 MiB model had lost most of the separation between distributions
+  at 32 MiB per column, and a pair of near-duplicates measured 0.198 where a model that does
+  not fill gives 0.006. ADR 0023 had exempted PPMd on data whose model barely fills (#132).
+  The distance stage now compresses every object, before any pair, and every pair, as it is
+  computed, again under half the model, and refuses if a size differs: a size that fits half
+  the model is the one any larger model gives. The pairs take about twice as long; the memory
+  each worker is charged does not change. Pairs that need between half and all of the model
+  are refused although they measured correctly -- under the default model, unrelated objects
+  of random bytes or integers from 2 MiB each and of six-decimal numbers from 8 MiB -- and a
+  larger `ppmd_memory_bytes` admits them with the same values. The refusal is a
+  `ResourceLimitError` naming the object or the pair and asking for a larger
   `ppmd_memory_bytes`; `ResourceLimits.allow_model_restart` (`--allow-model-restart`)
   measures anyway, and the distance stage's receipt records `ppmd_model_checked`.
-  `ppmd_memory_bytes` now starts at 8192, four times the codec's minimum. ADR 0025.
+  `ppmd_memory_bytes` now starts at 4096, twice the codec's minimum. ADR 0025.
 
 ## 0.5.0
 
