@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
-from damicore_distance import DistanceConfig
+from damicore_distance import DistanceConfig, PpmdCompressor
 from damicore_normalizer import NormalizationConfig, NormalizerError
 from damicore_normalizer.api import scan_source
 from damicore_normalizer.config import ObjectSource
@@ -124,6 +124,10 @@ def preflight(
     max_pair_bytes = sum(heapq.nlargest(2, (distance.pairing.span_bytes(s) for s in object_sizes)))
     pairs_per_shard = execution.effective_pairs_per_shard(pairs)
     checkpoint_bytes = math.ceil(pairs / pairs_per_shard) * 256
+    # Under the PPMd check a pair waiting for its second look waits on disk, 40 bytes each, and
+    # in the worst case every pair does (ADR 0025).
+    if isinstance(distance.compressor, PpmdCompressor) and not distance.allow_model_restart:
+        checkpoint_bytes += pairs * 40
     label_bytes = sum(len(item.label.encode("utf-8")) for item in scan.objects)
     metadata_bytes = 1_048_576 + objects * 4_096 + 8 * label_bytes
     diagnostic_bytes = (

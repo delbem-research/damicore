@@ -77,7 +77,10 @@ and at most one per worker. Where the budget holds none, or twice the model is p
 codec takes, a stream half the model codes otherwise is refused as before, and the refusal
 names the limit; it is never measured on trust. Until a flagged pair's second look passes, its
 shard is written and not completed, so an interruption before the look computes that shard
-again rather than resuming it unchecked. `ResourceLimits.allow_model_restart`
+again rather than resuming it unchecked. The flagged pairs wait on disk, 40 bytes each in an
+unnamed temporary file, which preflight charges for every pair: held in memory, they grew the
+coordinator by about 490 bytes a pair, some 230 MiB at the default limit on pairs, beyond
+anything preflight charged. `ResourceLimits.allow_model_restart`
 (`--allow-model-restart`) measures anyway and skips the check; like every limit it is not part
 of run identity [adr-0022]. The aggregate reports the refusal as `ResourceLimitError`, since it
 is lifted the way the other limits are.
@@ -174,8 +177,8 @@ without weakening it, if the shortness could be proved. Read against `Ppmd8.c` i
 on 2026-11-25, the bound that can be proved is too loose to pay: the model writes one byte of
 text per symbol into an eighth of its memory, and per symbol up to `ppmd_order` contexts gain
 a state, each of whose state arrays may be reallocated at up to 128 units of 12 bytes, beside a
-new context of one unit -- 9,360 bytes per symbol at order 6. Half the default model's unit
-area holds that for about 3,100 symbols, so only pairs of a few KB are proved safe, and those
+new context of one unit -- 6 x 129 x 12 = 9,288 bytes per symbol at order 6. Half the default
+model's unit area holds that for about 3,160 symbols, so only pairs of a few KB are proved safe, and those
 cost the check microseconds. A tighter bound would count on freed arrays being reused, which
 the allocator does not promise: a fragmented free list can fail an allocation with memory to
 spare. So the check runs on every stream, and the time it costs is the price of a guarantee a

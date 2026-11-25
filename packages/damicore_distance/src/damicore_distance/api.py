@@ -16,7 +16,7 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -157,25 +157,33 @@ def _check_worker(arguments: SizeArguments) -> bytes | None:
 
 
 # One stream's second look: its paths, the settings under twice the model, and the digest of
-# its bytes under the model [adr-0025].
-EscalationArguments = tuple[tuple[str, ...], DistanceConfig, bytes]
+# its bytes under the model [adr-0025], behind a tag the refusal names it by.
+EscalationArguments = tuple[int, tuple[str, ...], DistanceConfig, bytes]
+# A stream waiting for its second look, as the caller hands it over: tag, paths, digest.
+Look = tuple[int, tuple[Path, ...], bytes]
+# A flagged pair on disk while the shards are computed: two object indices and the digest, so
+# the waiting pairs cost the coordinator no memory however many there are.
+_FLAGGED_RECORD = struct.Struct("<II32s")
 
 
-def _escalation_worker(arguments: EscalationArguments) -> bool:
+def _escalation_worker(arguments: EscalationArguments) -> tuple[int, bool]:
     """Whether twice the model codes a stream into the bytes the model did: if so, the model
     did not restart on it, since its memory never mattered."""
-    raw_paths, escalation, coded = arguments
+    tag, raw_paths, escalation, coded = arguments
     paths = tuple(Path(path) for path in raw_paths)
-    return compressed_fingerprint(paths, config=escalation)[1] == coded
+    return tag, compressed_fingerprint(paths, config=escalation)[1] == coded
 
 
-def _model_escalation(settings: DistanceConfig) -> tuple[DistanceConfig, int] | None:
+def _model_escalation(
+    settings: DistanceConfig, *, past_budget: bool = False
+) -> tuple[DistanceConfig, int] | None:
     """The settings under twice the PPMd model, and how many such streams the working-memory
     budget holds at once; ``None`` when no second look is possible [adr-0025].
 
     The budget is ``max_working_memory_bytes`` where the caller set it, else what the workers
     are charged. A second look runs only while no pair is in flight, so the whole budget is
-    its own, and twice a model the codec cannot take is no look at all.
+    its own, and twice a model the codec cannot take is no look at all. ``past_budget`` asks
+    only whether the codec could take it, for the refusal to say which limit stood in the way.
     """
     compressor = settings.compressor
     if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
@@ -186,6 +194,8 @@ def _model_escalation(settings: DistanceConfig) -> tuple[DistanceConfig, int] | 
     escalation = settings.model_copy(
         update={"compressor": compressor.model_copy(update={"ppmd_memory_bytes": doubled})}
     )
+    if past_budget:
+        return escalation, 1
     budget = settings.max_working_memory_bytes
     if budget is None:
         budget = settings.effective_workers * settings.worker_memory_bytes
@@ -193,26 +203,32 @@ def _model_escalation(settings: DistanceConfig) -> tuple[DistanceConfig, int] | 
     return (escalation, slots) if slots else None
 
 
+Refusal = tuple[int, Literal["restarted", "no_look"]]
+
+
 def _second_look(
-    streams: list[tuple[tuple[Path, ...], bytes]],
-    settings: DistanceConfig,
-    executor: ProcessPoolExecutor | None,
-) -> list[bool] | None:
-    """For each stream, whether twice the PPMd model codes it as the model did; ``None`` when
-    the budget holds no stream of twice the model [adr-0025]."""
+    streams: Iterator[Look], settings: DistanceConfig, executor: ProcessPoolExecutor | None
+) -> Refusal | None:
+    """The first stream to refuse and why, or ``None`` when every one passes [adr-0025]: twice
+    the PPMd model codes it otherwise than the model (``"restarted"``), or no second look is
+    possible at all (``"no_look"``).
+
+    The streams are consumed as they are submitted, at most as many in flight as the budget
+    holds, so neither they nor their results are ever all in memory.
+    """
     escalation = _model_escalation(settings)
     if escalation is None:
-        return None
+        return next(((tag, "no_look") for tag, _, _ in streams), None)
     doubled, slots = escalation
-    arguments = iter(
-        [(tuple(str(path) for path in paths), doubled, coded) for paths, coded in streams]
+    arguments = (
+        (tag, tuple(str(path) for path in paths), doubled, coded) for tag, paths, coded in streams
     )
     results = (
         map(_escalation_worker, arguments)
         if executor is None
         else _bounded_submit(executor, _escalation_worker, arguments, slots)
     )
-    return list(_typed_results(results))
+    return next(((tag, "restarted") for tag, fits in _typed_results(results) if not fits), None)
 
 
 def _model_check(settings: DistanceConfig) -> DistanceConfig | None:
@@ -463,24 +479,33 @@ def _load_or_compute_sizes(
     return sizes
 
 
-def _model_capacity_error(subject: str, *, looked: bool) -> DistanceError:
-    """The refusal, saying whether twice the model confirmed the restart or there was no room
-    to look [adr-0025]."""
-    if looked:
-        cause = (
-            f"{subject} the PPMd model, which restarted and coded the rest with what it had "
-            "read forgotten -- twice the model codes it otherwise -- so the distance would not "
-            "be the one the objects have. Raise ppmd_memory_bytes -- each worker is charged "
-            "that memory --"
+def _model_capacity_error(
+    subject: str, settings: DistanceConfig, *, cause: Literal["restarted", "no_look"]
+) -> DistanceError:
+    """The refusal, saying what is known about the stream and the move that would admit it
+    [adr-0025]."""
+    if cause == "restarted":
+        found = (
+            "fills the PPMd model, which restarted and coded the rest with what it had read "
+            "forgotten -- twice the model codes it otherwise -- so the distance would not be the "
+            "one the objects have"
         )
+        advice = "Raise ppmd_memory_bytes -- each worker is charged that memory -- or set"
+    elif _model_escalation(settings, past_budget=True) is None:
+        found = (
+            "fills more than half the PPMd model, past which the model can restart, and twice "
+            "the model is past what the codec takes, so nothing can tell whether it did"
+        )
+        advice = "Set"
     else:
-        cause = (
-            f"{subject} more than half the PPMd model, past which the model can restart, and "
+        found = (
+            "fills more than half the PPMd model, past which the model can restart, and "
             "max_working_memory_bytes leaves no room to compress it again under twice the "
-            "model, which would tell. Raise max_working_memory_bytes or ppmd_memory_bytes,"
+            "model, which would tell"
         )
+        advice = "Raise max_working_memory_bytes or ppmd_memory_bytes, or set"
     return DistanceError(
-        f"{cause} or set allow_model_restart to measure anyway. See ADR 0025.",
+        f"{subject} {found}. {advice} allow_model_restart to measure anyway. See ADR 0025.",
         code="model_capacity_error",
     )
 
@@ -509,15 +534,12 @@ def _refuse_model_restart(
     flagged = [
         (index, coded) for index, coded in enumerate(_typed_results(results)) if coded is not None
     ]
-    if not flagged:
-        return
-    looks = _second_look([((paths[index],), coded) for index, coded in flagged], settings, executor)
-    over = [index for (index, _), fits in zip(flagged, looks or [False] * len(flagged)) if not fits]
-    if over:
-        raise _model_capacity_error(
-            f"{len(over)} of {len(paths)} objects, among them {labels[over[0]]!r}, each fill",
-            looked=looks is not None,
-        )
+    refused = _second_look(
+        ((index, (paths[index],), coded) for index, coded in flagged), settings, executor
+    )
+    if refused is not None:
+        index, cause = refused
+        raise _model_capacity_error(f"The object {labels[index]!r}", settings, cause=cause)
 
 
 def _open_matrix(path: Path, size: int, *, resume: bool) -> np.memmap[Any, Any]:
@@ -690,7 +712,8 @@ def compute_distance_matrix(
     ----------
     progress
         Called once before work begins -- so a resumed run reports the pairs it inherited --
-        and again after each completed shard, as ``(completed, total, "distance")``.
+        and again after each shard is measured, as ``(measured, total, "distance")``; a shard
+        holding a pair that waits for the PPMd second look counts as measured before the look.
 
     Raises
     ------
@@ -809,48 +832,51 @@ def compute_distance_matrix(
 
         # Shards holding a pair half the model coded otherwise wait, written but not completed,
         # for the second look once no pair is in flight: interrupted before it, they are
-        # computed again rather than resumed unchecked [adr-0025].
-        waiting: list[tuple[int, list[tuple[int, int]], Flagged]] = []
-        for shard_index, left, right, values, flagged in _typed_results(results):
-            if len(left) != len(values) or not all(math.isfinite(value) for value in values):
-                raise DistanceError(
-                    "Worker returned an invalid shard",
-                    code="distance_computation_error",
-                )
-            for i, j, value in zip(left, right, values, strict=True):
-                matrix[i, j] = value
-                matrix[j, i] = value
-            matrix.flush()
-            shard = list(zip(left, right, strict=True))
-            _validate_completed_shard(matrix, shard)
-            if flagged:
-                waiting.append((shard_index, shard, flagged))
-            else:
-                complete(matrix, shard_index, shard)
-            completed_pairs += len(values)
-            if progress is not None:
-                progress(completed_pairs, pair_count, "distance")
-        (doubled_size,) = _typed_results(self_size)
-        if waiting:
-            pairs = [pair for _, _, flagged in waiting for pair in flagged]
-            looks = _second_look(
-                [
-                    (
-                        (paths[i], paths[j]) if digests[i] <= digests[j] else (paths[j], paths[i]),
-                        coded,
+        # computed again rather than resumed unchecked. Their pairs wait on disk, so the
+        # coordinator holds only the waiting shards' indices [adr-0025].
+        waiting: set[int] = set()
+        with tempfile.TemporaryFile(dir=checkpoints) as flagged_file:
+            for shard_index, left, right, values, flagged in _typed_results(results):
+                if len(left) != len(values) or not all(math.isfinite(value) for value in values):
+                    raise DistanceError(
+                        "Worker returned an invalid shard",
+                        code="distance_computation_error",
                     )
-                    for i, j, coded in pairs
-                ],
-                settings,
-                executor,
-            )
-            for (i, j, _), fits in zip(pairs, looks or [False] * len(pairs), strict=True):
-                if not fits:
+                for i, j, value in zip(left, right, values, strict=True):
+                    matrix[i, j] = value
+                    matrix[j, i] = value
+                matrix.flush()
+                shard = list(zip(left, right, strict=True))
+                _validate_completed_shard(matrix, shard)
+                if flagged:
+                    waiting.add(shard_index)
+                    for i, j, coded in flagged:
+                        flagged_file.write(_FLAGGED_RECORD.pack(i, j, coded))
+                else:
+                    complete(matrix, shard_index, shard)
+                completed_pairs += len(values)
+                if progress is not None:
+                    progress(completed_pairs, pair_count, "distance")
+            (doubled_size,) = _typed_results(self_size)
+            if waiting:
+                flagged_file.seek(0)
+
+                def waiting_pairs() -> Iterator[Look]:
+                    while record := flagged_file.read(_FLAGGED_RECORD.size):
+                        i, j, coded = _FLAGGED_RECORD.unpack(record)
+                        first, second = (i, j) if digests[i] <= digests[j] else (j, i)
+                        yield i * len(paths) + j, (paths[first], paths[second]), coded
+
+                refused = _second_look(waiting_pairs(), settings, executor)
+                if refused is not None:
+                    tag, cause = refused
+                    i, j = divmod(tag, len(paths))
                     raise _model_capacity_error(
-                        f"The pair {labels[i]!r} and {labels[j]!r} fills", looked=looks is not None
+                        f"The pair {labels[i]!r} and {labels[j]!r}", settings, cause=cause
                     )
-            for shard_index, shard, _ in waiting:
-                complete(matrix, shard_index, shard)
+                for shard_index, shard in iter_pair_shards(len(paths), pairs_per_shard):
+                    if shard_index in waiting:
+                        complete(matrix, shard_index, shard)
         ncd_self_largest = normalized_compression_distance(
             sizes[largest], sizes[largest], doubled_size
         )

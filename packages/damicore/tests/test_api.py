@@ -747,6 +747,21 @@ def test_the_working_memory_limit_decides_the_second_look(tmp_path: Path) -> Non
         run(corpus, output_dir=tmp_path / "tight", execution=tight, **arguments)
 
 
+def test_preflight_charges_the_disk_pairs_wait_on_for_the_second_look(tmp_path: Path) -> None:
+    """Under the PPMd check a pair waiting for its second look waits on disk, 40 bytes, and
+    preflight charges it for every pair: nothing else may differ (ADR 0025)."""
+    source = _csv(tmp_path)
+    checked = estimate(source)
+    lifted = estimate(
+        source, execution=ExecutionConfig(limits=ResourceLimits(allow_model_restart=True))
+    )
+    assert checked.estimated_artifact_bytes - lifted.estimated_artifact_bytes == (
+        checked.pair_count * 40
+    )
+    zlib = estimate(source, compressor="zlib")
+    assert zlib.estimated_artifact_bytes == lifted.estimated_artifact_bytes
+
+
 def test_the_pairing_is_recorded_and_named_by_its_rule(tmp_path: Path) -> None:
     """The pairing changes every value, so it is configuration the hash covers and a rule the
     manifest names: `ncd-max/v2` for the concatenation, `ncd-max-interleaved/v1` for

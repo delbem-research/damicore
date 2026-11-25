@@ -16,9 +16,10 @@ import itertools
 import json
 import lzma
 import random
+import tracemalloc
 import zlib
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pyppmd
@@ -763,6 +764,46 @@ def test_shards_waiting_for_the_second_look_are_not_resumed_unlooked(
     assert np.load(resumed.matrix_path, allow_pickle=False).tolist() == expected.tolist()
 
 
+def test_pairs_waiting_for_the_second_look_cost_the_coordinator_no_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under a 4 KiB model every pair of 80-byte random objects needs more than half the model
+    and fits the whole of it, so every one of 1,770 pairs waits for the second look. What the
+    coordinator itself holds when the look starts must not grow with them: the pairs wait on
+    disk (ADR 0025). Measured as the memory allocated from the stage's own module and still
+    held, which the codec's own allocations do not enter."""
+    payloads = [random.Random(index).randbytes(80) for index in range(60)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    held: list[int] = []
+    original = distance_api._second_look
+
+    def measured(*arguments: Any) -> Any:
+        snapshot = tracemalloc.take_snapshot().filter_traces(
+            [tracemalloc.Filter(True, distance_api.__file__)]
+        )
+        held.append(sum(statistic.size for statistic in snapshot.statistics("filename")))
+        return original(*arguments)
+
+    monkeypatch.setattr(distance_api, "_second_look", measured)
+    tracemalloc.start(1)
+    try:
+        result = compute_distance_matrix(
+            manifest_path,
+            tmp_path / "run",
+            config=DistanceConfig(
+                compressor=PpmdCompressor(ppmd_memory_bytes=4_096),
+                workers=1,
+                max_working_memory_bytes=ROOMY,
+            ),
+        )
+    finally:
+        tracemalloc.stop()
+    assert result.matrix_path.exists()
+    # Holding the waiting pairs and their digests in lists held 481 KiB here.
+    assert held, "the second look never ran"
+    assert max(held) < 64 * 1024, held
+
+
 def test_without_memory_for_a_second_look_the_half_model_refuses(tmp_path: Path) -> None:
     """Twice the model is measured only within the working-memory budget: without it, a
     stream half the model codes differently is refused, as before the second look existed,
@@ -780,6 +821,28 @@ def test_without_memory_for_a_second_look_the_half_model_refuses(tmp_path: Path)
         )
     assert raised.value.code == "model_capacity_error"
     assert "max_working_memory_bytes" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("memory", "advice", "not_advised"),
+    [
+        (1_048_576, "max_working_memory_bytes", None),
+        # Twice this model is past what pyppmd takes: no limit can make room for the look, so
+        # the refusal must not send the caller to raise one.
+        (2_147_483_630, "allow_model_restart", "max_working_memory_bytes"),
+    ],
+)
+def test_a_refusal_without_a_second_look_advises_what_can_admit_it(
+    memory: int, advice: str, not_advised: str | None
+) -> None:
+    settings = DistanceConfig(
+        compressor=PpmdCompressor(ppmd_memory_bytes=memory), max_working_memory_bytes=1
+    )
+    message = str(distance_api._model_capacity_error("The object 'x'", settings, cause="no_look"))
+    assert message.startswith("The object 'x' fills more than half the PPMd model")
+    assert advice in message
+    if not_advised is not None:
+        assert not_advised not in message
 
 
 def test_a_caller_who_allows_the_restart_gets_the_measurement(tmp_path: Path) -> None:
