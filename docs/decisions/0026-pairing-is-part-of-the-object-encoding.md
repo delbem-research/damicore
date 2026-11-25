@@ -39,7 +39,7 @@ they change every value.
 | departure | the reference | here | evidence |
 |---|---|---|---|
 | which object goes first | the file name that sorts first | the lower SHA-256 [adr-0024] | ADR 0024: renaming files changed the partition (ARI 0.76 and 0.81). Digest order costs nothing more, and renaming cannot move a value |
-| how the pair reaches the compressor | written to a temporary file per pair, then compressed | streamed from both files, one block at a time | a test holds every pair, for every compressor, byte for byte equal to a line-for-line port of `interleave`, empty objects, a block of one byte and a block longer than both objects included. It writes nothing per pair, and a worker holds two blocks at most |
+| how the pair reaches the compressor | written to a temporary file per pair, then compressed | streamed from both files, one block at a time | a property test holds the bytes fed to the compressor equal to a line-for-line port of `interleave`, and the compressed size equal to compressing that port's output, for every compressor, empty objects, a block of one byte and a block longer than both objects included. It writes nothing per pair, and a worker holds two blocks at most |
 | a block the window cannot hold | measured, and reported as a distance | refused by preflight, like any pair past the window [adr-0023] | below. `max_pair_window_factor` measures it anyway, so nothing the reference could do is lost |
 | `ncd_self_largest` | not computed | `C` of the largest object paired with itself under the run's pairing | it is the reference's own `NCD(x, x)` under interleaving, the quantity its docstring names |
 
@@ -52,8 +52,12 @@ concatenated, `min(size, block)` when interleaved. Concatenation is interleaving
 that holds either object, and a test holds the two equal there. So the gate does not get a
 new rule: preflight and `pairs_over_window` read the span where they read the size.
 
-Measured on two 1 MiB objects, the second a copy of the first with one byte in a hundred
-changed, under `zlib` and its 32 KiB window, with an unrelated 1 MiB object for comparison:
+Measured on two 1 MiB objects -- lines of one letter repeated one to three times followed by
+a number below a million, seed 62 -- the second a copy of the first with one byte in a
+hundred replaced by a digit, under `zlib` and its 32 KiB window, with an unrelated 1 MiB
+object of the same kind for comparison. Other content moves the values a little and keeps
+the pattern; a second verification measured 0.10 to 0.145 below the window and 0.998 past
+it:
 
 | pairing | near-copy | unrelated |
 |---|---|---|
@@ -70,8 +74,11 @@ promise.
 
 The question the reference's docstring does not answer is columns of a table, where block
 `k` of one column does not hold the same rows as block `k` of another. Twelve synthetic
-columns in three known groups, the whole pipeline, adjusted Rand index against the groups
-(1.00 is exact; 0.84 to 0.88 is one group split in two), 2 MiB per column, one seed each:
+columns in three known groups, one JSON value per line as the normalizer writes them, 2 MiB
+per column, one seed each. The distances came from a measurement script with the same
+compressor settings and pairing rule, pairs in index order rather than digest order; the
+tree and the partition from this repository's Neighbor Joining and FastGreedy. Adjusted
+Rand index against the groups (1.00 is exact; 0.84 to 0.88 is one group split in two):
 
 | columns | PPMd: concat / interleave | zlib | bzip2 | LZMA |
 |---|---|---|---|---|

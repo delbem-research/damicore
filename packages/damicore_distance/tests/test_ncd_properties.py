@@ -38,7 +38,7 @@ from damicore_distance import (
     compute_distance_matrix,
 )
 from damicore_distance.api import _pairs_over_window
-from damicore_distance.compressor import compressed_size
+from damicore_distance.compressor import _paired_chunks, compressed_size
 from damicore_distance.ncd import normalized_compression_distance
 
 pytestmark = pytest.mark.unit
@@ -267,8 +267,11 @@ def test_interleaved_pair_compression_equals_compressing_the_legacy_interleave(
     config = _config(compressor, 6, chunk_bytes).model_copy(
         update={"pairing": InterleavePairing(interleave_block_bytes=block_bytes)}
     )
+    legacy = _legacy_interleave(left, right, block_bytes)
+    # The bytes fed to the compressor, then what it makes of them.
+    assert b"".join(_paired_chunks((left_path, right_path), config)) == legacy
     assert compressed_size((left_path, right_path), config=config) == _direct_size(
-        _legacy_interleave(left, right, block_bytes), config=config
+        legacy, config=config
     )
 
 
