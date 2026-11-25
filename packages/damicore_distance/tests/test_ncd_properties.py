@@ -21,7 +21,6 @@ import sys
 import textwrap
 import tracemalloc
 import zlib
-from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any, Literal
@@ -1078,18 +1077,21 @@ def test_no_worker_holds_more_residue_than_its_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every worker is a process of its own, replaced before a task would take the PPMd
-    stream residue it holds past its budget, and never before its first task (ADR 0027)."""
+    stream residue it holds past its budget, and never before its first task (ADR 0027).
+
+    The residue is counted from the encoders each task actually opens, not from what the
+    stage declares for it, so a task that opens more streams than it declares fails here."""
     payloads = [random.Random(index).randbytes(200) for index in range(6)]
     manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
     built: list[dict[str, Any]] = []
     held: list[int] = []
     largest_task = [0]
-    streams: dict[str, Callable[[Any], int]] = {
-        "_size_worker": lambda _: 1,
-        "_check_worker": lambda _: 2,
-        "_escalation_worker": lambda _: 1,
-        "_worker": lambda shard: 2 * len(shard[1]),
-    }
+    opened = [0]
+    encoder = pyppmd.Ppmd8Encoder
+
+    def counted(*arguments: Any) -> Any:
+        opened[0] += 1
+        return encoder(*arguments)
 
     class RecordingExecutor:
         def __init__(self, **options: Any) -> None:
@@ -1098,17 +1100,19 @@ def test_no_worker_holds_more_residue_than_its_budget(
             self.slot = len(held) - 1
 
         def submit(self, function: Any, argument: Any) -> Future[Any]:
-            residue = PPMD_STREAM_RESIDUE_BYTES * streams[function.__name__](argument)
-            held[self.slot] += residue
-            largest_task[0] = max(largest_task[0], residue)
+            before = opened[0]
             future: Future[Any] = Future()
             future.set_result(function(argument))
+            residue = PPMD_STREAM_RESIDUE_BYTES * (opened[0] - before)
+            held[self.slot] += residue
+            largest_task[0] = max(largest_task[0], residue)
             return future
 
         def shutdown(self, **_options: Any) -> None:
             pass
 
     monkeypatch.setattr(distance_api, "ProcessPoolExecutor", RecordingExecutor)
+    monkeypatch.setattr(pyppmd, "Ppmd8Encoder", counted)
     # One worker under a limit too small to hold its residue in process: a process of its
     # own, replaced as its residue grows.
     config = DistanceConfig(
