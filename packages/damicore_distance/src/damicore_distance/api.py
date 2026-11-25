@@ -308,7 +308,7 @@ _BROKEN_POOL_MESSAGE = (
     "The distance worker pool died. Either this call runs at module level in a script and "
     'needs to be guarded with `if __name__ == "__main__":`, or a worker was killed by the '
     "operating system, typically for running out of memory. Passing workers=1 avoids the "
-    "pool entirely."
+    "pool while the run's PPMd stream residue fits the working-memory limit (ADR 0027)."
 )
 
 
@@ -737,13 +737,19 @@ def compute_distance_matrix(
     identity = _checkpoint_identity(manifest_path, settings, object_ids)
     # One pool serves both phases, so neither the per-object sizes nor the pairs run
     # serially in this process while the workers wait.
+    # Workers are replaced before the PPMd stream residue they accumulate outgrows the
+    # budget, and a single worker leaves the calling process only when it would [adr-0027].
+    _, tasks_per_child, pooled = settings.stream_residue(
+        len(paths), len(paths) * (len(paths) - 1) // 2
+    )
     executor = (
-        None
-        if settings.effective_workers == 1
-        else ProcessPoolExecutor(
+        ProcessPoolExecutor(
             max_workers=settings.effective_workers,
             mp_context=get_context("spawn"),
+            max_tasks_per_child=tasks_per_child,
         )
+        if pooled
+        else None
     )
     try:
         sizes = _load_or_compute_sizes(

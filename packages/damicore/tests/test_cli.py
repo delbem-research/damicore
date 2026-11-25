@@ -10,6 +10,7 @@ from typing import Any, cast, get_args
 
 import pytest
 from damicore_distance import DistanceConfig
+from damicore_distance.config import PPMD_STREAM_RESIDUE_BYTES
 from damicore_normalizer import DelimitedSource
 
 from damicore import DamicoreResult, ExecutionConfig, estimate, run
@@ -44,9 +45,11 @@ def test_cli_passes_the_compressor_settings_to_estimate_and_run(
     deflate = ["estimate", str(source), "--workers", "2", "--json", "--compressor", "zlib"]
     estimated = json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"]
     assert main(deflate) == 0
-    # Two workers, each charged its stream: the 1 MiB model against DEFLATE's 256 KiB state.
+    # Two workers, each charged its stream: the 1 MiB model against DEFLATE's 256 KiB state,
+    # and PPMd's stream residue for two objects and their pair (ADR 0027).
+    residue = PPMD_STREAM_RESIDUE_BYTES * (2 * 4 + 1 * 3 + 1)
     assert estimated - json.loads(capsys.readouterr().out)["estimated_working_memory_bytes"] == (
-        2 * (1_048_576 - 262_144)
+        2 * (1_048_576 - 262_144 + residue)
     )
     output = tmp_path / "run"
     run_arguments = ["run", str(source), "--workers", "1", "--no-progress", *settings]

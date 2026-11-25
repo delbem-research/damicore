@@ -11,7 +11,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 # the shard count -- and the checkpoint, rewritten after every shard -- below twice this
 # count until the cap, which bounds the result a worker holds for one shard.
 _AUTO_SHARD_COUNT = 64
-_MAX_AUTO_PAIRS_PER_SHARD = 10_000
+# Small enough that one shard's PPMd stream residue, checked, fits what the default limit
+# leaves each of four workers, so a worker can always be replaced between shards [adr-0027].
+_MAX_AUTO_PAIRS_PER_SHARD = 2_048
+# pyppmd 1.3.1's `Ppmd8Encoder` frees its model on deallocation but never the `CPpmd8` that
+# holds it, 7,392 bytes on x86-64, and its `encode()` keeps whatever it is handed; fed from a
+# reused buffer, a stream keeps at most one 312-byte view of it: 7,704 bytes traced, left by
+# every PPMd stream in the process that opened it, rounded up to 8 KiB for the allocator's
+# headers and the interpreter's own bookkeeping [adr-0027].
+PPMD_STREAM_RESIDUE_BYTES = 8_192
+# What a pooled worker may accumulate before it is replaced, where no limit is declared.
+_DEFAULT_RESIDUE_BUDGET = 32 * 1_048_576
 
 
 class DeflateCompressor(BaseModel):
@@ -229,6 +239,42 @@ class DistanceConfig(BaseModel):
         pairing = self.pairing
         block = pairing.interleave_block_bytes if isinstance(pairing, InterleavePairing) else 0
         return 2 * max(self.compression_chunk_bytes, block) + self.compressor.stream_memory_bytes
+
+    def stream_residue(self, object_count: int, pair_count: int) -> tuple[int, int | None, bool]:
+        """How the PPMd stream residue is contained [adr-0027]: the bytes one process is
+        charged for it, how many tasks a pooled worker runs before it is replaced (``None``,
+        never), and whether the run needs worker processes at all.
+
+        Every stream a process opens stays resident in it, so a process's residue grows with
+        the streams it has run. A pooled worker is replaced after as many tasks as the
+        working-memory budget leaves it -- the limit, less what every worker is charged for
+        its stream, shared among the workers -- and never before one task, whose residue
+        cannot be split. A single worker runs in the calling process, as it always has, while
+        the residue of the whole run fits that budget, and in one process of its own,
+        replaced the same way, once it does not. Other compressors leave nothing.
+        """
+        workers = self.effective_workers
+        if not isinstance(self.compressor, PpmdCompressor):
+            return 0, None, workers > 1
+        checked = not self.allow_model_restart
+        pairs_per_shard = self.effective_pairs_per_shard(pair_count)
+        # Checked, an object is opened four times (its size, the model, half, twice) and a
+        # pair three (the model, half, twice); a shard task holds two per pair.
+        total = PPMD_STREAM_RESIDUE_BYTES * (
+            object_count * (4 if checked else 1) + pair_count * (3 if checked else 1) + 1
+        )
+        per_task = PPMD_STREAM_RESIDUE_BYTES * pairs_per_shard * (2 if checked else 1)
+        if self.max_working_memory_bytes is None:
+            if workers == 1:
+                return total, None, False
+            budget = _DEFAULT_RESIDUE_BUDGET
+        else:
+            spare = self.max_working_memory_bytes - workers * self.worker_memory_bytes
+            budget = (spare - pairs_per_shard * 24) // workers
+            if workers == 1 and total <= budget:
+                return total, None, False
+        tasks = max(1, budget // per_task)
+        return min(total, tasks * per_task), tasks, True
 
     @field_validator("compressor", mode="before")
     @classmethod

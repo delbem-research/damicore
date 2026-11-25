@@ -7,6 +7,7 @@ from typing import Any
 
 import pyppmd
 import pytest
+from damicore_distance.config import PPMD_STREAM_RESIDUE_BYTES
 
 import damicore.api as api
 from damicore import (
@@ -410,8 +411,11 @@ def test_preflight_charges_each_compressor_stream_once_per_worker(tmp_path: Path
     grown = estimate(source, ppmd_memory_bytes=(1 << 20) + 1_000, execution=workers)
     deflate = estimate(source, compressor="zlib", execution=workers)
     assert grown.estimated_working_memory_bytes - base.estimated_working_memory_bytes == 4_000
+    # And PPMd's stream residue (ADR 0027): each object opened four times, each pair three,
+    # and the largest object once more, every worker charged the whole run's.
+    residue = PPMD_STREAM_RESIDUE_BYTES * (base.object_count * 4 + base.pair_count * 3 + 1)
     assert base.estimated_working_memory_bytes - deflate.estimated_working_memory_bytes == 4 * (
-        (1 << 20) - 262_144
+        (1 << 20) - 262_144 + residue
     )
     assert estimate(source, execution=workers).within_limits
 

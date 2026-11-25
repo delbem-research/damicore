@@ -139,9 +139,14 @@ def preflight(
     required_disk = math.ceil(artifact_bytes * execution.limits.required_free_disk_factor)
     # Every worker holds one compressor stream, which fills to its stated size on
     # incompressible data, so that size is charged rather than any multiple of the object bytes.
+    # Every PPMd stream also leaves its codec state resident in the process that opened it,
+    # which the stage contains by replacing workers; what it lets each one hold is charged.
+    # See ADR 0027.
+    residue, _, _ = distance.stream_residue(objects, pairs)
     working_memory = max(
         6 * scan.max_serialized_chunk_bytes,
-        execution.effective_workers * distance.worker_memory_bytes + pairs_per_shard * 24,
+        execution.effective_workers * (distance.worker_memory_bytes + residue)
+        + pairs_per_shard * 24,
     )
     # Declared by the compressor, or `None` where there is none to declare: see
     # `PpmdCompressor.window_bytes`. A missing window is not a window of zero.

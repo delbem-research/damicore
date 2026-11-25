@@ -63,6 +63,21 @@ carries anything else, a date included, matches neither and fails the release.
   pairs values of the same rows wherever widths align them, so it measures some row-by-row
   association with the distributions. ADR 0026.
 
+### Fixed
+
+- **PPMd runs no longer outgrow the memory limit preflight admitted them under.** pyppmd 1.3.1
+  never releases what it is handed to `encode()` and never frees an encoder's 7,392-byte
+  codec state, so every PPMd stream left its whole input and about 7.4 KB resident in the
+  process that opened it -- a pair of 1 MiB objects, 2.1 MB. The stage now feeds every
+  compressor from one reused buffer, so a stream leaves 7,704 bytes and not its input. What
+  remains is still 11.6 GB for a run of 1,000 objects under the model check, against a 512 MiB
+  limit, so preflight charges 8 KiB per stream, and the distance stage replaces a pooled
+  worker after as many tasks as the limit leaves it room for. A single worker stays in the
+  calling process while the whole run's residue fits, and only past that gets a process of its
+  own. The automatic shard size is capped at 2,048 pairs, down from 10,000, so a worker can be
+  replaced between shards. No value changes, and a run that fitted its limit runs as before.
+  ADR 0027.
+
 ## 0.5.0
 
 ### Breaking

@@ -38,8 +38,11 @@ import hashlib
 import lzma
 import zlib
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import ExitStack
 from importlib.metadata import version
+from io import BufferedReader
 from pathlib import Path
+from typing import cast
 
 import pyppmd
 
@@ -54,7 +57,9 @@ from damicore_distance.config import (
 from damicore_distance.errors import DistanceError
 
 
-def _stream(config: DistanceConfig) -> tuple[Callable[[bytes], bytes], Callable[[], bytes]]:
+def _stream(
+    config: DistanceConfig,
+) -> tuple[Callable[[bytearray | memoryview], bytes], Callable[[], bytes]]:
     """Open one stream and return how to feed it and how to finish it.
 
     The match is total over the compressor union: a model added there without a case here
@@ -75,7 +80,10 @@ def _stream(config: DistanceConfig) -> tuple[Callable[[bytes], bytes], Callable[
                 settings.ppmd_memory_bytes,
                 pyppmd.PPMD8_RESTORE_METHOD_RESTART,
             )
-            return model.encode, model.flush
+            # pyppmd's stub declares `bytes`; its C extension takes any buffer (`y*`), which is
+            # what lets the stage hand it one reused buffer rather than a new object per piece.
+            encode = cast("Callable[[bytearray | memoryview], bytes]", model.encode)
+            return encode, model.flush
         case Bzip2Compressor():
             block = bz2.BZ2Compressor(settings.bzip2_block_size_100k)
             return block.compress, block.flush
@@ -114,27 +122,58 @@ def codec_fingerprint() -> dict[str, str]:
     }
 
 
-def _paired_chunks(paths: tuple[Path, ...], config: DistanceConfig) -> Iterator[bytes]:
-    """The bytes the compressor is fed, in order, never more than a chunk or a block at once.
+# pyppmd 1.3.1's `encode()` never releases the buffer it is handed, so the object it is given
+# stays alive for good: fed fresh bytes, every stream would leave its whole input resident.
+# Every compressor is therefore fed from one buffer per chunk size, kept for the life of the
+# process, which it would outlive anyway; a stream leaves at most one view of it [adr-0027].
+_BUFFERS: dict[int, bytearray] = {}
 
-    Two paths are a pair, joined by ``config.pairing``; one path, or any other count, is fed
-    whole in order. Interleaving yields each block on its own rather than joining it to its
-    partner, so a worker holds two blocks at most [adr-0026].
+
+def _paired_chunks(
+    paths: tuple[Path, ...], config: DistanceConfig
+) -> Iterator[bytearray | memoryview]:
+    """The bytes the compressor is fed, in order, a buffer of ``compression_chunk_bytes`` at a
+    time; each piece is valid until the next is requested.
+
+    Two paths are a pair, joined by ``config.pairing``: one after the other, or in blocks
+    taken in turn, the rest of the longer after the shorter ends [adr-0026]. One path, or any
+    other count, is fed whole in order. Full pieces are the buffer itself and only the last is
+    a view of it, so the compressor is handed no new object but one per stream [adr-0027].
     """
     pairing = config.pairing
-    if isinstance(pairing, InterleavePairing) and len(paths) == 2:
-        block = pairing.interleave_block_bytes
-        with paths[0].open("rb") as first, paths[1].open("rb") as second:
-            while True:
-                left, right = first.read(block), second.read(block)
-                if not left and not right:
-                    return
-                yield left
-                yield right
-    for path in paths:
-        with path.open("rb") as source:
-            while chunk := source.read(config.compression_chunk_bytes):
-                yield chunk
+    block = (
+        pairing.interleave_block_bytes
+        if isinstance(pairing, InterleavePairing) and len(paths) == 2
+        else None
+    )
+    size = config.compression_chunk_bytes
+    buffer = _BUFFERS.get(size)
+    if buffer is None:
+        buffer = _BUFFERS[size] = bytearray(size)
+    view = memoryview(buffer)
+    filled = 0
+    with ExitStack() as stack:
+        sources: list[BufferedReader] = [stack.enter_context(path.open("rb")) for path in paths]
+        while True:
+            moved = 0
+            # A round reads each source to its end, or, interleaved, one block of each.
+            for source in sources:
+                taken = 0
+                while block is None or taken < block:
+                    if filled == size:
+                        yield buffer
+                        filled = 0
+                    room = size - filled if block is None else min(size - filled, block - taken)
+                    got = source.readinto(view[filled : filled + room])
+                    if not got:
+                        break
+                    filled += got
+                    taken += got
+                moved += taken
+            if block is None or not moved:
+                break
+    if filled:
+        yield view[:filled]
 
 
 def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:

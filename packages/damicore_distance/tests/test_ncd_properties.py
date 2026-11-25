@@ -18,6 +18,7 @@ import lzma
 import random
 import tracemalloc
 import zlib
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Any, Literal
 
@@ -41,6 +42,7 @@ from damicore_distance import (
 )
 from damicore_distance.api import _pairs_over_window
 from damicore_distance.compressor import _paired_chunks, compressed_size
+from damicore_distance.config import PPMD_STREAM_RESIDUE_BYTES
 from damicore_distance.ncd import normalized_compression_distance
 
 pytestmark = pytest.mark.unit
@@ -271,7 +273,10 @@ def test_interleaved_pair_compression_equals_compressing_the_legacy_interleave(
     )
     legacy = _legacy_interleave(left, right, block_bytes)
     # The bytes fed to the compressor, then what it makes of them.
-    assert b"".join(_paired_chunks((left_path, right_path), config)) == legacy
+    # Each piece is the stage's reused buffer, valid until the next: copied as it comes.
+    assert b"".join(bytes(piece) for piece in _paired_chunks((left_path, right_path), config)) == (
+        legacy
+    )
     assert compressed_size((left_path, right_path), config=config) == _direct_size(
         legacy, config=config
     )
@@ -940,6 +945,74 @@ def test_an_admitted_ppmd_run_measures_what_an_unfilled_model_measures(
     if kind == "random":
         # Both sides of the edge are reached, so neither half above is vacuous.
         assert True in outcomes and False in outcomes
+
+
+# --- The PPMd stream residue (ADR 0027) ------------------------------------------------
+
+
+def test_the_pool_is_built_with_the_planned_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payloads = [random.Random(index).randbytes(200) for index in range(6)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    built: list[dict[str, Any]] = []
+
+    class RecordingExecutor:
+        def __init__(self, **options: Any) -> None:
+            built.append(options)
+
+        def submit(self, function: Any, argument: Any) -> Future[Any]:
+            future: Future[Any] = Future()
+            future.set_result(function(argument))
+            return future
+
+        def map(self, function: Any, arguments: Any) -> Any:
+            return iter([function(argument) for argument in arguments])
+
+        def shutdown(self, **_options: Any) -> None:
+            pass
+
+    monkeypatch.setattr(distance_api, "ProcessPoolExecutor", RecordingExecutor)
+    # One worker under a limit too small to hold its residue in process: a process of its
+    # own, replaced after every task.
+    config = DistanceConfig(
+        compressor=PpmdCompressor(ppmd_memory_bytes=1 << 20),
+        workers=1,
+        compression_chunk_bytes=1_024,
+        # The worker's stream and chunks, one pair's bookkeeping, and the residue of exactly
+        # one shard of one checked pair: room for one task before replacement.
+        max_working_memory_bytes=(1 << 20) + 2_048 + 24 + 2 * PPMD_STREAM_RESIDUE_BYTES + 100,
+    )
+    compute_distance_matrix(manifest_path, tmp_path / "run", config=config)
+    assert len(built) == 1
+    assert built[0]["max_workers"] == 1
+    assert built[0]["max_tasks_per_child"] == config.stream_residue(6, 15)[1] == 1
+
+
+def test_replacing_workers_changes_no_value(tmp_path: Path) -> None:
+    """Replacement is operational: a pool whose workers are replaced after every shard
+    measures the matrix a single in-process worker measures, bit for bit."""
+    payloads = [random.Random(index).randbytes(300) for index in range(5)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    model = PpmdCompressor(ppmd_memory_bytes=1 << 20)
+    serial = compute_distance_matrix(
+        manifest_path, tmp_path / "serial", config=DistanceConfig(compressor=model, workers=1)
+    )
+    replaced = compute_distance_matrix(
+        manifest_path,
+        tmp_path / "replaced",
+        config=DistanceConfig(
+            compressor=model,
+            workers=2,
+            pairs_per_shard=1,
+            compression_chunk_bytes=1_024,
+            max_working_memory_bytes=2 * ((1 << 20) + 2_048) + 2 * PPMD_STREAM_RESIDUE_BYTES,
+        ),
+    )
+    assert (
+        np.load(replaced.matrix_path, allow_pickle=False).tolist()
+        == np.load(serial.matrix_path, allow_pickle=False).tolist()
+    )
 
 
 # --- The compressor window, issue 59 ----------------------------------------------------

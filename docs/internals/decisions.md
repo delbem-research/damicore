@@ -30,6 +30,7 @@ one line per record, saying what it settles rather than what it is about.
 | [0024](../decisions/0024-a-pair-is-compressed-in-digest-order.md) | Each pair is compressed with the object whose SHA-256 is lower first, so the matrix is a function of the objects and not of their order in the input |
 | [0025](../decisions/0025-ppmd-measurements-are-checked-against-half-the-model.md) | Under PPMd every object and every pair is compressed again under half the model, and a run in which a size differs is refused; `allow_model_restart` lifts it |
 | [0026](../decisions/0026-pairing-is-part-of-the-object-encoding.md) | How a pair becomes one stream is a named rule: concatenation, or the original implementation's interleaving, whose window gate reads one block of each object |
+| [0027](../decisions/0027-the-ppmd-stream-residue-is-charged-and-contained.md) | pyppmd leaves each PPMd encoder's codec state resident; preflight charges it per stream and the stage replaces workers before it outgrows the memory limit |
 
 ```{toctree}
 :maxdepth: 1
@@ -57,4 +58,5 @@ one line per record, saying what it settles rather than what it is about.
 /decisions/0024-a-pair-is-compressed-in-digest-order
 /decisions/0025-ppmd-measurements-are-checked-against-half-the-model
 /decisions/0026-pairing-is-part-of-the-object-encoding
+/decisions/0027-the-ppmd-stream-residue-is-charged-and-contained
 ```
