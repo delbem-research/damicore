@@ -33,9 +33,9 @@ class ResourceLimits(BaseModel):
     is refused if the model and twice it code a stream differently -- the model restarted and
     coded the rest with what it had read forgotten -- or, where the limit holds no stream of
     twice the model, if half the model codes it otherwise. The check doubles the cost of the
-    pairs, not the memory preflight charges. Raise ``ppmd_memory_bytes`` or
-    ``max_working_memory_bytes``, or set this to measure anyway; the value is recorded in the
-    manifest. See ADR 0025.
+    pairs, and preflight charges the residue of the PPMd streams it opens (ADR 0027). Raise
+    ``ppmd_memory_bytes`` or ``max_working_memory_bytes``, or set this to measure anyway; the
+    value is recorded in the manifest. See ADR 0025.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -43,7 +43,8 @@ class ResourceLimits(BaseModel):
     max_objects: int = Field(default=1_000, gt=0)
     max_pairs: int = Field(default=500_000, gt=0)
     max_matrix_bytes: int = Field(default=536_870_912, gt=0)
-    max_working_memory_bytes: int = Field(default=536_870_912, gt=0)
+    # The distance stage's own default, so a stage called directly behaves as one called here.
+    max_working_memory_bytes: int = Field(default=DistanceConfig().max_working_memory_bytes, gt=0)
     required_free_disk_factor: float = Field(default=1.25, ge=1.0)
     max_pair_window_factor: float = Field(default=1.0, gt=0)
     allow_model_restart: bool = False

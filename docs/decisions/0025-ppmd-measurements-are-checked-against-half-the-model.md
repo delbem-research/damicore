@@ -72,10 +72,10 @@ object or the pair, and asking for a larger `ppmd_memory_bytes`.
 The second look runs only once no pair is in flight -- objects before the pairs, pairs after
 the last shard -- so no worker holds a stream then, and the working-memory budget is the
 look's, less what the workers still hold: the PPMd stream residue of ADR 0027, which preflight
-charged against the same limit. That budget is `max_working_memory_bytes` where the caller set
-it, `ResourceLimits.max_working_memory_bytes` through `run()`, less every worker's charged
-residue; else what the workers are charged for their streams, beside which their residue is
-charged on its own. It runs as many streams of twice the model at once as that budget holds
+charged against the same limit. That budget is `max_working_memory_bytes` --
+`ResourceLimits.max_working_memory_bytes` through `run()`, whose default the stage shares, so a
+caller who declares no limit gets the same look either way in -- less every worker's charged
+residue. It runs as many streams of twice the model at once as that budget holds
 and at most one per worker. Where the budget holds none, or twice the model is past what the
 codec takes, a stream half the model codes otherwise is refused as before, and the refusal
 names the limit; it is never measured on trust. Until a flagged pair's second look passes, its

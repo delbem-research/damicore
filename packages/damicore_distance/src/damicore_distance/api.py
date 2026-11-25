@@ -200,19 +200,13 @@ def _model_escalation(settings: DistanceConfig, residue: int) -> tuple[DistanceC
     A second look runs only while no pair is in flight, so no worker holds a stream then, but
     each still holds the PPMd stream residue of what it ran, ``residue`` at most, which
     preflight charged against the same limit [adr-0027]. The budget is therefore
-    ``max_working_memory_bytes`` less every worker's residue where the caller set a limit, and
-    otherwise what the workers are charged for their streams, beside which the residue was
-    charged on its own.
+    ``max_working_memory_bytes`` less every worker's residue.
     """
     escalation = _doubled_model(settings)
     if escalation is None:
         return None
     workers = settings.effective_workers
-    limit = settings.max_working_memory_bytes
-    if limit is None:
-        budget = workers * settings.worker_memory_bytes
-    else:
-        budget = limit - workers * residue
+    budget = settings.max_working_memory_bytes - workers * residue
     slots = min(workers, max(budget, 0) // escalation.worker_memory_bytes)
     return (escalation, slots) if slots else None
 

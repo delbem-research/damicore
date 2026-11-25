@@ -63,8 +63,9 @@ are owned.
 - **Contained.** `DistanceConfig.stream_residue(object_count, pair_count)` plans the
   containment, and preflight and the stage both read it, so the charge and the behavior cannot
   disagree. Each worker's budget for residue is what the working-memory limit leaves after
-  every worker's stream and chunks, shared among the workers. Without a declared limit it is
-  32 MiB. Every task declares the PPMd streams it opens, and a worker is replaced before a task
+  every worker's stream and chunks, shared among the workers. A caller of the stage who
+  declares no limit gets the default of `damicore.run()`, 512 MiB, so the containment is the
+  same on either way in. Every task declares the PPMd streams it opens, and a worker is replaced before a task
   would take its residue past the budget. It is never replaced before its first task, whose
   residue cannot be split, so it holds at most the larger of the budget and one task.
 - **Not `max_tasks_per_child`.** Each worker is a single-process `ProcessPoolExecutor` of its

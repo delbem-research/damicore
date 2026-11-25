@@ -592,7 +592,7 @@ def _matrix(
     compressor: PpmdCompressor,
     *,
     allow_model_restart: bool,
-    max_working_memory_bytes: int | None = ROOMY,
+    max_working_memory_bytes: int = ROOMY,
 ) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
     result = compute_distance_matrix(
         manifest_path,
@@ -838,6 +838,22 @@ def test_the_second_look_and_the_residue_workers_hold_fit_the_limit(
     assert looks, "the second look never ran"
     for slots, residue in looks:
         assert slots * look_bytes + residue <= limit, (slots, residue, limit)
+    expected = _matrix(
+        manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
+    )
+    assert np.load(result.matrix_path, allow_pickle=False).tolist() == expected.tolist()
+
+
+def test_a_single_worker_gets_the_second_look_under_the_default_limit(tmp_path: Path) -> None:
+    """A caller who declares no limit gets the default one, the limit `damicore.run()` passes,
+    and so the second look a declared limit gives: never a refusal that a declared limit would
+    have turned into a measurement (ADR 0025)."""
+    original = random.Random(12_000).randbytes(12_000)
+    payloads = [original, _near_duplicate(original, 12_000)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    result = compute_distance_matrix(
+        manifest_path, tmp_path / "run", config=DistanceConfig(compressor=SMALL_MODEL, workers=1)
+    )
     expected = _matrix(
         manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
     )

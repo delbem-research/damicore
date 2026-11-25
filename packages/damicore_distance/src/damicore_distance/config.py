@@ -20,8 +20,6 @@ _MAX_AUTO_PAIRS_PER_SHARD = 2_048
 # every PPMd stream in the process that opened it, rounded up to 8 KiB for the allocator's
 # headers and the interpreter's own bookkeeping [adr-0027].
 PPMD_STREAM_RESIDUE_BYTES = 8_192
-# What a pooled worker may accumulate before it is replaced, where no limit is declared.
-_DEFAULT_RESIDUE_BUDGET = 32 * 1_048_576
 
 
 class DeflateCompressor(BaseModel):
@@ -227,9 +225,10 @@ class DistanceConfig(BaseModel):
     resume: bool = True
     save_diagnostics: bool = False
     allow_model_restart: bool = False
-    # The working memory the caller allows the stage, or `None` for what its workers are
-    # charged. It bounds the second look under twice the PPMd model [adr-0025].
-    max_working_memory_bytes: int | None = Field(default=None, gt=0)
+    # The working memory the caller allows the stage, by default the limit `damicore.run()`
+    # passes when its own caller declares none, so the stage contains its PPMd residue and
+    # sizes the second look alike on either way in [adr-0025] [adr-0027].
+    max_working_memory_bytes: int = Field(default=536_870_912, gt=0)
 
     @property
     def worker_memory_bytes(self) -> int:
@@ -263,15 +262,10 @@ class DistanceConfig(BaseModel):
             object_count * (4 if checked else 1) + pair_count * (3 if checked else 1) + 1
         )
         per_task = PPMD_STREAM_RESIDUE_BYTES * pairs_per_shard * (2 if checked else 1)
-        if self.max_working_memory_bytes is None:
-            if workers == 1:
-                return total, None, False
-            budget = _DEFAULT_RESIDUE_BUDGET
-        else:
-            spare = self.max_working_memory_bytes - workers * self.worker_memory_bytes
-            budget = (spare - pairs_per_shard * 24) // workers
-            if workers == 1 and total <= budget:
-                return total, None, False
+        spare = self.max_working_memory_bytes - workers * self.worker_memory_bytes
+        budget = (spare - pairs_per_shard * 24) // workers
+        if workers == 1 and total <= budget:
+            return total, None, False
         held = max(budget, per_task)
         return min(total, held), held, True
 

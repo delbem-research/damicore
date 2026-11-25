@@ -126,8 +126,8 @@ def test_one_worker_stays_in_process_while_its_residue_fits_the_limit() -> None:
     assert charged == PPMD_STREAM_RESIDUE_BYTES * (100 * 4 + 4_950 * 3 + 1)
     large = small.stream_residue(1_000, 499_500)
     assert large[2] and large[1] is not None
-    standalone = DistanceConfig(workers=1).stream_residue(1_000, 499_500)
-    assert standalone[2] is False  # no limit declared: in process, as before
+    # No limit declared is the default limit, the one `damicore.run()` passes: one rule.
+    assert DistanceConfig(workers=1).stream_residue(1_000, 499_500) == large
 
 
 def _coded(paths: tuple[Path, ...], config: DistanceConfig) -> bytes:

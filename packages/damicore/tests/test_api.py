@@ -7,6 +7,7 @@ from typing import Any
 
 import pyppmd
 import pytest
+from damicore_distance import DistanceConfig
 from damicore_distance.config import PPMD_STREAM_RESIDUE_BYTES
 
 import damicore.api as api
@@ -716,6 +717,12 @@ def _near_copy_corpus(directory: Path, size: int) -> Path:
     (directory / "a.txt").write_bytes(original)
     (directory / "b.txt").write_bytes(bytes(copy))
     return directory
+
+
+def test_the_distance_stage_and_run_share_one_default_memory_limit() -> None:
+    """A caller of the distance stage who declares no limit gets the limit `run()` passes when
+    its caller declares none: one rule, so the stage behaves alike on both ways in."""
+    assert DistanceConfig().max_working_memory_bytes == ResourceLimits().max_working_memory_bytes
 
 
 def test_the_working_memory_limit_decides_the_second_look(tmp_path: Path) -> None:
