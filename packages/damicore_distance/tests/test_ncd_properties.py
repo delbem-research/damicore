@@ -843,6 +843,131 @@ def test_the_second_look_and_the_residue_workers_hold_fit_the_limit(
     assert np.load(result.matrix_path, allow_pickle=False).tolist() == expected.tolist()
 
 
+def _residue_edge_payloads(count: int) -> list[bytes]:
+    """A near-duplicate pair half the model codes otherwise, and `count` small objects whose
+    every stream fits half the model: one pair waits for the second look, and every object and
+    pair leaves residue."""
+    original = random.Random(12_000).randbytes(12_000)
+    small = [random.Random(index).randbytes(200) for index in range(count)]
+    return [original, _near_duplicate(original, 12_000), *small]
+
+
+def test_one_worker_in_process_looks_again_beside_what_it_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single worker in the calling process holds the residue of the streams it has opened,
+    not the residue of every stream the run could open: at the most a limit admits in process,
+    the second look still fits beside what is really held, and measures (ADR 0025, ADR 0027).
+    What is held is counted from the encoders the process really opens."""
+    payloads = _residue_edge_payloads(22)
+    count = len(payloads)
+    pairs = count * (count - 1) // 2
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    probe = DistanceConfig(compressor=SMALL_MODEL, workers=1, compression_chunk_bytes=1_024)
+    total, _, pooled = probe.model_copy(update={"max_working_memory_bytes": ROOMY}).stream_residue(
+        count, pairs
+    )
+    assert not pooled
+    # The largest limit still in process: what a worker is charged, its shard's slack and the
+    # residue of every stream the run could open.
+    limit = probe.worker_memory_bytes + probe.effective_pairs_per_shard(pairs) * 24 + total
+    config = probe.model_copy(update={"max_working_memory_bytes": limit})
+    assert config.stream_residue(count, pairs)[2] is False
+    doubled = PpmdCompressor(ppmd_memory_bytes=2 * SMALL_MODEL.ppmd_memory_bytes)
+    look_bytes = config.model_copy(update={"compressor": doubled}).worker_memory_bytes
+    opened = [0]
+    encoder = pyppmd.Ppmd8Encoder
+
+    def counted(*arguments: Any) -> Any:
+        opened[0] += 1
+        return encoder(*arguments)
+
+    held_at_looks: list[int] = []
+    look = distance_api._escalation_worker
+
+    def recorded(arguments: Any) -> Any:
+        held_at_looks.append(opened[0] * PPMD_STREAM_RESIDUE_BYTES)
+        return look(arguments)
+
+    monkeypatch.setattr(pyppmd, "Ppmd8Encoder", counted)
+    monkeypatch.setattr(distance_api, "_escalation_worker", recorded)
+    result = compute_distance_matrix(manifest_path, tmp_path / "run", config=config)
+    assert held_at_looks, "the second look never ran"
+    for held in held_at_looks:
+        # The look's own stream leaves its state too.
+        assert held + PPMD_STREAM_RESIDUE_BYTES + look_bytes <= limit, (held, limit)
+    monkeypatch.undo()
+    expected = _matrix(
+        manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
+    )
+    assert np.load(result.matrix_path, allow_pickle=False).tolist() == expected.tolist()
+
+
+def test_one_pooled_worker_is_replaced_to_make_room_for_the_second_look(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pooled worker may hold all the residue its limit leaves it, so the look cannot run
+    beside it; it is replaced first, and the look and what every worker then holds fit the
+    limit (ADR 0025, ADR 0027). What is held is counted from real encoders."""
+    payloads = _residue_edge_payloads(16)
+    count = len(payloads)
+    pairs = count * (count - 1) // 2
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    probe = DistanceConfig(compressor=SMALL_MODEL, workers=1, compression_chunk_bytes=1_024)
+    doubled = PpmdCompressor(ppmd_memory_bytes=2 * SMALL_MODEL.ppmd_memory_bytes)
+    look_bytes = probe.model_copy(update={"compressor": doubled}).worker_memory_bytes
+    limit = look_bytes + probe.worker_memory_bytes
+    config = probe.model_copy(update={"max_working_memory_bytes": limit})
+    assert config.stream_residue(count, pairs)[2] is True
+    held: dict[int, int] = {}
+    running = [-1]
+    slots = [0]
+    peaks: list[int] = []
+    spawned = itertools.count()
+
+    class InlineExecutor:
+        def __init__(self, **_options: Any) -> None:
+            self.slot = next(spawned)
+            held[self.slot] = 0
+
+        def submit(self, function: Any, argument: Any) -> Future[Any]:
+            if function is distance_api._escalation_worker:
+                peaks.append(slots[0] * look_bytes + sum(held.values()))
+            running[0] = self.slot
+            future: Future[Any] = Future()
+            future.set_result(function(argument))
+            return future
+
+        def shutdown(self, **_options: Any) -> None:
+            held.pop(self.slot, None)
+
+    encoder = pyppmd.Ppmd8Encoder
+
+    def counted(*arguments: Any) -> Any:
+        if running[0] in held:
+            held[running[0]] += PPMD_STREAM_RESIDUE_BYTES
+        return encoder(*arguments)
+
+    bounded = distance_api._bounded_submit
+
+    def recorded(executor: Any, function: Any, arguments: Any, limit: int, streams: Any) -> Any:
+        if function is distance_api._escalation_worker:
+            slots[0] = limit
+        return bounded(executor, function, arguments, limit, streams)
+
+    monkeypatch.setattr(distance_api, "ProcessPoolExecutor", InlineExecutor)
+    monkeypatch.setattr(pyppmd, "Ppmd8Encoder", counted)
+    monkeypatch.setattr(distance_api, "_bounded_submit", recorded)
+    result = compute_distance_matrix(manifest_path, tmp_path / "run", config=config)
+    assert peaks, "the second look never ran"
+    assert max(peaks) <= limit, (peaks, limit)
+    monkeypatch.undo()
+    expected = _matrix(
+        manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
+    )
+    assert np.load(result.matrix_path, allow_pickle=False).tolist() == expected.tolist()
+
+
 def test_a_single_worker_gets_the_second_look_under_the_default_limit(tmp_path: Path) -> None:
     """A caller who declares no limit gets the default one, the limit `damicore.run()` passes,
     and so the second look a declared limit gives: never a refusal that a declared limit would

@@ -70,13 +70,15 @@ stands. Only a stream the model and twice the model code differently is refused,
 object or the pair, and asking for a larger `ppmd_memory_bytes`.
 
 The second look runs only once no pair is in flight -- objects before the pairs, pairs after
-the last shard -- so no worker holds a stream then, and the working-memory budget is the
-look's, less what the workers still hold: the PPMd stream residue of ADR 0027, which preflight
-charged against the same limit. That budget is `max_working_memory_bytes` --
-`ResourceLimits.max_working_memory_bytes` through `run()`, whose default the stage shares, so a
-caller who declares no limit gets the same look either way in -- less every worker's charged
-residue. It runs as many streams of twice the model at once as that budget holds
-and at most one per worker. Where the budget holds none, or twice the model is past what the
+the last shard -- so no worker holds a stream then, and the look shares the working-memory
+limit only with the PPMd stream residue of ADR 0027 held at that moment, not with all the run
+could ever hold. The limit is `max_working_memory_bytes` -- `ResourceLimits.max_working_memory_bytes`
+through `run()`, whose default the stage shares, so a caller who declares no limit gets the same
+look either way in. A pool runs as many streams of twice the model at once as the limit holds,
+at most one per worker, and holds its workers to what the limit leaves beside them, replacing
+first, while it is idle, any worker that holds more. A single worker in the calling process
+looks at a stream only while it fits beside the residue of the streams the run has opened
+there. Where the budget holds none, or twice the model is past what the
 codec takes, a stream half the model codes otherwise is refused as before, and the refusal
 names the limit; it is never measured on trust. Until a flagged pair's second look passes, its
 shard is written and not completed, so an interruption before the look computes that shard
@@ -145,10 +147,10 @@ Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes`
   stream of twice the model -- one worker under a limit within one model of what it is
   charged -- they are refused as before, and raising the limit or the model admits them with
   the same values.
-- **Not the memory preflight charges.** The second look never runs beside a pair, and never
-  more streams of twice the model than the budget left beside the workers' residue holds, so
-  the look and the residue together stay within the limit preflight admitted the run under,
-  which a test holds by counting the encoders each worker opens.
+- **Not the memory preflight charges.** The second look never runs beside a pair, and the
+  look and the residue held beside it stay within the limit preflight admitted the run under,
+  which tests hold by counting the encoders each worker opens, pooled and in process. A pool
+  may replace a worker before the look to make that room, at the cost of one worker's start.
 
 ## What was not chosen
 

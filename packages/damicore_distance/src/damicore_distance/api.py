@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import itertools
 import json
 import logging
 import math
@@ -193,50 +194,57 @@ def _doubled_model(settings: DistanceConfig) -> DistanceConfig | None:
     )
 
 
-def _model_escalation(settings: DistanceConfig, residue: int) -> tuple[DistanceConfig, int] | None:
-    """The settings under twice the PPMd model, and how many such streams the working-memory
-    budget holds at once; ``None`` when no second look is possible [adr-0025].
-
-    A second look runs only while no pair is in flight, so no worker holds a stream then, but
-    each still holds the PPMd stream residue of what it ran, ``residue`` at most, which
-    preflight charged against the same limit [adr-0027]. The budget is therefore
-    ``max_working_memory_bytes`` less every worker's residue.
-    """
-    escalation = _doubled_model(settings)
-    if escalation is None:
-        return None
-    workers = settings.effective_workers
-    budget = settings.max_working_memory_bytes - workers * residue
-    slots = min(workers, max(budget, 0) // escalation.worker_memory_bytes)
-    return (escalation, slots) if slots else None
-
-
 Refusal = tuple[int, Literal["restarted", "no_look"]]
 
 
 def _second_look(
-    streams: Iterator[Look], settings: DistanceConfig, executor: _WorkerPool | None, residue: int
+    streams: Iterator[Look], settings: DistanceConfig, executor: _WorkerPool | None, opened: int
 ) -> Refusal | None:
     """The first stream to refuse and why, or ``None`` when every one passes [adr-0025]: twice
-    the PPMd model codes it otherwise than the model (``"restarted"``), or no second look is
-    possible at all (``"no_look"``).
+    the PPMd model codes it otherwise than the model (``"restarted"``), or no second look fits
+    the working-memory limit beside the PPMd stream residue already held (``"no_look"``).
 
-    The streams are consumed as they are submitted, at most as many in flight as the budget
-    holds, so neither they nor their results are ever all in memory.
+    A look runs only while no pair is in flight, so it shares the limit with residue alone
+    [adr-0027], and with what is held now, not what the run could ever hold. In the calling
+    process that is the residue of the ``opened`` streams this call opened before the look and
+    of each look before the next. A pool's workers are instead held to a budget of their own
+    for the look -- the limit less the looks it runs at once, shared among them -- and one that
+    holds more is replaced first, while it is idle; the pool's budget is restored after. The
+    streams are consumed as they are submitted, so neither they nor their results are ever all
+    in memory.
     """
-    escalation = _model_escalation(settings, residue)
+    first = next(streams, None)
+    if first is None:
+        return None
+    escalation = _doubled_model(settings)
     if escalation is None:
-        return next(((tag, "no_look") for tag, _, _ in streams), None)
-    doubled, slots = escalation
-    arguments = (
-        (tag, tuple(str(path) for path in paths), doubled, coded) for tag, paths, coded in streams
-    )
-    results = (
-        map(_escalation_worker, arguments)
-        if executor is None
-        else _bounded_submit(executor, _escalation_worker, arguments, slots, lambda _: 1)
-    )
-    return next(((tag, "restarted") for tag, fits in _typed_results(results) if not fits), None)
+        return first[0], "no_look"
+    pending = itertools.chain((first,), streams)
+    limit = settings.max_working_memory_bytes
+    # A look holds a stream under twice the model and, once it ends, that stream's state.
+    look_bytes = escalation.worker_memory_bytes + PPMD_STREAM_RESIDUE_BYTES
+    if executor is None:
+        for done, (tag, paths, coded) in enumerate(pending):
+            if (opened + done) * PPMD_STREAM_RESIDUE_BYTES + look_bytes > limit:
+                return tag, "no_look"
+            arguments = (tag, tuple(str(path) for path in paths), escalation, coded)
+            if not _escalation_worker(arguments)[1]:
+                return tag, "restarted"
+        return None
+    workers = settings.effective_workers
+    slots = min(workers, (limit - workers * PPMD_STREAM_RESIDUE_BYTES) // look_bytes)
+    if slots <= 0:
+        return first[0], "no_look"
+    previous = executor.rebudget((limit - slots * look_bytes) // workers)
+    try:
+        arguments = (
+            (tag, tuple(str(path) for path in paths), escalation, coded)
+            for tag, paths, coded in pending
+        )
+        results = _bounded_submit(executor, _escalation_worker, arguments, slots, lambda _: 1)
+        return next(((tag, "restarted") for tag, fits in _typed_results(results) if not fits), None)
+    finally:
+        executor.rebudget(previous)
 
 
 def _model_check(settings: DistanceConfig) -> DistanceConfig | None:
@@ -350,6 +358,19 @@ class _WorkerPool:
     def shutdown(self, *, cancel_futures: bool) -> None:
         for executor in self._executors:
             executor.shutdown(cancel_futures=cancel_futures)
+
+    def rebudget(self, budget: int | None) -> int | None:
+        """Set the residue budget and return the one it replaces, first replacing every worker
+        that holds more than the new one, once the tasks it took have finished."""
+        previous = self._budget
+        for index, held in enumerate(self._held):
+            if budget is not None and held > budget:
+                self._executors[index].shutdown(wait=True)
+                self._executors[index] = self._spawn()
+                self._held[index] = 0
+                self._in_flight[index].clear()
+        self._budget = budget
+        return previous
 
 
 def _bounded_submit(
@@ -594,7 +615,6 @@ def _refuse_model_restart(
     labels: list[str],
     settings: DistanceConfig,
     executor: _WorkerPool | None,
-    residue: int,
 ) -> None:
     """Refuse, before any pair, a PPMd run in which an object alone restarts the model, or
     fills more than half of it with no room for a second look [adr-0025].
@@ -614,8 +634,12 @@ def _refuse_model_restart(
     flagged = [
         (index, coded) for index, coded in enumerate(_typed_results(results)) if coded is not None
     ]
+    # In the calling process, its size and two checks per object were opened before the look.
     refused = _second_look(
-        ((index, (paths[index],), coded) for index, coded in flagged), settings, executor, residue
+        ((index, (paths[index],), coded) for index, coded in flagged),
+        settings,
+        executor,
+        3 * len(paths),
     )
     if refused is not None:
         index, cause = refused
@@ -823,9 +847,7 @@ def compute_distance_matrix(
     # serially in this process while the workers wait.
     # Workers are replaced before the PPMd stream residue they accumulate outgrows the
     # budget, and a single worker leaves the calling process only when it would [adr-0027].
-    residue, budget, pooled = settings.stream_residue(
-        len(paths), len(paths) * (len(paths) - 1) // 2
-    )
+    _, budget, pooled = settings.stream_residue(len(paths), len(paths) * (len(paths) - 1) // 2)
     executor = _WorkerPool(settings.effective_workers, budget) if pooled else None
     try:
         sizes = _load_or_compute_sizes(
@@ -836,7 +858,7 @@ def compute_distance_matrix(
             executor,
         )
 
-        _refuse_model_restart(paths, labels, settings, executor, residue)
+        _refuse_model_restart(paths, labels, settings, executor)
 
         # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
         # defers it until it is read after the last shard.
@@ -958,7 +980,10 @@ def compute_distance_matrix(
                         first, second = (i, j) if digests[i] <= digests[j] else (j, i)
                         yield i * len(paths) + j, (paths[first], paths[second]), coded
 
-                refused = _second_look(waiting_pairs(), settings, executor, residue)
+                # In the calling process: every object's size, checks and at most one look,
+                # two checks per pair and the largest object's self-pair, at most.
+                opened = 4 * len(paths) + 2 * pair_count + 1
+                refused = _second_look(waiting_pairs(), settings, executor, opened)
                 if refused is not None:
                     tag, cause = refused
                     i, j = divmod(tag, len(paths))
