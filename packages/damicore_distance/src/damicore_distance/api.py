@@ -253,9 +253,9 @@ def _model_check(settings: DistanceConfig) -> DistanceConfig | None:
     of it therefore gives, under the whole model, the size any larger one gives: the measured
     value is the objects' own, unless both models restarted and still coded the same bytes
     [adr-0025]. Bytes and not sizes: sizes alone were found to coincide across two restarts.
-    Half and not twice, so the check never needs more memory than the run already declares;
-    the price is refusing a stream that fills more than half the model and less than all of
-    it, which a larger ``ppmd_memory_bytes`` admits.
+    Half and not twice, so the check beside the pairs never needs more memory than the run
+    already declares; a stream half the model codes otherwise is not refused on that alone,
+    but looked at again under twice the model once no pair is in flight (``_second_look``).
     """
     compressor = settings.compressor
     if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
@@ -781,18 +781,20 @@ def compute_distance_matrix(
     :func:`damicore_tree_builder.build_tree` consumes together with ``labels.json``. That
     validation pass also measures the matrix range, reported as ``ncd_min``, ``ncd_max``
     and ``ncd_out_of_range_count`` on the result, and the largest object is compressed once
-    more after itself for ``ncd_self_largest``.
+    more, paired with itself under ``config.pairing``, for ``ncd_self_largest``.
 
-    Each pair is compressed as one concatenation, the object whose SHA-256 is lower first, so
-    the matrix is a function of the objects and not of their order in the manifest: reordered,
-    it comes back with its rows and columns reordered alike and no value changed [adr-0024].
+    Each pair is compressed as one stream joined by ``config.pairing`` [adr-0026], the object
+    whose SHA-256 is lower first, so the matrix is a function of the objects and not of their
+    order in the manifest: reordered, it comes back with its rows and columns reordered alike
+    and no value changed [adr-0024].
 
     Pairs are computed shard by shard straight into the memory map, and each finished shard
     is checkpointed with a digest, so an interrupted run resumes from the shards already
     done. With ``config.resume`` disabled, existing outputs are a conflict instead of a
-    starting point. With more than one worker the per-object compressed sizes and the shards
-    run in one pool of spawned processes that re-import the caller's ``__main__``, so a
-    script-level call must sit under ``if __name__ == "__main__":``.
+    starting point. With more than one worker, or one whose PPMd stream residue outgrows the
+    working-memory limit [adr-0027], the per-object compressed sizes and the shards run in
+    spawned processes that re-import the caller's ``__main__``, so a script-level call must
+    sit under ``if __name__ == "__main__":``.
 
     Parameters
     ----------
@@ -810,7 +812,9 @@ def compute_distance_matrix(
         outputs exist but resume is disabled (``output_directory_conflict_error``); the
         compressor failed (``compression_error``); a worker died or returned an invalid shard
         (``distance_computation_error``); the finished matrix breaks an invariant
-        (``distance_matrix_validation_error``).
+        (``distance_matrix_validation_error``); under the PPMd model check, an object or a
+        pair restarts the model, or fills more than half of it with no second look possible
+        (``model_capacity_error``) [adr-0025].
     """
     started = time.monotonic()
     settings = config or DistanceConfig()

@@ -20,8 +20,7 @@ carries anything else, a date included, matches neither and fails the release.
   value whose pair was compressed in the other order changes. The distance rule in the
   manifest's `method` block is `ncd-max/v2`, and a distance checkpoint written before this
   release is refused on resume rather than mixed with new shards. ADR 0024.
-- **Under PPMd, a run in which an object or a pair needs more than half the model memory is
-  refused.** PPMd restarts its model from nothing when the memory fills, so whatever a pair
+- **Under PPMd, a run in which an object or a pair restarts the model is refused.** PPMd restarts its model from nothing when the memory fills, so whatever a pair
   codes after the restart is coded with the first object forgotten: on numeric columns with
   six decimals the default 64 MiB model had lost most of the separation between distributions
   at 32 MiB per column, and a pair of near-duplicates measured 0.198 where a model that does
@@ -29,12 +28,12 @@ carries anything else, a date included, matches neither and fails the release.
   The distance stage now compresses every object, before any pair, and every pair, as it is
   computed, again under half the model: a stream half the model codes into the same bytes has
   the size any larger model gives. A stream half the model codes otherwise is compressed once
-  more under twice the model, as many at once as `max_working_memory_bytes` holds and only
-  once no pair is in flight, and the run is refused only if the model and twice it code it
+  more under twice the model, as many at once as `max_working_memory_bytes` holds beside the
+  stream residue the workers keep and only once no pair is in flight, and the run is refused only if the model and twice it code it
   differently, that is, if the model restarted. A run resumed with the check measures again
   the shards measured without it, and a directory whose distance stage completed without it
-  is refused by a call that applies it. The pairs take about twice as long; the memory
-  each worker is charged does not change. Where the budget holds no stream of twice the model,
+  is refused by a call that applies it. The pairs take about twice as long, and each object
+  and pair opens more PPMd streams, whose residue preflight charges (see Fixed). Where the budget holds no stream of twice the model,
   a stream that needs between half and all of the model is refused, naming the limit, and a
   larger limit or `ppmd_memory_bytes` admits it with the same values. The refusal is a
   `ResourceLimitError` naming the object or the pair and asking for a larger

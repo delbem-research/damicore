@@ -146,7 +146,7 @@ it.
   search has found. Without memory for the second look, a stream half the model codes
   otherwise is refused, and the refusal names the limit. The pairs then cost twice the time,
   within the same memory limit. `ResourceLimits.allow_model_restart` lifts the check
-  [adr-0025]. Measuring objects past the model -- interleaved pairing -- is still open work.
+  [adr-0025].
 - **Idempotency is measured once, not established.** The largest object is compressed a
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is
@@ -163,7 +163,7 @@ it.
 |---|---|
 | Available | `ppmd` through `pyppmd`; `zlib` and `gzip` through `zlib.compressobj`; `bzip2` and `lzma` through the standard library; exact (every pair computed) |
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
-| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result. Interleaved, what is measured against the window is one block of each object ([adr-0026]). Under PPMd, an object or a pair that needs more than half the model, refused by the distance stage -- an object before any pair -- unless `allow_model_restart` ([adr-0025]) |
+| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result. Interleaved, what is measured against the window is one block of each object ([adr-0026]). Under PPMd, an object or a pair the model codes otherwise than twice the model -- it restarted -- or, with no memory for that second look, otherwise than half the model, refused by the distance stage -- an object before any pair -- unless `allow_model_restart` ([adr-0025]) |
 | Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a compressor stream that cannot be allocated, raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
 
