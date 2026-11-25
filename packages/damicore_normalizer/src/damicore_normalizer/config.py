@@ -69,4 +69,7 @@ class NormalizationConfig(BaseModel):
 
     source: ObjectSource = DelimitedSource()
     chunk_rows: int = Field(default=50_000, gt=0)
+    # The most object files a column split holds open at once. It bounds descriptors, not
+    # speed: a wider table writes its other columns from a fixed buffer, opening each file once
+    # per flush rather than once per cell (issue #134).
     max_open_files: int = Field(default=64, gt=0)

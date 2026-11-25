@@ -12,7 +12,6 @@ References
 from __future__ import annotations
 
 import hashlib
-from collections import OrderedDict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,26 +30,63 @@ class TableScan:
     row_count: int
 
 
-class _FilePool:
-    def __init__(self, root: Path, limit: int) -> None:
-        self._root = root
-        self._limit = limit
-        self._streams: OrderedDict[str, BinaryIO] = OrderedDict()
+# The column bytes held before they are written, across all columns. A split writes the cells
+# of a row to every column in turn, so writing each cell as it comes opens every file once per
+# row as soon as the files do not all fit `max_open_files` (issue #134). Held to this budget,
+# each file is opened once per budget's worth of bytes instead. Measured on tables of 80 and
+# 1,000 columns, 4 to 8 MiB normalized as fast as keeping every file open, and 1 MiB was 5%
+# slower at 1,000 columns; 8 MiB gives wider tables the larger writes, at a fixed cost.
+_WRITE_BUFFER_BYTES = 8 * 1_048_576
 
-    def write(self, name: str, payload: bytes) -> None:
-        stream = self._streams.pop(name, None)
-        if stream is None:
-            if len(self._streams) >= self._limit:
-                _, oldest = self._streams.popitem(last=False)
-                oldest.close()
-            stream = (self._root / name).open("ab")
-        self._streams[name] = stream
-        stream.write(payload)
+
+class _ColumnWriter:
+    """Append each column's bytes to its object file, holding at most a fixed budget of them.
+
+    A table no wider than ``limit`` keeps every file open for the whole split, as before. A
+    wider one keeps its first ``limit - 1`` files open and opens each of the rest once per
+    flush, one at a time, so no more than ``limit`` object files are ever open at once. The
+    bytes of every column reach its file in the order they came, so the objects do not depend
+    on when the buffers are flushed.
+    """
+
+    def __init__(self, root: Path, names: Sequence[str], limit: int) -> None:
+        self._root = root
+        self._names = names
+        self._kept = len(names) if len(names) <= limit else limit - 1
+        self._buffers = [bytearray() for _ in names]
+        self._held = 0
+        self._streams: list[BinaryIO] = []
+
+    def write(self, index: int, payload: bytes) -> None:
+        self._buffers[index] += payload
+        self._held += len(payload)
+        if self._held >= _WRITE_BUFFER_BYTES:
+            self.flush()
+
+    def flush(self) -> None:
+        for index, buffer in enumerate(self._buffers):
+            if not buffer:
+                continue
+            if index < len(self._streams):
+                self._streams[index].write(buffer)
+            elif index < self._kept and index == len(self._streams):
+                stream = (self._root / self._names[index]).open("ab")
+                self._streams.append(stream)
+                stream.write(buffer)
+            else:
+                with (self._root / self._names[index]).open("ab") as stream:
+                    stream.write(buffer)
+            buffer.clear()
+        self._held = 0
 
     def close(self) -> None:
-        for stream in self._streams.values():
+        """Release every file without writing what is held: called on success after the last
+        flush, and on failure, where writing could raise over the error that stopped the split."""
+        for stream in self._streams:
             stream.close()
         self._streams.clear()
+        self._buffers = [bytearray() for _ in self._names]
+        self._held = 0
 
 
 def validate_header_names(header: Sequence[str]) -> None:
@@ -105,7 +141,12 @@ def split_table(
     max_chunk_bytes = 0
     chunk_bytes = 0
     row_count = 0
-    pool = _FilePool(objects_dir, max_open_files) if objects_dir is not None else None
+    names = [f"column_{index + 1:06d}.jsonl" for index in range(len(header))]
+    writer = (
+        _ColumnWriter(objects_dir, names, max_open_files)
+        if objects_dir is not None and split == "columns"
+        else None
+    )
 
     try:
         for values in rows:
@@ -142,15 +183,17 @@ def split_table(
                     column_hashes[index].update(payload)
                     column_sizes[index] += len(payload)
                     chunk_bytes += len(payload)
-                    if pool is not None:
-                        pool.write(f"column_{index + 1:06d}.jsonl", payload)
+                    if writer is not None:
+                        writer.write(index, payload)
             if row_count % chunk_rows == 0:
                 max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
                 chunk_bytes = 0
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
+        if writer is not None:
+            writer.flush()
     finally:
-        if pool is not None:
-            pool.close()
+        if writer is not None:
+            writer.close()
 
     if row_count == 0 or (split == "rows" and row_count < 2):
         raise NormalizerError(

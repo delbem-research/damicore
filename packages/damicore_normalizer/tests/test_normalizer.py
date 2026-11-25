@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 import damicore_normalizer.api as api
 import damicore_normalizer.delimited_reader as delimited_reader
-import damicore_normalizer.table_split as table_split
 from damicore_normalizer import (
     DelimitedSource,
     FileCorpusSource,
@@ -375,11 +374,9 @@ def test_a_blank_line_is_a_full_width_empty_row(tmp_path: Path) -> None:
     assert (tmp_path / "out/objects/row_000002.jsonl").read_bytes() == b'["",""]\n'
 
 
-def test_more_columns_than_the_open_file_limit_stay_complete(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The LRU pool caps open handles, so a wide CSV forces
-    eviction and reopening. Every object must still contain all of its rows, in order."""
+def test_more_columns_than_the_open_file_limit_stay_complete(tmp_path: Path) -> None:
+    """More columns than files may be open at once: every object must still contain all of its
+    rows, in order. How many files are open at once is held in `test_column_writer.py`."""
     columns = 70
     limit = 8
     header = ",".join(f"c{index:03d}" for index in range(columns))
@@ -387,22 +384,12 @@ def test_more_columns_than_the_open_file_limit_stay_complete(
     source = tmp_path / "wide.csv"
     source.write_text("\n".join([header, *rows]) + "\n", encoding="utf-8")
 
-    peak_open_streams = 0
-    write = table_split._FilePool.write
-
-    def counting_write(pool: table_split._FilePool, name: str, payload: bytes) -> None:
-        nonlocal peak_open_streams
-        write(pool, name, payload)
-        peak_open_streams = max(peak_open_streams, len(pool._streams))
-
-    monkeypatch.setattr(table_split._FilePool, "write", counting_write)
     result = normalize_csv(
         source,
         tmp_path / "out",
         config=NormalizationConfig(chunk_rows=1, max_open_files=limit),
     )
 
-    assert peak_open_streams == limit
     assert result.object_count == columns
     for index, item in enumerate(result.objects):
         payload = (tmp_path / "out" / item.relative_path).read_bytes()
