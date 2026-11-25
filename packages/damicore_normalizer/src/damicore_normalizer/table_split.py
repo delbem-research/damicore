@@ -46,8 +46,10 @@ class _ColumnWriter:
     A table no wider than ``limit`` keeps every file open for the whole split, as before. A
     wider one keeps its first ``limit - 1`` files open and opens each of the rest once per
     flush, one at a time, so no more than ``limit`` object files are ever open at once. A flush
-    writes at least the budget, so each of those opens writes on average a column's share of
-    it; only a row larger than the budget brings back an open per cell, as before this writer.
+    is due once the next cell would not fit, so each of those opens writes on average close to
+    a column's share of it; only rows larger than the budget bring back an open per cell, as
+    before this writer. The bytes held never exceed the budget: a larger cell is written as it
+    comes.
     The bytes of every column reach its file in the order they came, so the objects do not
     depend on when the buffers are flushed. Beside the budget it holds one buffer per column,
     as `split_table` already holds a digest and a size per column.
@@ -64,30 +66,37 @@ class _ColumnWriter:
         return self._root / f"column_{index + 1:06d}.jsonl"
 
     def write(self, index: int, payload: bytes) -> None:
+        # Never past the budget: what does not fit flushes what is held first, and a cell the
+        # budget cannot hold is written as it is, after the bytes of its column that came first.
+        if self._held + len(payload) > _WRITE_BUFFER_BYTES:
+            self.flush()
+            if len(payload) > _WRITE_BUFFER_BYTES:
+                self._write_out(index, payload)
+                return
         self._buffers[index] += payload
         self._held += len(payload)
-        if self._held >= _WRITE_BUFFER_BYTES:
-            self.flush()
 
     def flush(self) -> None:
         for index, buffer in enumerate(self._buffers):
-            if not buffer:
-                continue
-            if index < len(self._streams):
-                self._streams[index].write(buffer)
-            elif index < self._kept and index == len(self._streams):
-                self._streams.append(self._path(index).open("ab"))
-                self._streams[index].write(buffer)
-            else:
-                stream = self._path(index).open("ab")
-                try:
-                    stream.write(buffer)
-                except BaseException:
-                    _close_quietly(stream)
-                    raise
-                stream.close()
-            buffer.clear()
+            if buffer:
+                self._write_out(index, buffer)
+                buffer.clear()
         self._held = 0
+
+    def _write_out(self, index: int, data: bytes | bytearray) -> None:
+        if index < len(self._streams):
+            self._streams[index].write(data)
+        elif index < self._kept and index == len(self._streams):
+            self._streams.append(self._path(index).open("ab"))
+            self._streams[index].write(data)
+        else:
+            stream = self._path(index).open("ab")
+            try:
+                stream.write(data)
+            except BaseException:
+                _close_quietly(stream)
+                raise
+            stream.close()
 
     def close(self) -> None:
         """Close every kept file after the last flush. Closing writes what a file still holds,

@@ -212,6 +212,28 @@ def _unwritable(objects: Path) -> None:
         (objects / f"column_{index + 1:06d}.jsonl").symlink_to("/dev/full")
 
 
+def test_a_failed_write_to_a_column_opened_per_flush_closes_its_file(tmp_path: Path) -> None:
+    """Only the last column -- past `max_open_files`, so opened once per flush -- cannot be
+    written: its own write error propagates and no object file stays open."""
+    if not Path("/dev/full").exists() or not Path("/proc/self/fd").is_dir():
+        pytest.skip("needs /dev/full and /proc")
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    (objects / f"column_{_COLUMNS:06d}.jsonl").symlink_to("/dev/full")
+    with pytest.raises(OSError) as raised:
+        table_split.split_table(
+            [f"c{index}" for index in range(_COLUMNS)],
+            _rows(400),
+            split="columns",
+            chunk_rows=50_000,
+            max_open_files=64,
+            objects_dir=objects,
+        )
+    assert raised.value.errno == 28  # ENOSPC
+    assert raised.value.__context__ is None, raised.value.__context__
+    assert _open_objects(objects) == []
+
+
 def _open_objects(objects: Path) -> list[str]:
     held: list[str] = []
     for descriptor in os.listdir("/proc/self/fd"):
@@ -247,3 +269,37 @@ def test_a_failed_write_raises_its_own_error_and_closes_every_object_file(
     assert raised.value.errno == 28  # ENOSPC
     assert raised.value.__context__ is None, raised.value.__context__
     assert _open_objects(objects) == []
+
+
+def _peak(objects_dir: Path | None, rows: list[list[str]]) -> int:
+    if objects_dir is not None:
+        objects_dir.mkdir()
+    tracemalloc.start()
+    try:
+        table_split.split_table(
+            ["a", "b"],
+            iter(rows),
+            split="columns",
+            chunk_rows=50_000,
+            max_open_files=64,
+            objects_dir=objects_dir,
+        )
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+def test_a_cell_larger_than_the_buffer_does_not_grow_it(tmp_path: Path) -> None:
+    """The buffer is a bound, not a target: a cell that does not fit is written out rather than
+    held beside a nearly full buffer. Writing the split must cost at most the buffer over only
+    measuring it, whatever the largest cell."""
+    budget = table_split._WRITE_BUFFER_BYTES
+    # Two UTF-8 bytes per character, so the serialized cell is not hidden by the transient
+    # copies serializing it makes, which measuring alone also makes.
+    rows = [["a" * (budget - 100), "é" * (3 * budget)], ["x", "y"]]
+    measured = _peak(None, rows)
+    written = _peak(tmp_path / "out", rows)
+    assert written - measured <= budget + 1_048_576, (written - measured, budget)
+    assert (tmp_path / "out" / "column_000002.jsonl").read_bytes() == (
+        ('"' + "é" * (3 * budget) + '"\n"y"\n').encode()
+    )
