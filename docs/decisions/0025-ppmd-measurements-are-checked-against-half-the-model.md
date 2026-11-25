@@ -166,7 +166,17 @@ This revises ADR 0023's exemption of PPMd, not its gate: the windowed compressor
 as before, and PPMd is now checked by measurement instead of not at all. Runs under PPMd in
 which an object or a pair restarts the model, which completed under 0.5 with a distance that
 was not the objects', are refused until the model is raised or the check is lifted; so are
-those that need more than half the model where the budget holds no second look. Skipping the
-check for pairs too short to fill half the model, from a bound on what PPMd can allocate per
-byte, would remove most of the time cost without weakening the check, if such a bound can be
-proved from the codec. Interleaved pairing (ADR 0026) is checked like any other stream.
+those that need more than half the model where the budget holds no second look. Interleaved
+pairing (ADR 0026) is checked like any other stream.
+
+Skipping the check for streams too short to fill half the model would remove its time cost
+without weakening it, if the shortness could be proved. Read against `Ppmd8.c` in pyppmd 1.3.1
+on 2026-11-25, the bound that can be proved is too loose to pay: the model writes one byte of
+text per symbol into an eighth of its memory, and per symbol up to `ppmd_order` contexts gain
+a state, each of whose state arrays may be reallocated at up to 128 units of 12 bytes, beside a
+new context of one unit -- 9,360 bytes per symbol at order 6. Half the default model's unit
+area holds that for about 3,100 symbols, so only pairs of a few KB are proved safe, and those
+cost the check microseconds. A tighter bound would count on freed arrays being reused, which
+the allocator does not promise: a fragmented free list can fail an allocation with memory to
+spare. So the check runs on every stream, and the time it costs is the price of a guarantee a
+bound cannot give.
