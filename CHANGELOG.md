@@ -5,6 +5,21 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## 0.6.1
+
+### Fixed
+
+- **A column split wider than `max_open_files` no longer opens a file for every cell.** The
+  normalizer wrote each cell straight to its column's object file through a pool of at most
+  `max_open_files` (default 64) open files, and a row visits the columns in a cycle, so a table
+  wider than the pool missed it on every write: a 12.6 GB, 76-column CSV opened and closed a
+  file about 735 million times and spent about three hours normalizing. The writer now holds at
+  most 8 MiB of column bytes and flushes them in order; a wide table keeps `max_open_files - 1`
+  files open and opens each of the others once per flush, so it never holds more than
+  `max_open_files` open. A table no wider than the limit is written as before, and every
+  object's bytes, size and SHA-256 are unchanged. If reading fails partway, the held bytes are
+  dropped and every file closed, so the reader's own error is the one raised (#134).
+
 ## 0.6.0
 
 ### Breaking
