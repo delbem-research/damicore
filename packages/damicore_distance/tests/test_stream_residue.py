@@ -20,6 +20,7 @@ from damicore_distance import (
     ConcatPairing,
     DeflateCompressor,
     DistanceConfig,
+    DistanceError,
     InterleavePairing,
     PpmdCompressor,
 )
@@ -219,3 +220,15 @@ def test_concurrent_streams_in_one_process_measure_what_they_measure_alone(
     with ThreadPoolExecutor(max_workers=4) as threads:
         together = list(threads.map(fingerprint, jobs))
     assert together == alone
+
+
+def test_a_piece_coded_into_a_full_output_block_is_refused() -> None:
+    """The guard behind the piece bound: handed more than the bound, so that its code reaches
+    pyppmd's first output block, the encoder refuses rather than report a stream that may
+    have lost bytes (ADR 0027)."""
+    feed, _ = distance_compressor._stream(
+        DistanceConfig(compressor=PpmdCompressor(ppmd_memory_bytes=1 << 22))
+    )
+    with pytest.raises(DistanceError) as refused:
+        feed(bytearray(random.Random(1).randbytes(80_000)))
+    assert refused.value.code == "compression_error"

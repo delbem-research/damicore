@@ -324,7 +324,12 @@ class _WorkerPool:
             self._executors[index] = self._spawn()
             self._held[index] = 0
             self._in_flight[index].clear()
-        future = self._executors[index].submit(function, argument)
+        try:
+            future = self._executors[index].submit(function, argument)
+        except BrokenProcessPool as exc:
+            # A worker killed while idle breaks its executor before the next submission, which
+            # no result read would ever report: typed here, on every phase's way in.
+            raise DistanceError(_BROKEN_POOL_MESSAGE, code="distance_computation_error") from exc
         self._held[index] += residue
         self._in_flight[index].append(future)
         return future

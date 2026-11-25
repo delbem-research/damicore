@@ -658,6 +658,33 @@ def test_a_manifest_with_fewer_than_two_objects_is_rejected(tmp_path: Path) -> N
     assert raised.value.code == "artifact_validation_error"
 
 
+def test_a_pool_that_breaks_between_phases_is_a_typed_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker the operating system kills while idle breaks its executor before the next
+    task is even submitted. The failure must still reach the caller as the stage's typed
+    error, whichever phase submits next."""
+    normalized = _normalized(tmp_path)
+
+    class BrokenExecutor:
+        def __init__(self, **_options: object) -> None:
+            pass
+
+        def submit(self, function: object, argument: object) -> Future[object]:
+            raise BrokenProcessPool("a child process terminated abruptly")
+
+        def shutdown(self, **_options: object) -> None:
+            pass
+
+    monkeypatch.setattr(distance_api, "ProcessPoolExecutor", BrokenExecutor)
+    with pytest.raises(DistanceError) as raised:
+        compute_distance_matrix(
+            normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
+        )
+    assert raised.value.code == "distance_computation_error"
+    assert isinstance(raised.value.__cause__, BrokenProcessPool)
+
+
 def test_a_worker_returning_a_non_finite_shard_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

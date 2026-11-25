@@ -84,7 +84,10 @@ carries anything else, a date included, matches neither and fails the release.
   `max_tasks_per_child`, which hangs under Python 3.11 and 3.12. A single worker stays in the
   calling process while the whole run's residue fits, and only past that gets a process of its
   own. The automatic shard size is capped at 2,048 pairs, down from 10,000, so a worker can be
-  replaced between shards. A run that fitted its limit runs as before. ADR 0027.
+  replaced between shards. A run that fitted its limit runs as before.
+  `DistanceConfig.worker_memory_bytes` and `DistanceConfig.stream_residue()` state what a worker
+  is charged and how its residue is contained, and preflight reads them. A worker killed while
+  idle now surfaces as `distance_computation_error` rather than as a raw broken pool. ADR 0027.
 
 ## 0.5.0
 

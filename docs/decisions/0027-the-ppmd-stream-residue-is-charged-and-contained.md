@@ -44,8 +44,9 @@ are owned.
   also guarded: a call returning 32 KiB or more raises `compression_error` rather than report
   a stream that may have lost bytes. The bound makes the guard unreachable. The piece size is
   operational: values no longer depend on `compression_chunk_bytes`, which still sizes the
-  other compressors' pieces. Measured, the smaller calls cost nothing: 1.96 s for 4 MiB in
-  1,023-byte pieces against 2.02 s in one call.
+  other compressors' pieces. Measured, the smaller calls cost within 5% either way: 1.96 s for
+  4 MiB in 1,023-byte pieces against 2.02 s in one call, and 2.15 s against 2.06 s on a second
+  run.
 - **A reused buffer, per thread.** Every compressor is fed from one buffer per piece size, read
   into with `readinto` and kept for the life of the thread, which outlives it anyway. A full
   piece is the buffer itself, and only a stream's last piece is a view of it. A stream
@@ -69,8 +70,10 @@ are owned.
 - **Not `max_tasks_per_child`.** Each worker is a single-process `ProcessPoolExecutor` of its
   own, replaced by shutting it down and starting another. The standard library's
   `max_tasks_per_child` hangs under CPython 3.11 and 3.12, 3.12.3 included: a retired worker is
-  not replaced while tasks are queued. Measured, `map` over more tasks than one round of
-  workers hung on 3.11.18 and 3.12.3 and finished on 3.13.18. A task goes to a worker that can
+  not replaced while tasks are queued. Measured, the stage built on it hung on 3.11.18 and
+  3.12.3 and finished on 3.13.18. A standalone `map` of 10 to 120 tasks hung on 3.12.3 in four
+  of five configurations here; a second machine finished it in 21 others, so the race is real
+  but its window depends on timing. A task goes to a worker that can
   take it without replacement, the least busy of them. A worker is shut down only once the
   tasks it took have finished, and a dead worker still surfaces as the broken pool it always
   did.
@@ -86,16 +89,17 @@ are owned.
 
 ## What changes, and why nothing is lost
 
-- **Values.** A PPMd value changes only where pyppmd dropped a byte. The new value is the one
-  the decoder accepts, where the old one was a stream it rejected. Every other value is
-  unchanged: concatenated matrices under the other compressors, and PPMd ones on objects whose
-  code never crossed a block, are bit for bit those of 0.5.
+- **Values.** This record changes a PPMd value only where pyppmd dropped a byte. The new value
+  is the one the decoder accepts, where the old one was a stream it rejected. It changes no
+  other value: measured against the code before it, every size under the other compressors and
+  every PPMd size whose stream decoded is bit for bit the same. Against 0.5, values also move
+  where ADR 0024's digest order reverses a pair.
 - **Runs that fitted their limit** run where they ran. A pool whose budget holds the run's
   whole residue never replaces a worker, and replacement changes no value, which a test holds
   bit for bit.
 - **Runs that did not fit** now stay within their limit, at the cost of a replacement where a
   worker's budget runs out. A replacement costs the cold start of a spawned worker that imports
-  the stage, 0.31 to 0.48 s over five starts. At the defaults a worker's budget holds one full
+  the stage: 0.22 to 0.48 s, measured on two machines. At the defaults a worker's budget holds one full
   shard of 2,048 checked pairs. A worker is therefore replaced about once per shard, about
   0.15 ms a pair, against the compressions that cost more than that at any object size where
   the residue matters. Tasks of one object each never force a replacement on their own.
