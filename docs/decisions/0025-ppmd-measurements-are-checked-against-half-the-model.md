@@ -78,9 +78,11 @@ hold the cases that broke earlier checks: the near-duplicate pair a per-object c
 and the restart whose size coincided.
 
 What the check does not prove: if both the model and its half restart and still code the same
-bytes, a wrong size is admitted. The runs the verification found admitted with a wrong size are
-refused when bytes are compared, and pyppmd exposes no restart signal that would close the
-case by construction.
+bytes, a wrong size is admitted. The verification's search, rerun with bytes compared over the
+same 30,000 runs, admitted 7,883 and refused 22,117: no admitted run differed from a 256 MiB
+model, and every refused one held a stream half the model codes differently from it. That is
+a search, not a proof; pyppmd exposes no restart signal that would close the case by
+construction.
 `ncd_self_largest`, which is a diagnostic and never a gate, is not checked.
 
 Preflight cannot apply the check: it needs the object bytes, which do not exist before
