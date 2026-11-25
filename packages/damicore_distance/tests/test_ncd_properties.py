@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import bz2
 import hashlib
+import io
 import itertools
 import json
 import lzma
@@ -27,9 +28,11 @@ from hypothesis import strategies as st
 
 from damicore_distance import (
     Bzip2Compressor,
+    ConcatPairing,
     DeflateCompressor,
     DistanceConfig,
     DistanceError,
+    InterleavePairing,
     LzmaCompressor,
     PpmdCompressor,
     compute_distance_matrix,
@@ -50,6 +53,31 @@ COMPRESSOR: st.SearchStrategy[CompressorName] = st.sampled_from(
     ["zlib", "gzip", "ppmd", "bzip2", "lzma"]
 )
 LEVEL = st.integers(min_value=0, max_value=9)
+Pairing = ConcatPairing | InterleavePairing
+PAIRING: st.SearchStrategy[Pairing] = st.one_of(
+    st.just(ConcatPairing()),
+    st.builds(InterleavePairing, interleave_block_bytes=st.integers(min_value=1, max_value=64)),
+)
+
+
+def _legacy_interleave(first: bytes, second: bytes, block_bytes: int) -> bytes:
+    """``interleave`` from the original damicore-python (``src/ncd.py``), ported line for line
+    from files to bytes: the oracle the pairing is held to, sharing no code with it."""
+    paired = io.BytesIO()
+    left, right = io.BytesIO(first), io.BytesIO(second)
+    maxsize = max(len(first), len(second))
+    for _ in range(0, maxsize, block_bytes):
+        x1 = left.read(block_bytes)
+        x2 = right.read(block_bytes)
+        paired.write(x1 + x2)
+    return paired.getvalue()
+
+
+def _paired(first: bytes, second: bytes, pairing: Pairing) -> bytes:
+    """The bytes a pairing hands the compressor, built by the oracle above or by joining."""
+    if isinstance(pairing, InterleavePairing):
+        return _legacy_interleave(first, second, pairing.interleave_block_bytes)
+    return first + second
 
 
 def _config(compressor: CompressorName, level: int, chunk_bytes: int) -> DistanceConfig:
@@ -213,6 +241,59 @@ def test_pair_compression_equals_compressing_the_joined_bytes(
     )
 
 
+@given(
+    left=PAYLOAD,
+    right=PAYLOAD,
+    chunk_bytes=CHUNK_BYTES,
+    compressor=COMPRESSOR,
+    block_bytes=st.integers(min_value=1, max_value=128),
+)
+@settings(max_examples=200, deadline=None)
+def test_interleaved_pair_compression_equals_compressing_the_legacy_interleave(
+    tmp_path_factory: pytest.TempPathFactory,
+    left: bytes,
+    right: bytes,
+    chunk_bytes: int,
+    compressor: CompressorName,
+    block_bytes: int,
+) -> None:
+    """The interleaved pair is the original implementation's, byte for byte, streamed rather
+    than written to a temporary file: blocks of ``block_bytes`` taken in turn, the rest of the
+    longer object after the shorter one ends (ADR 0026). Empty objects, a block longer than
+    both, and a block of one byte are all in the drawn range."""
+    directory = tmp_path_factory.mktemp("interleaved")
+    left_path = _object_file(directory, "left.jsonl", left)
+    right_path = _object_file(directory, "right.jsonl", right)
+    config = _config(compressor, 6, chunk_bytes).model_copy(
+        update={"pairing": InterleavePairing(interleave_block_bytes=block_bytes)}
+    )
+    assert compressed_size((left_path, right_path), config=config) == _direct_size(
+        _legacy_interleave(left, right, block_bytes), config=config
+    )
+
+
+@given(left=PAYLOAD, right=PAYLOAD, compressor=COMPRESSOR)
+@settings(max_examples=60, deadline=None)
+def test_concatenation_is_interleaving_with_a_block_that_holds_either_object(
+    tmp_path_factory: pytest.TempPathFactory,
+    left: bytes,
+    right: bytes,
+    compressor: CompressorName,
+) -> None:
+    """One block of each object is the whole of each: the pairings meet there, which is why
+    the window gate reads one block of each object in place of the whole object (ADR 0026)."""
+    directory = tmp_path_factory.mktemp("meet")
+    paths = (
+        _object_file(directory, "left.jsonl", left),
+        _object_file(directory, "right.jsonl", right),
+    )
+    concatenated = _named(compressor)
+    holding = concatenated.model_copy(
+        update={"pairing": InterleavePairing(interleave_block_bytes=max(len(left), len(right), 1))}
+    )
+    assert compressed_size(paths, config=holding) == compressed_size(paths, config=concatenated)
+
+
 def test_the_default_compressor_reproduces_a_known_size(tmp_path: Path) -> None:
     """A size computed once with pyppmd 1.3.1, so a codec build that encodes differently --
     another platform, another patch release -- fails here instead of shifting every NCD."""
@@ -314,23 +395,23 @@ def test_ncd_is_the_exact_ratio_and_is_never_clamped(cx: int, cy: int, cxy: int)
     assert normalized_compression_distance(cy, cx, cxy) == value
 
 
-@given(payloads=st.lists(PAYLOAD, min_size=2, max_size=4))
+@given(payloads=st.lists(PAYLOAD, min_size=2, max_size=4), pairing=PAIRING)
 @settings(
-    max_examples=30,
+    max_examples=40,
     deadline=None,
     # The temporary directory comes from the session-scoped factory, so each example gets a
     # fresh one; only the unused function-scoped fixtures would trip this check.
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
-    tmp_path_factory: pytest.TempPathFactory, payloads: list[bytes]
+    tmp_path_factory: pytest.TempPathFactory, payloads: list[bytes], pairing: Pairing
 ) -> None:
     directory = tmp_path_factory.mktemp("matrix")
     manifest_path = _normalization_manifest(directory / "normalized", payloads)
     result = compute_distance_matrix(
         manifest_path,
         directory / "run",
-        config=DistanceConfig(workers=1, pairs_per_shard=1),
+        config=DistanceConfig(workers=1, pairs_per_shard=1, pairing=pairing),
     )
     matrix = np.load(result.matrix_path, allow_pickle=False)
 
@@ -350,7 +431,7 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
                 (payloads[left], payloads[right]),
                 key=lambda payload: hashlib.sha256(payload).digest(),
             )
-            joined = _direct_size(first, second, config=config)
+            joined = _direct_size(_paired(first, second, pairing), config=config)
             expected = normalized_compression_distance(sizes[left], sizes[right], joined)
             assert float(matrix[left, right]) == expected
 
@@ -359,7 +440,7 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
         range(count),
         key=lambda index: (len(payloads[index]), hashlib.sha256(payloads[index]).digest()),
     )
-    doubled = _direct_size(payloads[largest], payloads[largest], config=config)
+    doubled = _direct_size(_paired(payloads[largest], payloads[largest], pairing), config=config)
     assert result.ncd_self_largest == normalized_compression_distance(
         sizes[largest], sizes[largest], doubled
     )
@@ -368,6 +449,7 @@ def test_random_small_matrices_hold_the_invariants_and_the_exact_pair_values(
 @given(
     payloads=st.lists(PAYLOAD, min_size=2, max_size=5),
     compressor=COMPRESSOR,
+    pairing=PAIRING,
     seed=st.integers(min_value=0, max_value=2**32 - 1),
 )
 @settings(
@@ -379,9 +461,11 @@ def test_reordering_the_objects_reorders_the_matrix_and_changes_no_value(
     tmp_path_factory: pytest.TempPathFactory,
     payloads: list[bytes],
     compressor: CompressorName,
+    pairing: Pairing,
     seed: int,
 ) -> None:
-    """The matrix is a function of the objects, not of where they sit in the input.
+    """The matrix is a function of the objects, not of where they sit in the input, under
+    either pairing.
 
     No compressor here is symmetric, so a pair compressed in input order measures a value
     that moves when the objects are reordered -- and that was enough to change the partition
@@ -397,9 +481,8 @@ def test_reordering_the_objects_reorders_the_matrix_and_changes_no_value(
         name: str, objects: list[bytes]
     ) -> tuple[np.ndarray[tuple[int, int], np.dtype[np.float64]], float]:
         manifest_path = _normalization_manifest(directory / name / "normalized", objects)
-        result = compute_distance_matrix(
-            manifest_path, directory / name / "run", config=_named(compressor)
-        )
+        config = _named(compressor).model_copy(update={"pairing": pairing})
+        result = compute_distance_matrix(manifest_path, directory / name / "run", config=config)
         return np.load(result.matrix_path, allow_pickle=False), result.ncd_self_largest
 
     reference, reference_self = measured("reference", payloads)
@@ -689,6 +772,18 @@ def test_each_compressor_declares_what_it_can_match_across(
     assert settings.window_bytes == window
 
 
+def _near_copies(line_count: int) -> tuple[bytes, bytes]:
+    """A column of ``line_count`` values and a copy with one byte in a hundred changed."""
+    rng = random.Random(59)
+    vocabulary = [f"value-{index:05d}" for index in range(2_000)]
+    lines = [json.dumps(rng.choice(vocabulary)) for _ in range(line_count)]
+    left = ("\n".join(lines) + "\n").encode("utf-8")
+    perturbed = bytearray(left)
+    for index in range(0, len(perturbed), 100):
+        perturbed[index] = (perturbed[index] % 26) + 65
+    return left, bytes(perturbed)
+
+
 def test_a_pair_the_window_cannot_hold_measures_as_unrelated(tmp_path: Path) -> None:
     """The defect the gate exists for, shown rather than asserted.
 
@@ -697,14 +792,7 @@ def test_a_pair_the_window_cannot_hold_measures_as_unrelated(tmp_path: Path) -> 
     compressed. Under `zlib` they measure as nearly unrelated; under an LZMA dictionary that
     holds the pair, the same two objects measure as the near-copies they are.
     """
-    rng = random.Random(59)
-    vocabulary = [f"value-{index:05d}" for index in range(2_000)]
-    lines = [json.dumps(rng.choice(vocabulary)) for _ in range(2_600)]
-    left = ("\n".join(lines) + "\n").encode("utf-8")
-    perturbed = bytearray(left)
-    for index in range(0, len(perturbed), 100):
-        perturbed[index] = (perturbed[index] % 26) + 65
-    right = bytes(perturbed)
+    left, right = _near_copies(2_600)
     assert len(left) > 32_768
 
     def ncd(settings: CompressorSettings) -> float:
@@ -724,6 +812,37 @@ def test_a_pair_the_window_cannot_hold_measures_as_unrelated(tmp_path: Path) -> 
     assert inside_it < 0.25
     # The same pair, measured by two compressors: the difference is the window, not the data.
     assert past_the_window > 2 * inside_it
+
+
+def test_interleaving_holds_a_pair_the_window_cannot_until_a_block_outgrows_it(
+    tmp_path: Path,
+) -> None:
+    """Issue 62, the case interleaving exists for. Two 100 KiB near-copies under DEFLATE's
+    32 KiB window: concatenated, the first is out of view while the second is coded, and the
+    pair measures as unrelated and is counted over the window. In 1 KiB blocks each block of
+    one lies a block behind the same block of the other, in view, and the pair measures as the
+    near-copies it is, counted over nothing. In 40 KiB blocks the block again outgrows the
+    window: unrelated again, and counted, which is what the gate reads (ADR 0026)."""
+    left, right = _near_copies(7_500)
+    assert len(left) > 3 * 32_768
+    manifest_path = _normalization_manifest(tmp_path / "normalized", [left, right])
+
+    def measured(name: str, pairing: Pairing) -> tuple[float, int | None]:
+        result = compute_distance_matrix(
+            manifest_path,
+            tmp_path / name,
+            config=DistanceConfig(compressor=DeflateCompressor(), workers=1, pairing=pairing),
+        )
+        matrix = np.load(result.matrix_path, allow_pickle=False)
+        return float(matrix[0, 1]), result.pairs_over_window
+
+    concatenated, concatenated_over = measured("concat", ConcatPairing())
+    fine, fine_over = measured("fine", InterleavePairing(interleave_block_bytes=1_024))
+    coarse, coarse_over = measured("coarse", InterleavePairing(interleave_block_bytes=40_960))
+    assert (concatenated_over, fine_over, coarse_over) == (1, 0, 1)
+    # Measured: 0.983 concatenated, 0.312 in 1 KiB blocks, 0.848 in 40 KiB blocks.
+    assert concatenated > 2 * fine
+    assert coarse > 2 * fine
 
 
 @given(

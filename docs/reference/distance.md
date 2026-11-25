@@ -28,6 +28,12 @@
 .. autoclass:: damicore_distance.LzmaCompressor
    :members:
 
+.. autoclass:: damicore_distance.ConcatPairing
+   :members:
+
+.. autoclass:: damicore_distance.InterleavePairing
+   :members:
+
 .. autoclass:: damicore_distance.DistanceMatrixView
    :members:
 

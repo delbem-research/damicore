@@ -2,8 +2,10 @@ from damicore_distance.api import compute_distance_matrix
 from damicore_distance.compressor import codec_fingerprint
 from damicore_distance.config import (
     Bzip2Compressor,
+    ConcatPairing,
     DeflateCompressor,
     DistanceConfig,
+    InterleavePairing,
     LzmaCompressor,
     PpmdCompressor,
 )
@@ -18,6 +20,8 @@ __all__ = [
     "DeflateCompressor",
     "Bzip2Compressor",
     "LzmaCompressor",
+    "ConcatPairing",
+    "InterleavePairing",
     "DistanceResult",
     "DistanceMatrixView",
     "DistanceError",

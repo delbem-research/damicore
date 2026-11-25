@@ -29,6 +29,7 @@ one line per record, saying what it settles rather than what it is about.
 | [0023](../decisions/0023-the-compressor-window-is-a-correctness-gate.md) | A pair longer than the window its compressor declares is refused by preflight, under a factor that lifts it; PPMd declares none, and ADR 0025 revises why |
 | [0024](../decisions/0024-a-pair-is-compressed-in-digest-order.md) | Each pair is compressed with the object whose SHA-256 is lower first, so the matrix is a function of the objects and not of their order in the input |
 | [0025](../decisions/0025-ppmd-measurements-are-checked-against-half-the-model.md) | Under PPMd every object and every pair is compressed again under half the model, and a run in which a size differs is refused; `allow_model_restart` lifts it |
+| [0026](../decisions/0026-pairing-is-part-of-the-object-encoding.md) | How a pair becomes one stream is a named rule: concatenation, or the original implementation's interleaving, whose window gate reads one block of each object |
 
 ```{toctree}
 :maxdepth: 1
@@ -55,4 +56,5 @@ one line per record, saying what it settles rather than what it is about.
 /decisions/0023-the-compressor-window-is-a-correctness-gate
 /decisions/0024-a-pair-is-compressed-in-digest-order
 /decisions/0025-ppmd-measurements-are-checked-against-half-the-model
+/decisions/0026-pairing-is-part-of-the-object-encoding
 ```

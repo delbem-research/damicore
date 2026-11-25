@@ -550,7 +550,10 @@ def _write_diagnostics(
 
 
 def _pairs_over_window(object_bytes: list[int], window: int | None) -> int:
-    """Count the pairs whose two objects together exceed what the compressor matches across.
+    """Count the pairs whose two spans together exceed what the compressor matches across.
+
+    A span is what the pairing makes the compressor hold of one object at once: the object
+    when concatenated, one block of it when interleaved [adr-0026].
 
     Counted from the object sizes rather than during compression: the pair loop runs in
     workers and across shards, so a resumed run would otherwise count only the shards it
@@ -773,6 +776,7 @@ def compute_distance_matrix(
         ncd_out_of_range_count=out_of_range,
         ncd_self_largest=ncd_self_largest,
         pairs_over_window=_pairs_over_window(
-            [path.stat().st_size for path in paths], settings.compressor.window_bytes
+            [settings.pairing.span_bytes(path.stat().st_size) for path in paths],
+            settings.compressor.window_bytes,
         ),
     )

@@ -151,6 +151,22 @@ def _parser() -> argparse.ArgumentParser:
             "it against the memory limit (default: 8388608)",
         )
         command.add_argument(
+            "--pairing",
+            choices=["concat", "interleave"],
+            default="concat",
+            help="how a pair becomes one stream: `concat` compresses one object after the "
+            "other; `interleave` takes blocks of --interleave-block-bytes from each in turn, "
+            "the original implementation's pairing, which keeps aligned content of large "
+            "objects within a window that cannot hold both; it changes the distances "
+            "(default: concat; ADR 0026)",
+        )
+        command.add_argument(
+            "--interleave-block-bytes",
+            type=int,
+            help="block size for --pairing interleave, at least 1 byte; the window gate "
+            "reads one block of each object, and it changes the distances (default: 1024)",
+        )
+        command.add_argument(
             "--max-objects",
             type=int,
             default=_DEFAULT_LIMITS.max_objects,
@@ -286,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
     ppmd_memory_bytes: int | None = arguments.ppmd_memory_bytes
     bzip2_block_size_100k: int | None = arguments.bzip2_block_size_100k
     lzma_dictionary_bytes: int | None = arguments.lzma_dictionary_bytes
+    pairing: str = arguments.pairing
+    interleave_block_bytes: int | None = arguments.interleave_block_bytes
     result: DamicoreResult | None = None
     try:
         # ResourceLimits and ExecutionConfig own the bounds behind these flags, so building
@@ -311,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
                 ppmd_memory_bytes=ppmd_memory_bytes,
                 bzip2_block_size_100k=bzip2_block_size_100k,
                 lzma_dictionary_bytes=lzma_dictionary_bytes,
+                pairing=pairing,
+                interleave_block_bytes=interleave_block_bytes,
                 keep_normalized=keep_normalized,
                 save_diagnostics=save_diagnostics,
                 execution=execution,
@@ -345,6 +365,8 @@ def main(argv: list[str] | None = None) -> int:
                 ppmd_memory_bytes=ppmd_memory_bytes,
                 bzip2_block_size_100k=bzip2_block_size_100k,
                 lzma_dictionary_bytes=lzma_dictionary_bytes,
+                pairing=pairing,
+                interleave_block_bytes=interleave_block_bytes,
                 num_clusters=num_clusters,
                 output_dir=output_dir,
                 progress=not arguments.no_progress,

@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
-from damicore_distance import DistanceConfig
+from damicore_distance import DistanceConfig, InterleavePairing
 from damicore_normalizer import NormalizationConfig, NormalizerError
 from damicore_normalizer.api import scan_source
 from damicore_normalizer.config import ObjectSource
@@ -35,9 +35,9 @@ class ResourceEstimate(BaseModel):
     objects of every pair, and the largest object twice for ``ncd_self_largest``, which is
     ``object_count * normalized_bytes`` plus twice the largest object. Divided by a measured
     throughput it is the stage's time, and nothing gates on it. ``max_pair_bytes`` is the
-    longest concatenation the compressor is given -- the two largest objects -- which is
-    what a compressor's window or model memory has to hold for an NCD value to see across
-    the pair. ``compressor_window_bytes`` is what that compressor declares it can match
+    most of a pair the compressor has to hold at once for an NCD value to see across it: the
+    two largest objects when concatenated, a block of each when interleaved (ADR 0026).
+    ``compressor_window_bytes`` is what that compressor declares it can match
     across, and the ``compressor_window`` violation is raised when the first exceeds the
     second times ``limits.max_pair_window_factor``: the run would measure, and report
     nothing unusual about, a matrix the compressor could not see. See ADR 0023.
@@ -82,6 +82,12 @@ def _fingerprints(paths: Sequence[Path]) -> tuple[tuple[int, int], ...]:
     return tuple((item.st_size, item.st_mtime_ns) for item in stats)
 
 
+def _block_bytes(distance: DistanceConfig) -> int:
+    """The block an interleaving worker reads from each object at once, or 0 [adr-0026]."""
+    pairing = distance.pairing
+    return pairing.interleave_block_bytes if isinstance(pairing, InterleavePairing) else 0
+
+
 def preflight(
     source: str | Path | Sequence[str | Path],
     *,
@@ -118,8 +124,10 @@ def preflight(
     pairs = objects * (objects - 1) // 2
     matrix_bytes = objects * objects * 8
     object_sizes = [item.size_bytes for item in scan.objects]
-    # Every source yields at least two objects, so the two largest always form a pair.
-    max_pair_bytes = sum(heapq.nlargest(2, object_sizes))
+    # Every source yields at least two objects, so the two largest always form a pair. What the
+    # compressor holds of a pair at once is each object's span under the pairing: the whole
+    # object concatenated, one block of it interleaved [adr-0026].
+    max_pair_bytes = sum(heapq.nlargest(2, (distance.pairing.span_bytes(s) for s in object_sizes)))
     pairs_per_shard = execution.effective_pairs_per_shard(pairs)
     checkpoint_bytes = math.ceil(pairs / pairs_per_shard) * 256
     label_bytes = sum(len(item.label.encode("utf-8")) for item in scan.objects)
@@ -136,7 +144,10 @@ def preflight(
     working_memory = max(
         6 * scan.max_serialized_chunk_bytes,
         execution.effective_workers
-        * (2 * execution.compression_chunk_bytes + distance.compressor.stream_memory_bytes)
+        * (
+            2 * max(execution.compression_chunk_bytes, _block_bytes(distance))
+            + distance.compressor.stream_memory_bytes
+        )
         + pairs_per_shard * 24,
     )
     # Declared by the compressor, or `None` where there is none to declare: see

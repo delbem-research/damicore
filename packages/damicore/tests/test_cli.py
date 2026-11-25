@@ -139,6 +139,20 @@ def test_the_model_restart_flag_reaches_the_resource_limits(
     assert main(allowed) == 0
 
 
+def test_the_pairing_flags_reach_estimate_and_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = _csv(tmp_path)
+    settings = ["--pairing", "interleave", "--interleave-block-bytes", "512"]
+    assert main(["estimate", str(source), "--workers", "1", "--json", *settings]) == 0
+    assert json.loads(capsys.readouterr().out)["object_count"] == 2
+    output = tmp_path / "run"
+    run_arguments = ["run", str(source), "--workers", "1", "--no-progress", *settings]
+    assert main([*run_arguments, "--output-dir", str(output)]) == 0
+    config = json.loads((output / "manifest.json").read_text(encoding="utf-8"))["config"]
+    assert (config["pairing"], config["interleave_block_bytes"]) == ("interleave", 512)
+
+
 def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "run"
@@ -353,7 +367,12 @@ def test_every_compressor_setting_written_is_the_one_recorded() -> None:
                 assert lowest != info.default, (tag, field)
                 written = dict.fromkeys(fields, None) | {field: lowest}
                 distance = _distance_config(
-                    tag, **written, execution=execution, save_diagnostics=False
+                    tag,
+                    **written,
+                    pairing="concat",
+                    interleave_block_bytes=None,
+                    execution=execution,
+                    save_diagnostics=False,
                 )
                 payload = _config_payload(
                     object_source=DelimitedSource(),
@@ -369,3 +388,23 @@ def test_every_compressor_setting_written_is_the_one_recorded() -> None:
                 checked += 1
     # Guards the discovery: zlib and gzip share one setting, so six of five fields.
     assert checked >= 6, checked
+    # The pairing's one setting, threaded the same way and written at its lower bound.
+    interleaved = _distance_config(
+        "ppmd",
+        **dict.fromkeys(fields, None),
+        pairing="interleave",
+        interleave_block_bytes=1,
+        execution=execution,
+        save_diagnostics=False,
+    )
+    payload = _config_payload(
+        object_source=DelimitedSource(),
+        distance=interleaved,
+        num_clusters=None,
+        keep_normalized=False,
+        save_diagnostics=False,
+        execution=execution,
+        pairs_per_shard=1,
+    )
+    recorded = RunConfig.model_validate_json(json.dumps(payload))
+    assert (recorded.pairing, recorded.interleave_block_bytes) == ("interleave", 1)

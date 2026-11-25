@@ -41,6 +41,27 @@ carries anything else, a date included, matches neither and fails the release.
   measures anyway, and the distance stage's receipt records `ppmd_model_checked`.
   `ppmd_memory_bytes` now starts at 4096, twice the codec's minimum. ADR 0025.
 
+### Added
+
+- **Interleaved pairing, the original implementation's, as a second named rule** (#62).
+  `pairing="interleave"` (`--pairing interleave`, `InterleavePairing`) cuts both objects of a
+  pair into blocks of `interleave_block_bytes` (default 1024) and takes them in turn, the
+  rest of the longer after the shorter ends -- `damicore-python`'s `interleave`, byte for byte,
+  streamed instead of written to a temporary file per pair. A block of one object lies one
+  block behind the same block of the other, so a compressor whose window holds a block pair
+  matches aligned content across objects of any size: two 100 KiB near-copies under `zlib`
+  measure 0.31 interleaved in 1 KiB blocks against 0.98 concatenated. `pairing="concat"`
+  stays the default and measures what it measured. Each pairing is a rule in the manifest's
+  `method` block, `ncd-max/v2` or `ncd-max-interleaved/v1`, and both settings enter the run
+  identity. Two departures from the original, each losing nothing: the pair is ordered by
+  digest rather than by file name (ADR 0024), and a block the compressor's window cannot hold
+  is refused by the window gate, which under interleaving reads one block of each object --
+  past the window the original reported a near-copy as unrelated (0.980 against 0.997);
+  `max_pair_window_factor` still measures it. Preflight charges an interleaving worker two
+  blocks where they exceed a compression chunk. On columns of a table interleaving also
+  pairs values of the same rows wherever widths align them, so it measures some row-by-row
+  association with the distributions. ADR 0026.
+
 ## 0.5.0
 
 ### Breaking

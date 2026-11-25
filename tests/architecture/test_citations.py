@@ -37,6 +37,7 @@ METHOD = ROOT / "docs" / "method"
 CHOICE_PAGES = {
     "DeflateCompressor.name": "docs/method/ncd.md",
     "RunConfig.compressor": "docs/method/ncd.md",
+    "RunConfig.pairing": "docs/method/ncd.md",
     "DelimitedDatasetInput.split": "docs/input-contract.md",
     "DelimitedSource.split": "docs/input-contract.md",
     "ResourceEstimate.split": "docs/input-contract.md",
@@ -638,12 +639,16 @@ def test_every_rule_the_manifest_records_cites_a_basis_that_resolves() -> None:
     does not read it. A typo there would be provenance pointing nowhere, in an artifact
     whose whole purpose is to still answer a year from now.
     """
-    from damicore.manifest import RUN_METHOD
+    from damicore.manifest import DISTANCE_RULES, RUN_METHOD
 
     refs = _refs()
+    rules = [
+        *RUN_METHOD.model_dump().items(),
+        *(("distance", rule.model_dump()) for rule in DISTANCE_RULES.values()),
+    ]
     unresolved = [
         f"  {stage}: {rule['name']} cites [{key}]\n{_hint(key)}"
-        for stage, rule in RUN_METHOD.model_dump().items()
+        for stage, rule in rules
         for key in rule["refs"]
         if not _resolves(key, refs)
     ]

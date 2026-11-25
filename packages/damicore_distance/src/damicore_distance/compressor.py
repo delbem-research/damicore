@@ -37,7 +37,7 @@ import bz2
 import hashlib
 import lzma
 import zlib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from importlib.metadata import version
 from pathlib import Path
 
@@ -47,6 +47,7 @@ from damicore_distance.config import (
     Bzip2Compressor,
     DeflateCompressor,
     DistanceConfig,
+    InterleavePairing,
     LzmaCompressor,
     PpmdCompressor,
 )
@@ -113,6 +114,29 @@ def codec_fingerprint() -> dict[str, str]:
     }
 
 
+def _paired_chunks(paths: tuple[Path, ...], config: DistanceConfig) -> Iterator[bytes]:
+    """The bytes the compressor is fed, in order, never more than a chunk or a block at once.
+
+    Two paths are a pair, joined by ``config.pairing``; one path, or any other count, is fed
+    whole in order. Interleaving yields each block on its own rather than joining it to its
+    partner, so a worker holds two blocks at most [adr-0026].
+    """
+    pairing = config.pairing
+    if isinstance(pairing, InterleavePairing) and len(paths) == 2:
+        block = pairing.interleave_block_bytes
+        with paths[0].open("rb") as first, paths[1].open("rb") as second:
+            while True:
+                left, right = first.read(block), second.read(block)
+                if not left and not right:
+                    return
+                yield left
+                yield right
+    for path in paths:
+        with path.open("rb") as source:
+            while chunk := source.read(config.compression_chunk_bytes):
+                yield chunk
+
+
 def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:
     return compressed_fingerprint(paths, config=config)[0]
 
@@ -136,12 +160,10 @@ def compressed_fingerprint(paths: Iterable[Path], *, config: DistanceConfig) -> 
         ) from exc
     total = 0
     try:
-        for path in paths:
-            with path.open("rb") as source:
-                while chunk := source.read(config.compression_chunk_bytes):
-                    coded = feed(chunk)
-                    digest.update(coded)
-                    total += len(coded)
+        for chunk in _paired_chunks(tuple(paths), config):
+            coded = feed(chunk)
+            digest.update(coded)
+            total += len(coded)
         coded = finish()
         digest.update(coded)
         total += len(coded)

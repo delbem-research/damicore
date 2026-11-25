@@ -56,6 +56,21 @@ rather than quietly compress as something else, because every NCD value is a fun
 the compressor and its settings. Why PPMd is the default, and how it compares with `zlib`
 and with the original DAMICORE implementation on the same objects, is [adr-0020].
 
+How the two objects become one stream is the pairing, and it is part of the value too
+[adr-0026]. `pairing="concat"`, the default, is the concatenation above. `pairing="interleave"`
+is the original implementation's other pairing, unchanged: both objects cut into blocks of
+`interleave_block_bytes` (at least 1, default 1024), taken in turn -- `x1 y1 x2 y2 ...` --
+the rest of the longer after the shorter ends, `x` again the lower digest. A block of one
+object then lies one block behind the same block of the other, so a compressor whose window
+holds a pair of blocks matches aligned content across objects of any size, which is what
+interleaving is for; content shared out of alignment is matched only within that reach.
+`damicore_distance` takes them as `ConcatPairing()` and `InterleavePairing()`, and a block
+size without interleaving is refused. Each pairing is its own rule in the manifest:
+`ncd-max/v2` and `ncd-max-interleaved/v1`. On columns of a table, interleaving also pairs
+values of the same rows wherever the columns' widths keep them in the same block, so it
+measures some row-by-row association along with the distributions, in a proportion the run
+cannot report; ADR 0026 has the calibration.
+
 Execution defaults, from `DistanceConfig`: `compression_chunk_bytes=4194304`,
 `pairs_per_shard="auto"`, `workers="auto"`, `resume=True`. None of them changes an NCD
 value.
@@ -145,7 +160,7 @@ it.
 |---|---|
 | Available | `ppmd` through `pyppmd`; `zlib` and `gzip` through `zlib.compressobj`; `bzip2` and `lzma` through the standard library; exact (every pair computed) |
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
-| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result. Under PPMd, an object or a pair that needs more than half the model, refused by the distance stage -- an object before any pair -- unless `allow_model_restart` ([adr-0025]) |
+| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result. Interleaved, what is measured against the window is one block of each object ([adr-0026]). Under PPMd, an object or a pair that needs more than half the model, refused by the distance stage -- an object before any pair -- unless `allow_model_restart` ([adr-0025]) |
 | Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a compressor stream that cannot be allocated, raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
 
@@ -181,3 +196,9 @@ it.
   measurement of what input order did to the partition.
 - [adr-0025] — why every PPMd measurement is checked against half the model, with the
   measurements that revised ADR 0023's exemption and refuted a check per object.
+- [adr-0026] — why the pairing is a named rule, the original implementation's interleaving
+  it brings back, each way it departs from that implementation with the evidence, and the
+  calibration on columns of a table.
+- [cesar2016] — the thesis issue 62 names as the basis for interleaving. What this
+  implementation takes is the original code's `interleave` (ADR 0026), not the thesis.
+  Not read: the algorithm is taken from the original implementation's code, not the thesis.

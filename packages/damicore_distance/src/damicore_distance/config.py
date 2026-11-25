@@ -145,12 +145,53 @@ Compressor = Annotated[
 ]
 
 
+class ConcatPairing(BaseModel):
+    """The pair is one object followed by the other, the pairing NCD is defined with
+    [cilibrasi2005]."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["concat"] = "concat"
+
+    def span_bytes(self, object_bytes: int) -> int:
+        """The bytes of one object the compressor holds at once to match the other across a
+        pair: all of it [adr-0026]."""
+        return object_bytes
+
+
+class InterleavePairing(BaseModel):
+    """The pair is the two objects' blocks of ``interleave_block_bytes`` taken in turn, the
+    rest of the longer one after the shorter ends: the original implementation's
+    ``interleave``, unchanged [adr-0026].
+
+    A block of one object lies one block behind the same block of the other, so a compressor
+    whose window holds a block pair matches aligned content across objects of any size.
+    Content shared out of alignment is matched only within that reach.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["interleave"] = "interleave"
+    interleave_block_bytes: int = Field(default=1_024, ge=1)
+
+    def span_bytes(self, object_bytes: int) -> int:
+        """The bytes of one object the compressor holds at once to match the other across a
+        pair: one block, or the object if it is shorter [adr-0026]."""
+        return min(object_bytes, self.interleave_block_bytes)
+
+
+# Each pairing is its own model, like each compressor: a block size is not a setting of the
+# concatenation, so it is refused there rather than ignored.
+Pairing = Annotated[ConcatPairing | InterleavePairing, Field(discriminator="name")]
+
+
 class DistanceConfig(BaseModel):
     """What the distance stage measures with, and how it schedules the work.
 
-    ``compressor`` and its settings change every NCD value; everything else changes only
-    cost, recovery or admission. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA,
-    and ``docs/method/ncd.md`` for what each compressor computes.
+    ``compressor`` and ``pairing``, with their settings, change every NCD value; everything
+    else changes only cost, recovery or admission. See ADR 0020 for the default, ADR 0021
+    for bzip2 and LZMA, ADR 0026 for the pairings, and ``docs/method/ncd.md`` for what each
+    computes.
 
     ``allow_model_restart`` lifts the one admission check this stage makes itself: under
     PPMd, every object and every pair is compressed again under half the model, and the run
@@ -162,6 +203,7 @@ class DistanceConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     compressor: Compressor = PpmdCompressor()
+    pairing: Pairing = ConcatPairing()
     compression_chunk_bytes: int = Field(default=4_194_304, gt=0)
     workers: int | Literal["auto"] = "auto"
     pairs_per_shard: int | Literal["auto"] = "auto"
