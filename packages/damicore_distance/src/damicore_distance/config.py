@@ -11,7 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 # the shard count -- and the checkpoint, rewritten after every shard -- below twice this
 # count until the cap, which bounds the result a worker holds for one shard.
 _AUTO_SHARD_COUNT = 64
-_MAX_AUTO_PAIRS_PER_SHARD = 10_000
+# Small enough that one shard's PPMd stream residue, checked, fits what the default limit
+# leaves each of four workers, so a worker can always be replaced between shards [adr-0027].
+_MAX_AUTO_PAIRS_PER_SHARD = 2_048
+# pyppmd 1.3.1's `Ppmd8Encoder` frees its model on deallocation but never the `CPpmd8` that
+# holds it, 7,392 bytes on x86-64, and its `encode()` keeps whatever it is handed; fed from a
+# reused buffer, a stream keeps at most one 312-byte view of it: 7,704 bytes traced, left by
+# every PPMd stream in the process that opened it, rounded up to 8 KiB for the allocator's
+# headers and the interpreter's own bookkeeping [adr-0027].
+PPMD_STREAM_RESIDUE_BYTES = 8_192
 
 
 class DeflateCompressor(BaseModel):
@@ -46,16 +54,22 @@ class DeflateCompressor(BaseModel):
         return 32_768
 
 
+# pyppmd's own ceiling on model memory, past which it clamps without saying so.
+PPMD_MEMORY_LIMIT = 4_294_967_259
+
+
 class PpmdCompressor(BaseModel):
     """PPMd variant I with model restart, at ``ppmd_order`` with ``ppmd_memory_bytes`` of
-    model [adr-0020]. The bounds are the codec's own: pyppmd would clamp a value outside them
-    without saying so."""
+    model [adr-0020]. The bounds are the codec's own -- pyppmd would clamp a value outside them
+    without saying so -- except the lower memory bound, twice the codec's: the stage checks
+    every measurement again under half the model, which must still be one the codec takes
+    [adr-0025]."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: Literal["ppmd"] = "ppmd"
     ppmd_order: int = Field(default=6, ge=2, le=64)
-    ppmd_memory_bytes: int = Field(default=67_108_864, ge=2_048, le=4_294_967_259)
+    ppmd_memory_bytes: int = Field(default=67_108_864, ge=4_096, le=PPMD_MEMORY_LIMIT)
 
     @property
     def stream_memory_bytes(self) -> int:
@@ -70,10 +84,10 @@ class PpmdCompressor(BaseModel):
     def window_bytes(self) -> None:
         """PPMd declares no window, because it has none to declare [adr-0023].
 
-        Its reach across a pair is a property of the content, not a byte count: the model's
-        size does not decide what it finds, which is measured in that record. What it loses
-        with size is the copy, not the distribution [adr-0020], and
-        ``DistanceResult.ncd_self_largest`` is where that shows.
+        Its reach across a pair is set by the model memory together with the content, not by
+        a byte count: the model restarts when it fills, and how fast it fills depends on how
+        varied the data is and on what the two objects share. The stage therefore checks each
+        measurement instead of gating it by size [adr-0025].
         """
         return None
 
@@ -143,22 +157,118 @@ Compressor = Annotated[
 ]
 
 
+class ConcatPairing(BaseModel):
+    """The pair is one object followed by the other, the pairing NCD is defined with
+    [cilibrasi2005]."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["concat"] = "concat"
+
+    def span_bytes(self, object_bytes: int) -> int:
+        """The bytes of one object the compressor holds at once to match the other across a
+        pair: all of it [adr-0026]."""
+        return object_bytes
+
+
+class InterleavePairing(BaseModel):
+    """The pair is the two objects' blocks of ``interleave_block_bytes`` taken in turn, the
+    rest of the longer one after the shorter ends: the original implementation's
+    ``interleave``, unchanged [adr-0026].
+
+    A block of one object lies one block behind the same block of the other, so a compressor
+    whose window holds a block pair matches aligned content across objects of any size.
+    Content shared out of alignment is matched only within that reach.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["interleave"] = "interleave"
+    interleave_block_bytes: int = Field(default=1_024, ge=1)
+
+    def span_bytes(self, object_bytes: int) -> int:
+        """The bytes of one object the compressor holds at once to match the other across a
+        pair: one block, or the object if it is shorter [adr-0026]."""
+        return min(object_bytes, self.interleave_block_bytes)
+
+
+# Each pairing is its own model, like each compressor: a block size is not a setting of the
+# concatenation, so it is refused there rather than ignored.
+Pairing = Annotated[ConcatPairing | InterleavePairing, Field(discriminator="name")]
+
+
 class DistanceConfig(BaseModel):
     """What the distance stage measures with, and how it schedules the work.
 
-    ``compressor`` and its settings change every NCD value; everything else changes only
-    cost and recovery. See ADR 0020 for the default, ADR 0021 for bzip2 and LZMA, and
-    ``docs/method/ncd.md`` for what each compressor computes.
+    ``compressor`` and ``pairing``, with their settings, change every NCD value; everything
+    else changes only cost, recovery or admission. See ADR 0020 for the default, ADR 0021
+    for bzip2 and LZMA, ADR 0026 for the pairings, and ``docs/method/ncd.md`` for what each
+    computes.
+
+    ``allow_model_restart`` lifts the one admission check this stage makes itself: under
+    PPMd, every object and every pair is compressed again under half the model. A stream half
+    the model codes into other bytes may have restarted the model, so it is compressed once
+    more under twice the model, as many at once as ``max_working_memory_bytes`` holds, and the
+    run is refused if the model's bytes differ from those: the model restarted, and the size
+    is not the objects' own [adr-0025]. Objects are checked before any pair, pairs as they are
+    computed and looked at again once all are. Setting it measures anyway, and skips the check
+    and its cost.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     compressor: Compressor = PpmdCompressor()
+    pairing: Pairing = ConcatPairing()
     compression_chunk_bytes: int = Field(default=4_194_304, gt=0)
     workers: int | Literal["auto"] = "auto"
     pairs_per_shard: int | Literal["auto"] = "auto"
     resume: bool = True
     save_diagnostics: bool = False
+    allow_model_restart: bool = False
+    # The working memory the caller allows the stage, by default the limit `damicore.run()`
+    # passes when its own caller declares none, so the stage contains its PPMd residue and
+    # sizes the second look alike on either way in [adr-0025] [adr-0027]. The stage does not
+    # refuse workers whose streams outgrow it; `run()`'s preflight does.
+    max_working_memory_bytes: int = Field(default=536_870_912, gt=0)
+
+    @property
+    def worker_memory_bytes(self) -> int:
+        """The memory one worker is charged, which is its compressor stream and two compression
+        chunks [adr-0021], whatever the pairing: an interleaved block is read into the same
+        buffer a chunk at a time and never held whole [adr-0026]."""
+        return 2 * self.compression_chunk_bytes + self.compressor.stream_memory_bytes
+
+    def stream_residue(self, object_count: int, pair_count: int) -> tuple[int, int | None, bool]:
+        """How the PPMd stream residue is contained [adr-0027]: the bytes one process is
+        charged for it, the residue a pooled worker may hold before it is replaced (``None``,
+        never), and whether the run needs worker processes at all.
+
+        Every stream a process opens stays resident in it, so a process's residue grows with
+        the streams it has run. A pooled worker is replaced before a task would take it past
+        what the working-memory budget leaves it -- the limit, less what every worker is
+        charged for its stream, shared among the workers -- and never before its first task,
+        whose residue cannot be split, so it holds at most the larger of the two. A single
+        worker runs in the calling process, as it always has, while the residue of the whole
+        run fits that budget, and in one process of its own, replaced the same way, once it
+        does not. Other compressors leave nothing.
+        """
+        workers = self.effective_workers
+        if not isinstance(self.compressor, PpmdCompressor):
+            return 0, None, workers > 1
+        checked = not self.allow_model_restart
+        pairs_per_shard = self.effective_pairs_per_shard(pair_count)
+        # Checked, an object is opened four times (its size, the model, half, twice) and a
+        # pair three (the model, half, twice); a shard task holds two per pair.
+        total = PPMD_STREAM_RESIDUE_BYTES * (
+            object_count * (4 if checked else 1) + pair_count * (3 if checked else 1) + 1
+        )
+        per_task = PPMD_STREAM_RESIDUE_BYTES * pairs_per_shard * (2 if checked else 1)
+        spare = self.max_working_memory_bytes - workers * self.worker_memory_bytes
+        budget = (spare - pairs_per_shard * 24) // workers
+        if workers == 1 and total <= budget:
+            return total, None, False
+        held = max(budget, per_task)
+        return min(total, held), held, True
 
     @field_validator("compressor", mode="before")
     @classmethod

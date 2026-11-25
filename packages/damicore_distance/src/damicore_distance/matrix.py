@@ -30,10 +30,11 @@ class DistanceResult(BaseModel):
     describe the whole matrix, diagonal included, which is why ``ncd_min`` is ``0.0`` for
     any matrix whose values are all non-negative.
 
-    ``ncd_self_largest`` is NCD(x, x) for the largest object -- the first in manifest order
-    among equals -- which is ``(C(xx) - C(x)) / C(x)``: how much of an object the compressor
-    recognizes when it reads it a second time, the idempotency [cilibrasi2005] requires of a
-    normal compressor. Zero is full recognition. It is measured, never gated, and a high
+    ``ncd_self_largest`` is NCD(x, x) for the largest object -- the one whose SHA-256 is
+    higher among equals, so it does not depend on manifest order [adr-0024] -- which is
+    ``(C(xx) - C(x)) / C(x)``: how much of an object the compressor recognizes when it reads
+    it a second time, the idempotency [cilibrasi2005] requires of a normal compressor. Zero
+    is full recognition. It is measured, never gated, and a high
     value is not by itself a fault: on one independently drawn value per line neither DEFLATE
     nor PPMd recognizes a repeat of 128 KiB, while PPMd still separates such columns by
     their distributions (ADR 0020). What it does show is a compressor that stops recognizing

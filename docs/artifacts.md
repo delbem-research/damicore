@@ -21,7 +21,7 @@ versioned name and the citation keys that are its basis, resolvable in `docs/ref
 
 ```json
 "method": {
-  "distance": {"name": "ncd-max/v1", "refs": ["cilibrasi2005"]},
+  "distance": {"name": "ncd-max/v2", "refs": ["cilibrasi2005", "adr-0024"]},
   "tree": {"name": "neighbor-joining-q/v1", "refs": ["saitou1987", "studier1988", "adr-0017"]}
 }
 ```

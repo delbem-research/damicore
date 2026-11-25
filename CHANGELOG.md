@@ -5,6 +5,95 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## 0.6.0
+
+### Breaking
+
+- **Each pair is compressed in the order of its contents' digests, not of the input.** No
+  compressor here is symmetric, and until now the object that came first in the input came
+  first in `C(xy)`, so reordering the columns of a table or renaming files changed distances
+  -- and, measured on DAMICORE's own modules and on a 12-column table, the partition (#131).
+  The object whose SHA-256 is lower now goes first, so the matrix is a function of the
+  objects and a reordered input returns it reordered alike with every value unchanged; when
+  objects tie for the largest size, `ncd_self_largest` likewise takes the one with the higher
+  digest instead of the first in the input. Every
+  value whose pair was compressed in the other order changes. The distance rule in the
+  manifest's `method` block is `ncd-max/v2`, and a distance checkpoint written before this
+  release is refused on resume rather than mixed with new shards. ADR 0024.
+- **Under PPMd, a run in which an object or a pair restarts the model is refused.** PPMd restarts its model from nothing when the memory fills, so whatever a pair
+  codes after the restart is coded with the first object forgotten: on numeric columns with
+  six decimals the default 64 MiB model had lost most of the separation between distributions
+  at 32 MiB per column, and a pair of near-duplicates measured 0.198 where a model that does
+  not fill gives 0.006. ADR 0023 had exempted PPMd on data whose model barely fills (#132).
+  The distance stage now compresses every object, before any pair, and every pair, as it is
+  computed, again under half the model: a stream half the model codes into the same bytes has
+  the size any larger model gives. A stream half the model codes otherwise is compressed once
+  more under twice the model, as many at once as `max_working_memory_bytes` holds beside the
+  stream residue the workers keep and only once no pair is in flight, and the run is refused only if the model and twice it code it
+  differently, that is, if the model restarted. A run resumed with the check measures again
+  the shards measured without it, and a directory whose distance stage completed without it
+  is refused by a call that applies it. The pairs take about twice as long, and each object
+  and pair opens more PPMd streams, whose residue preflight charges (see Fixed). Where the budget holds no stream of twice the model,
+  a stream that needs between half and all of the model is refused, naming the limit, and a
+  larger limit or `ppmd_memory_bytes` admits it with the same values. The refusal is a
+  `ResourceLimitError` naming the object or the pair and asking for a larger
+  `ppmd_memory_bytes`; `ResourceLimits.allow_model_restart` (`--allow-model-restart`)
+  measures anyway, and the distance stage's receipt records `ppmd_model_checked`.
+  `ppmd_memory_bytes` now starts at 4096, twice the codec's minimum. ADR 0025.
+
+### Added
+
+- **Interleaved pairing, the original implementation's, as a second named rule** (#62).
+  `pairing="interleave"` (`--pairing interleave`, `InterleavePairing`) cuts both objects of a
+  pair into blocks of `interleave_block_bytes` (default 1024) and takes them in turn, the
+  rest of the longer after the shorter ends -- `damicore-python`'s `interleave`, byte for byte,
+  streamed instead of written to a temporary file per pair. A block of one object lies one
+  block behind the same block of the other, so a compressor whose window holds a block pair
+  matches aligned content across objects of any size: two 100 KiB near-copies under `zlib`
+  measure 0.31 interleaved in 1 KiB blocks against 0.98 concatenated. `pairing="concat"`
+  stays the default and measures what it measured. Each pairing is a rule in the manifest's
+  `method` block, `ncd-max/v2` or `ncd-max-interleaved/v1`, and both settings enter the run
+  identity. Two departures from the original, each losing nothing: the pair is ordered by
+  digest rather than by file name (ADR 0024), and a block the compressor's window cannot hold
+  is refused by the window gate, which under interleaving reads one block of each object --
+  past the window the original reported a near-copy as unrelated (0.980 against 0.997);
+  `max_pair_window_factor` still measures it. A block is read a compression chunk at a time,
+  so an interleaving worker holds no block whole and is charged what a concatenating one is.
+  On columns of a table interleaving also
+  pairs values of the same rows wherever widths align them, so it measures some row-by-row
+  association with the distributions. ADR 0026.
+
+### Fixed
+
+- **PPMd sizes are the ones the decoder accepts, whatever the chunk size.** pyppmd 1.3.1 drops
+  a byte when a symbol's code crosses the end of the 32 KiB output block an `encode()` call
+  starts with, so a call coding more than that could yield a stream its own decoder rejects:
+  80,000 random bytes coded in one call, as 4 MiB chunks coded them, did in 4 of 40 seeds. A
+  PPMd size therefore depended on `compression_chunk_bytes`. The stage now hands pyppmd at most
+  `32,767 // (4 × (ppmd_order + 2))` bytes a call, 1,023 at order 6, whose code cannot fill the
+  block, and refuses a call that would. Values change only where a byte was dropped. ADR 0027.
+- **PPMd runs no longer outgrow the memory limit preflight admitted them under.** pyppmd 1.3.1
+  never releases what it is handed to `encode()` and never frees an encoder's 7,392-byte
+  codec state, so every PPMd stream left its whole input and about 7.4 KB resident in the
+  process that opened it -- a pair of 1 MiB objects, 2.1 MB. The stage now feeds every
+  compressor from one reused buffer per thread, so a stream leaves 7,704 bytes and not its
+  input. What remains is still 11.6 GB for a run of 1,000 objects under the model check,
+  against a 512 MiB limit, so preflight charges 8 KiB per stream, and the distance stage
+  replaces a worker before the residue it holds would pass what the limit leaves it. Workers
+  are single-process executors replaced by the stage rather than through
+  `max_tasks_per_child`, which hangs under Python 3.11 and 3.12. A single worker stays in the
+  calling process while the whole run's residue fits, and only past that gets a process of its
+  own. The automatic shard size is capped at 2,048 pairs, down from 10,000, so a worker can be
+  replaced between shards. A run that fitted its limit runs as before.
+  `DistanceConfig.worker_memory_bytes` and `DistanceConfig.stream_residue()` state what a worker
+  is charged and how its residue is contained, and preflight reads them.
+  `DistanceConfig.max_working_memory_bytes` sizes the stage's residue containment and second
+  look, by default to the 512 MiB `ResourceLimits` passes, so a direct caller gets both as
+  `run()` does; only `run()`'s preflight refuses workers whose streams outgrow it. A worker killed while
+  idle surfaces as `distance_computation_error`, rather than as a raw broken pool, when a later
+  task would have gone to it; when none would, nothing it held is lost and the run completes
+  with the same values. ADR 0027.
+
 ## 0.5.0
 
 ### Breaking

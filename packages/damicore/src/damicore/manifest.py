@@ -65,6 +65,9 @@ class ManifestResourceLimits(BaseModel):
     # that run was admitted without it, and a default of 1.0 here would say it passed a gate
     # nobody applied. See ADR 0023.
     max_pair_window_factor: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    # `None` on a run written before the PPMd model check existed, for the same reason: that
+    # run was admitted without it. See ADR 0025.
+    allow_model_restart: bool | None = None
 
 
 class RunConfig(BaseModel):
@@ -89,6 +92,10 @@ class RunConfig(BaseModel):
     ppmd_memory_bytes: int | None = Field(default=None, ge=2_048, le=4_294_967_259)
     bzip2_block_size_100k: int | None = Field(default=None, ge=1, le=9)
     lzma_dictionary_bytes: int | None = Field(default=None, ge=4_096, le=1_610_612_736)
+    # `None` on a run written before pairing was a choice: it was concatenated, but the record
+    # says only what that run recorded. See ADR 0026.
+    pairing: Literal["concat", "interleave"] | None = None
+    interleave_block_bytes: int | None = Field(default=None, ge=1)
     num_clusters: int | None = Field(default=None, ge=1)
     keep_normalized: bool
     save_diagnostics: bool
@@ -147,15 +154,28 @@ class RunMethod(BaseModel):
 # The rules this release implements. Every key here must resolve in `docs/refs.json` or name
 # an ADR, which `tests/architecture/test_citations.py` holds: a typo would otherwise reach a
 # run directory as provenance pointing nowhere.
+# The distance rule is the pairing's: each pairing hands the compressor other bytes, so each
+# is its own rule, and the run's `pairing` setting selects which one it records [adr-0026].
+DISTANCE_RULES = {
+    "concat": MethodRule(name="ncd-max/v2", refs=("cilibrasi2005", "adr-0024")),
+    "interleave": MethodRule(
+        name="ncd-max-interleaved/v1", refs=("cilibrasi2005", "adr-0024", "adr-0026")
+    ),
+}
 RUN_METHOD = RunMethod(
     objects=MethodRule(name="canonical-json-lines/v1", refs=("adr-0001", "adr-0008", "adr-0010")),
-    distance=MethodRule(name="ncd-max/v1", refs=("cilibrasi2005",)),
+    distance=DISTANCE_RULES["concat"],
     tree=MethodRule(name="neighbor-joining-q/v1", refs=("saitou1987", "studier1988", "adr-0017")),
     clusters=MethodRule(
         name="fastgreedy-modularity/v1",
         refs=("clauset2004", "newman2004", "csardi2006", "adr-0016"),
     ),
 )
+
+
+def run_method(pairing: Literal["concat", "interleave"]) -> RunMethod:
+    """The rules a run under ``pairing`` records."""
+    return RUN_METHOD.model_copy(update={"distance": DISTANCE_RULES[pairing]})
 
 
 class RunManifest(BaseModel):

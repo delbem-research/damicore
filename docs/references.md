@@ -10,6 +10,12 @@ Bennett, C., Gacs, P., Ming Li, Vitanyi, P., Zurek, W. (1998). *Information dist
 
 <https://doi.org/10.1109/18.681318>
 
+## `cesar2016`
+
+Cesar, B. K. M. (2016). *Estudo e extensão da metodologia DAMICORE para tarefas de classificação*. Digital Library of Theses and Dissertations  (Universidade de São Paulo).
+
+<https://doi.org/10.11606/d.55.2016.tde-16112016-170837>
+
 ## `cilibrasi2005`
 
 Cilibrasi, R., Vitanyi, P. (2005). *Clustering by Compression*. IEEE Transactions on Information Theory.

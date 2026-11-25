@@ -99,6 +99,10 @@ class DistanceShardsCheckpoint(BaseModel):
     shard_count: int = Field(ge=0)
     completed: tuple[int, ...]
     digests: dict[str, str]
+    # Completed shards measured with the PPMd model check lifted. `allow_model_restart` is not
+    # checkpoint identity, so a resume that applies the check recomputes these rather than
+    # inheriting values it never checked [adr-0025].
+    unchecked: tuple[int, ...] = ()
 
     @field_validator("digests")
     @classmethod

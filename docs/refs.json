@@ -15,6 +15,18 @@
     "source": "crossref",
     "fetched": "2026-11-01"
   },
+  "cesar2016": {
+    "doi": "10.11606/d.55.2016.tde-16112016-170837",
+    "title": "Estudo e extensão da metodologia DAMICORE para tarefas de classificação",
+    "authors": [
+      "Cesar, B. K. M."
+    ],
+    "year": 2016,
+    "venue": "Digital Library of Theses and Dissertations  (Universidade de São Paulo)",
+    "type": "phdthesis",
+    "source": "crossref",
+    "fetched": "2026-11-25"
+  },
   "cilibrasi2005": {
     "doi": "10.1109/TIT.2005.844059",
     "title": "Clustering by Compression",

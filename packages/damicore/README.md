@@ -68,7 +68,10 @@ shared distribution of large objects. `"lzma"` finds shared content at any size 
 dictionary holds, `"bzip2"` sees both within its 900 kB block, and `"zlib"` and `"gzip"`
 see 32 KiB, past which objects look unrelated. Each compressor takes only its own
 settings — `ppmd_order`, `lzma_dictionary_bytes` and the like — and a setting written for
-another compressor is rejected.
+another compressor is rejected. `pairing="interleave"` pairs two objects in blocks of
+`interleave_block_bytes` taken in turn, as the original DAMICORE could, so a compressor whose
+window holds a block pair still matches aligned content of objects larger than the window;
+`pairing="concat"`, the default, compresses one object after the other.
 
 ## Command line
 
@@ -78,6 +81,7 @@ damicore run dataset.csv --split columns --output-dir ./results
 damicore run dataset.xlsx --source xlsx --sheet measurements --split rows
 damicore run ./corpus --source files --no-recursive
 damicore run dataset.csv --compressor lzma --lzma-dictionary-bytes 67108864
+damicore run ./corpus --source files --compressor zlib --pairing interleave
 damicore run one.bin two.bin three.bin --source files
 damicore --version
 ```

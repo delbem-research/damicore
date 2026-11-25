@@ -4,7 +4,7 @@ import math
 import re
 import sys
 from collections.abc import Callable, Iterator
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future
 from concurrent.futures.process import BrokenProcessPool
 from importlib.metadata import version
 from pathlib import Path
@@ -30,8 +30,8 @@ from damicore_distance.ncd import normalized_compression_distance
 pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
-WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], DistanceConfig]
-WorkerResult = tuple[int, list[int], list[int], list[float]]
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[str], list[int], DistanceConfig]
+WorkerResult = tuple[int, list[int], list[int], list[float], list[tuple[int, int, bytes]]]
 
 
 def _normalized(tmp_path: Path) -> NormalizationResult:
@@ -368,20 +368,26 @@ def test_every_compression_runs_on_the_pool_when_there_is_one(
         def shutdown(self, **_options: object) -> None:
             pass
 
-    original = distance_api.compressed_size
+    original_size = distance_api.compressed_size
+    original_fingerprint = distance_api.compressed_fingerprint
 
     def placed(*args: Any, **kwargs: Any) -> int:
         placements.append(in_pool)
-        return original(*args, **kwargs)
+        return original_size(*args, **kwargs)
+
+    def fingerprinted(*args: Any, **kwargs: Any) -> tuple[int, bytes]:
+        placements.append(in_pool)
+        return original_fingerprint(*args, **kwargs)
 
     monkeypatch.setattr(distance_api, "ProcessPoolExecutor", MarkingExecutor)
     monkeypatch.setattr(distance_api, "compressed_size", placed)
+    monkeypatch.setattr(distance_api, "compressed_fingerprint", fingerprinted)
     compute_distance_matrix(
         normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
     )
-    # Three objects, three pairs and the largest object after itself: every one of the seven
-    # compressions ran in the pool.
-    assert placements == [True] * 7
+    # Three objects; each object and each of the three pairs under the PPMd model and under half
+    # of it (ADR 0025); and the largest object after itself: all sixteen ran in the pool.
+    assert placements == [True] * 16
 
 
 def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:
@@ -399,7 +405,8 @@ def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> 
     [
         ("ppmd", "ppmd_order", 1, 2),
         ("ppmd", "ppmd_order", 65, 64),
-        ("ppmd", "ppmd_memory_bytes", 2_047, 2_048),
+        # Twice the codec's 2,048: the stage checks every size again under half the model.
+        ("ppmd", "ppmd_memory_bytes", 4_095, 4_096),
         ("ppmd", "ppmd_memory_bytes", 4_294_967_260, 4_294_967_259),
         ("bzip2", "bzip2_block_size_100k", 0, 1),
         ("bzip2", "bzip2_block_size_100k", 10, 9),
@@ -651,6 +658,33 @@ def test_a_manifest_with_fewer_than_two_objects_is_rejected(tmp_path: Path) -> N
     assert raised.value.code == "artifact_validation_error"
 
 
+def test_a_pool_that_breaks_between_phases_is_a_typed_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker the operating system kills while idle breaks its executor before the next
+    task is even submitted. The failure must still reach the caller as the stage's typed
+    error, whichever phase submits next."""
+    normalized = _normalized(tmp_path)
+
+    class BrokenExecutor:
+        def __init__(self, **_options: object) -> None:
+            pass
+
+        def submit(self, function: object, argument: object) -> Future[object]:
+            raise BrokenProcessPool("a child process terminated abruptly")
+
+        def shutdown(self, **_options: object) -> None:
+            pass
+
+    monkeypatch.setattr(distance_api, "ProcessPoolExecutor", BrokenExecutor)
+    with pytest.raises(DistanceError) as raised:
+        compute_distance_matrix(
+            normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
+        )
+    assert raised.value.code == "distance_computation_error"
+    assert isinstance(raised.value.__cause__, BrokenProcessPool)
+
+
 def test_a_worker_returning_a_non_finite_shard_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -664,6 +698,7 @@ def test_a_worker_returning_a_non_finite_shard_is_rejected(
             [i for i, _ in pairs],
             [j for _, j in pairs],
             [float("nan")] * len(pairs),
+            [],
         )
 
     monkeypatch.setattr(distance_api, "_worker", broken_worker)
@@ -722,6 +757,23 @@ def test_a_compressed_size_checkpoint_from_another_run_is_rejected(tmp_path: Pat
         lambda payload: payload["identity"].update(object_ids=["other"]),
     )
     with pytest.raises(DistanceError, match="checkpoint is incompatible") as raised:
+        compute_distance_matrix(
+            manifest, output, config=DistanceConfig(workers=1, pairs_per_shard=1)
+        )
+    assert raised.value.code == "checkpoint_mismatch_error"
+
+
+def test_a_checkpoint_written_in_input_pair_order_is_rejected(tmp_path: Path) -> None:
+    """Before pairs went in digest order (ADR 0024) a shard held values measured in input
+    order; resuming one would put both orders into one matrix, which no check downstream
+    could tell apart from a clean run."""
+    manifest, output = _completed_run(tmp_path)
+    for name in ("compressed-sizes.json", "distance-shards.json"):
+        _rewrite(
+            output / "checkpoints" / name,
+            lambda payload: payload["identity"].update(schema_version=1),
+        )
+    with pytest.raises(DistanceError, match="incompatible") as raised:
         compute_distance_matrix(
             manifest, output, config=DistanceConfig(workers=1, pairs_per_shard=1)
         )
@@ -921,24 +973,30 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
 
     class RecordingExecutor:
         def submit(
-            self, function: object, argument: distance_api.WorkerArguments
+            self, function: object, argument: distance_api.WorkerArguments, *, streams: int
         ) -> Future[distance_api.WorkerResult]:
             submitted.append(argument[0])
             future: Future[distance_api.WorkerResult] = Future()
-            future.set_result((argument[0], [], [], []))
+            future.set_result((argument[0], [], [], [], []))
             return future
 
     total = 10
     limit = 3
     no_pairs: list[tuple[int, int]] = []
     no_paths: list[str] = []
+    no_digests: list[str] = []
     no_sizes: list[int] = []
     shards: list[distance_api.WorkerArguments] = [
-        (index, no_pairs, no_paths, no_sizes, DistanceConfig()) for index in range(total)
+        (index, no_pairs, no_paths, no_digests, no_sizes, DistanceConfig())
+        for index in range(total)
     ]
     arguments: Iterator[distance_api.WorkerArguments] = iter(shards)
     results = distance_api._bounded_submit(
-        cast(ProcessPoolExecutor, RecordingExecutor()), arguments, limit
+        cast(distance_api._WorkerPool, RecordingExecutor()),
+        distance_api._worker,
+        arguments,
+        limit,
+        lambda _: 1,
     )
 
     # Nothing is submitted until the first result is pulled, and then only enough to fill

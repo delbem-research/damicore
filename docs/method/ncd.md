@@ -14,9 +14,14 @@ more. Checked against the implementation: `C(x)=100`, `C(y)=140`, `C(xy)=180` gi
 
 `C(s)` is not a property of `s` alone. It is the byte length of **one** compressor stream
 fed the object's bytes, from `damicore_distance.compressor.compressed_size`: a single
-stream is opened, every chunk of every path is pushed through it, and the returned total is
-the sum of the compressed output plus the final flush. `C(xy)` is the same call given two
-paths in order, so the concatenation is never materialised on disk.
+stream is opened, the bytes of every path are pushed through it in pieces, and the returned
+total is the sum of the compressed output plus the final flush. How the bytes are cut into
+pieces changes no value: under PPMd each piece is small enough that pyppmd cannot drop part of
+its code, which in larger calls it did [adr-0027]. `C(xy)` is the same call given two
+paths, so the concatenation is never materialised on disk. Which of the two goes first is
+fixed by content: the object whose SHA-256 is lower, as the normalization manifest records it
+[adr-0024]. The matrix is therefore a function of the objects, not of their order in the
+input -- reordered, it comes back reordered alike with every value unchanged.
 
 The compressor and its settings are part of the value, and each compressor reads only its
 own; a setting for another compressor is refused, not ignored. `damicore` takes them as
@@ -26,9 +31,11 @@ flat arguments; `damicore_distance` takes one settings model per compressor --
 
 - `compressor="ppmd"`, the default, is PPMd variant I through `pyppmd`, restarting its
   model from scratch when the model memory fills. `ppmd_order` (2 to 64, default 6) and
-  `ppmd_memory_bytes` (2048 to 4294967259, default 67108864) set it; the bounds are the
-  codec's own, outside which it would clamp without saying so. It has no window: what it
-  keeps across a pair is the statistics of what it has read, until its memory fills.
+  `ppmd_memory_bytes` (4096 to 4294967259, default 67108864) set it; the bounds are the
+  codec's own, outside which it would clamp without saying so, except the lower memory bound,
+  twice the codec's so that half the model is still a model [adr-0025]. It has no window:
+  what it keeps across a pair is the statistics of what it has read, until its memory fills
+  and it restarts from nothing.
 - `compressor="zlib"` and `compressor="gzip"` are DEFLATE through `zlib.compressobj`, with
   `wbits = zlib.MAX_WBITS` and `wbits = 31`, and `compression_level` (0 to 9, default 6).
   Both see a 32 KiB window: past it, the first object of a pair is out of view while the
@@ -50,6 +57,21 @@ The `Literal` is what keeps the choice total: a name outside it must fail to typ
 rather than quietly compress as something else, because every NCD value is a function of
 the compressor and its settings. Why PPMd is the default, and how it compares with `zlib`
 and with the original DAMICORE implementation on the same objects, is [adr-0020].
+
+How the two objects become one stream is the pairing, and it is part of the value too
+[adr-0026]. `pairing="concat"`, the default, is the concatenation above. `pairing="interleave"`
+is the original implementation's other pairing, unchanged: both objects cut into blocks of
+`interleave_block_bytes` (at least 1, default 1024), taken in turn -- `x1 y1 x2 y2 ...` --
+the rest of the longer after the shorter ends, `x` again the lower digest. A block of one
+object then lies one block behind the same block of the other, so a compressor whose window
+holds a pair of blocks matches aligned content across objects of any size, which is what
+interleaving is for; content shared out of alignment is matched only within that reach.
+`damicore_distance` takes them as `ConcatPairing()` and `InterleavePairing()`, and a block
+size without interleaving is refused. Each pairing is its own rule in the manifest:
+`ncd-max/v2` and `ncd-max-interleaved/v1`. On columns of a table, interleaving also pairs
+values of the same rows wherever the columns' widths keep them in the same block, so it
+measures some row-by-row association along with the distributions, in a proportion the run
+cannot report; ADR 0026 has the calibration.
 
 Execution defaults, from `DistanceConfig`: `compression_chunk_bytes=4194304`,
 `pairs_per_shard="auto"`, `workers="auto"`, `resume=True`. None of them changes an NCD
@@ -95,6 +117,9 @@ it.
 
 - **No symmetrisation.** The matrix is symmetric because each unordered pair is computed
   once and written to both triangles, not because `C(xy) = C(yx)` was checked or enforced.
+  The asymmetry is still in every value; what is fixed is its direction, which the digest
+  order ties to the objects' contents instead of their position in the input, after the
+  position was measured changing the partition of the same corpus [adr-0024].
 - **No normality check.** Nothing measures idempotency, monotonicity, symmetry or
   distributivity for the configured compressor on the data at hand. The paper's guarantees
   are conditional on them; this code does not establish the condition.
@@ -107,10 +132,21 @@ it.
   wants the measurement anyway. `report.json` carries `compressor_window_bytes` and
   `pairs_over_window`, and the result carries the count beside the window its own
   configuration declares, so a run admitted that way says how much of its matrix was
-  measured with one object out of view. PPMd declares no window, and
-  [adr-0023] carries the measurement that says why: its model size is not a limit, and the
-  number that would go in that field would be invented. Correcting the measurement for
-  oversized objects -- interleaved pairing -- is still open work.
+  measured with one object out of view. PPMd declares no window, because how fast its model
+  fills depends on the content as much as on the size, so no byte count would be true for
+  every column, nor even per object: the memory a pair needs grows with what the two share,
+  so near-duplicates can fill a model each of them fits. Each measurement is checked instead:
+  the distance stage compresses every object, before any pair, and every pair, as it is
+  computed, again under half the model. A stream that half the model codes into the same
+  bytes was not changed by a restart under all of it; one coded otherwise gets a second look
+  under twice the model, as many at once as the working-memory budget holds beside the
+  stream residue the workers keep [adr-0027], once no pair is in flight, and is refused only
+  if the model and twice it code it differently -- the model restarted. An admitted size is
+  therefore the objects' own unless two models restarted into the same bytes, which no
+  search has found. Without memory for the second look, a stream half the model codes
+  otherwise is refused, and the refusal names the limit. The pairs then cost twice the time,
+  within the same memory limit. `ResourceLimits.allow_model_restart` lifts the check
+  [adr-0025].
 - **Idempotency is measured once, not established.** The largest object is compressed a
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is
@@ -127,7 +163,7 @@ it.
 |---|---|
 | Available | `ppmd` through `pyppmd`; `zlib` and `gzip` through `zlib.compressobj`; `bzip2` and `lzma` through the standard library; exact (every pair computed) |
 | Not available | any other compressor; approximate or sampled NCD; a distance other than NCD |
-| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result |
+| Gated | a pair longer than the compressor's declared window, refused by preflight under `max_pair_window_factor` ([adr-0023]); counted per pair on the result. Interleaved, what is measured against the window is one block of each object ([adr-0026]). Under PPMd, an object or a pair the model codes otherwise than twice the model -- it restarted -- or, with no memory for that second look, otherwise than half the model, refused by the distance stage -- an object before any pair -- unless `allow_model_restart` ([adr-0025]) |
 | Guarded | `max(C(x), C(y)) == 0` raises `DistanceError` with code `distance_computation_error`; a compressor I/O failure, or a compressor stream that cannot be allocated, raises the same class with code `compression_error` |
 | Validated before the result returns | the matrix is finite, zero on the diagonal and bitwise symmetric |
 
@@ -159,3 +195,15 @@ it.
   `zlib` and with the original DAMICORE implementation on the same objects.
 - [adr-0021] — why bzip2 and LZMA are offered, what each measures at which size, and the
   memory each stream is charged.
+- [adr-0024] — why each pair is compressed in the order of its contents' digests, with the
+  measurement of what input order did to the partition.
+- [adr-0025] — why every PPMd measurement is checked against half the model, with the
+  measurements that revised ADR 0023's exemption and refuted a check per object.
+- [adr-0027] — the three pyppmd 1.3.1 encoder defects the stage works around, and how the
+  PPMd stream residue is charged and contained.
+- [adr-0026] — why the pairing is a named rule, the original implementation's interleaving
+  it brings back, each way it departs from that implementation with the evidence, and the
+  calibration on columns of a table.
+- [cesar2016] — the thesis issue 62 names as the basis for interleaving. What this
+  implementation takes is the original code's `interleave` (ADR 0026), not the thesis.
+  Not read: the algorithm is taken from the original implementation's code, not the thesis.

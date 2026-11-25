@@ -72,13 +72,13 @@ from damicore.errors import (
 )
 from damicore.estimate import ResourceEstimate, preflight
 from damicore.manifest import (
-    RUN_METHOD,
     ClustersArtifact,
     LabelsArtifact,
     RunManifest,
     artifact_record,
     atomic_json,
     json_mapping,
+    run_method,
     sha256_file,
 )
 from damicore.pipeline import (
@@ -123,7 +123,8 @@ _WINDOW_GUIDANCE = (
     "A pair longer than the window its compressor declares is compressed with one object out "
     "of view, so C(xy) approaches C(x) + C(y) and every distance moves toward 1 while still "
     "looking like a measurement. Choose a compressor whose window holds the pair -- `ppmd`, "
-    "the default, declares none, and `lzma` matches across its dictionary -- or raise "
+    "the default, declares none, and `lzma` matches across its dictionary -- interleave the "
+    "pair in blocks the window holds (pairing='interleave', --pairing interleave), or raise "
     "ResourceLimits.max_pair_window_factor (--max-pair-window-factor) to measure anyway; the "
     "run records the factor it was admitted under, and report.json counts the pairs above the "
     "window. See ADR 0023."
@@ -177,6 +178,8 @@ def _distance_config(
     ppmd_memory_bytes: int | None,
     bzip2_block_size_100k: int | None,
     lzma_dictionary_bytes: int | None,
+    pairing: str,
+    interleave_block_bytes: int | None,
     execution: ExecutionConfig,
     save_diagnostics: bool,
 ) -> DistanceConfig:
@@ -199,15 +202,25 @@ def _distance_config(
     foreign = sorted(written.keys() - _COMPRESSOR_SETTINGS[compressor])
     if foreign:
         raise ConfigurationError(f"{', '.join(foreign)} does not apply to {compressor}")
+    if pairing not in ("concat", "interleave"):
+        raise ConfigurationError("pairing must be exactly 'concat' or 'interleave'")
+    if interleave_block_bytes is not None and pairing != "interleave":
+        raise ConfigurationError(f"interleave_block_bytes does not apply to {pairing}")
+    block = (
+        {} if interleave_block_bytes is None else {"interleave_block_bytes": interleave_block_bytes}
+    )
     try:
         return DistanceConfig.model_validate(
             {
                 "compressor": {"name": compressor, **written},
+                "pairing": {"name": pairing, **block},
                 "compression_chunk_bytes": execution.compression_chunk_bytes,
                 "workers": execution.effective_workers,
                 "pairs_per_shard": execution.pairs_per_shard,
                 "resume": execution.resume,
                 "save_diagnostics": save_diagnostics,
+                "allow_model_restart": execution.limits.allow_model_restart,
+                "max_working_memory_bytes": execution.limits.max_working_memory_bytes,
             }
         )
     except ValidationError as exc:
@@ -300,6 +313,8 @@ def estimate(
     ppmd_memory_bytes: int | None = None,
     bzip2_block_size_100k: int | None = None,
     lzma_dictionary_bytes: int | None = None,
+    pairing: str = "concat",
+    interleave_block_bytes: int | None = None,
     keep_normalized: bool = False,
     save_diagnostics: bool = False,
     execution: ExecutionConfig | None = None,
@@ -327,8 +342,11 @@ def estimate(
         As for :func:`run`, and validated the same way. The compressor decides the memory
         every worker's stream holds, which the working-memory projection charges once per
         worker.
-    bzip2_block_size_100k, lzma_dictionary_bytes
-        As for :func:`run`, and validated the same way.
+    bzip2_block_size_100k, lzma_dictionary_bytes, pairing, interleave_block_bytes
+        As for :func:`run`, and validated the same way. An interleaving worker reads each
+        block a compression chunk at a time, so it is charged what a concatenating one is,
+        and the window gate reads one block of each object where the concatenation reads
+        both objects.
     keep_normalized
         Accepted for parity with :func:`run` and deliberately ignored: object bytes exist on
         disk while a run is in progress either way, so they are always counted.
@@ -373,6 +391,8 @@ def estimate(
         ppmd_memory_bytes=ppmd_memory_bytes,
         bzip2_block_size_100k=bzip2_block_size_100k,
         lzma_dictionary_bytes=lzma_dictionary_bytes,
+        pairing=pairing,
+        interleave_block_bytes=interleave_block_bytes,
         execution=settings,
         save_diagnostics=save_diagnostics,
     )
@@ -403,6 +423,7 @@ def _config_payload(
     # differing only in source cannot collide onto the same run directory.
     described = object_source.model_dump(mode="json")
     compressor = distance.compressor.model_dump(mode="json")
+    pairing = distance.pairing.model_dump(mode="json")
     return {
         "source_kind": described["kind"],
         "split": described.get("split"),
@@ -419,6 +440,8 @@ def _config_payload(
         "ppmd_memory_bytes": compressor.get("ppmd_memory_bytes"),
         "bzip2_block_size_100k": compressor.get("bzip2_block_size_100k"),
         "lzma_dictionary_bytes": compressor.get("lzma_dictionary_bytes"),
+        "pairing": pairing["name"],
+        "interleave_block_bytes": pairing.get("interleave_block_bytes"),
         "num_clusters": num_clusters,
         "keep_normalized": keep_normalized,
         "save_diagnostics": save_diagnostics,
@@ -614,6 +637,8 @@ _STAGE_TRANSLATIONS: tuple[
             "artifact_validation_error": ArtifactValidationError,
             "compression_error": CompressionError,
             "distance_matrix_validation_error": DistanceMatrixValidationError,
+            # The stage's own admission check (ADR 0025), lifted through ResourceLimits.
+            "model_capacity_error": ResourceLimitError,
         },
         DistanceComputationError,
     ),
@@ -701,6 +726,8 @@ def run(
     ppmd_memory_bytes: int | None = None,
     bzip2_block_size_100k: int | None = None,
     lzma_dictionary_bytes: int | None = None,
+    pairing: str = "concat",
+    interleave_block_bytes: int | None = None,
     num_clusters: int | None = None,
     output_dir: str | Path | None = None,
     keep_normalized: bool = False,
@@ -756,13 +783,21 @@ def run(
     compression_level, ppmd_order, ppmd_memory_bytes, bzip2_block_size_100k, lzma_dictionary_bytes
         The settings of the chosen compressor: ``compression_level`` (0 to 9, default 6) for
         ``"zlib"`` and ``"gzip"``; ``ppmd_order`` (2 to 64, default 6) and
-        ``ppmd_memory_bytes`` (2048 to 4294967259, default 67108864) for ``"ppmd"``;
+        ``ppmd_memory_bytes`` (4096 to 4294967259, default 67108864) for ``"ppmd"``;
         ``bzip2_block_size_100k`` (1 to 9, default 9) for ``"bzip2"``; and
         ``lzma_dictionary_bytes`` (4096 to 1610612736, default 8388608) for ``"lzma"``.
         ``None`` uses the default. A setting for a compressor that does not read it is a
         ``ConfigurationError``, never ignored, and every setting in force enters the run
         identity. Each worker holds one compressor stream, and preflight charges its stated
         memory per worker against ``max_working_memory_bytes``.
+    pairing, interleave_block_bytes
+        How the two objects of a pair become one stream, and so a rule every NCD value
+        depends on: ``"concat"``, the default, compresses one after the other [cilibrasi2005];
+        ``"interleave"`` takes blocks of ``interleave_block_bytes`` (at least 1, default 1024)
+        from each in turn, the rest of the longer after the shorter ends -- the original
+        implementation's pairing, which keeps aligned content of large objects within a
+        window that cannot hold both. Both enter the run identity and the manifest names the
+        rule; a block size without interleaving is a ``ConfigurationError``. See ADR 0026.
     num_clusters
         ``None`` lets FastGreedy choose the cut. Otherwise the upper bound is the object count
         this source produces, which is only known after preflight, so an oversized value is
@@ -842,6 +877,8 @@ def run(
         ppmd_memory_bytes=ppmd_memory_bytes,
         bzip2_block_size_100k=bzip2_block_size_100k,
         lzma_dictionary_bytes=lzma_dictionary_bytes,
+        pairing=pairing,
+        interleave_block_bytes=interleave_block_bytes,
         execution=settings,
         save_diagnostics=save_diagnostics,
     )
@@ -918,6 +955,22 @@ def run(
         )
         if not compatible:
             raise OutputDirectoryConflictError("Output directory belongs to another run")
+        # `allow_model_restart` is a limit, not run identity, so a directory measured with the
+        # check lifted is compatible with a call that applies it. Reused or resumed past the
+        # distance stage, it would hand that call a matrix the check never saw [adr-0025].
+        distancing = json_mapping(json_mapping(existing_manifest.get("stages")).get("distancing"))
+        if (
+            isinstance(distance_config.compressor, PpmdCompressor)
+            and not distance_config.allow_model_restart
+            and distancing.get("status") == "completed"
+            and json_mapping(distancing.get("metrics")).get("ppmd_model_checked") is not True
+        ):
+            raise ResourceLimitError(
+                "This run directory's distance matrix was measured with the PPMd model check "
+                "lifted, and this call applies it. Set allow_model_restart to use the directory "
+                "as it is, or choose another output directory to measure with the check. "
+                "See ADR 0025."
+            )
         recorded_runtime = {
             key: str(item) for key, item in json_mapping(existing_manifest.get("runtime")).items()
         }
@@ -971,7 +1024,7 @@ def run(
         "runtime": runtime_fingerprint(),
         # Recorded per run rather than inferred from the version: a directory outlives the
         # release that wrote it, and a rule that is constant today is a variant later.
-        "method": RUN_METHOD.model_dump(mode="json"),
+        "method": run_method(distance_config.pairing.name).model_dump(mode="json"),
         "stages": {},
         "artifacts": {},
         "warnings": [],
@@ -1082,6 +1135,11 @@ def run(
                 "ncd_max": distance.ncd_max,
                 "ncd_out_of_range_count": distance.ncd_out_of_range_count,
                 "ncd_self_largest": distance.ncd_self_largest,
+                # Written by the invocation that ran the stage, so it is true even when the run
+                # directory was created by an earlier one whose limits manifest.json keeps: a
+                # refused run resumed with the check lifted says here that it was not applied.
+                "ppmd_model_checked": isinstance(distance_config.compressor, PpmdCompressor)
+                and not distance_config.allow_model_restart,
             }
             # A stage that ran counted its pairs, so this is written rather than defaulted:
             # recording a zero where the count is absent would be a measurement nobody made.

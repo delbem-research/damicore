@@ -684,7 +684,7 @@ def test_a_run_records_the_rule_in_force_at_every_stage(tmp_path: Path) -> None:
     manifest = _completed_manifest(tmp_path)
     method = manifest["method"]
     assert set(method) == {"objects", "distance", "tree", "clusters"}
-    assert method["distance"] == {"name": "ncd-max/v1", "refs": ["cilibrasi2005"]}
+    assert method["distance"] == {"name": "ncd-max/v2", "refs": ["cilibrasi2005", "adr-0024"]}
     assert all(rule["refs"] for rule in method.values())
 
 

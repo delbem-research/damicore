@@ -1,17 +1,23 @@
 import hashlib
 import json
 import os
+import random
 from pathlib import Path
+from typing import Any
 
 import pyppmd
 import pytest
+from damicore_distance import DistanceConfig
+from damicore_distance.config import PPMD_STREAM_RESIDUE_BYTES
 
+import damicore.api as api
 from damicore import (
     ArtifactValidationError,
     ConfigurationError,
     DamicoreError,
     ExecutionConfig,
     MaterializationError,
+    ResourceLimitError,
     ResourceLimits,
     estimate,
     load_result,
@@ -365,7 +371,11 @@ def test_the_report_states_how_far_the_largest_object_is_from_itself(tmp_path: P
     )
     result.close()
     objects = sorted((output / "normalization" / "objects").iterdir())
-    largest = max(objects, key=lambda path: path.stat().st_size).read_bytes()
+    # The largest object, ties to the higher SHA-256 (ADR 0024), as the stage chooses it.
+    largest = max(
+        (path.read_bytes() for path in objects),
+        key=lambda payload: (len(payload), hashlib.sha256(payload).hexdigest()),
+    )
 
     def size(payload: bytes) -> int:
         return len(pyppmd.compress(payload, max_order=6, mem_size=67_108_864, variant="I"))
@@ -402,8 +412,11 @@ def test_preflight_charges_each_compressor_stream_once_per_worker(tmp_path: Path
     grown = estimate(source, ppmd_memory_bytes=(1 << 20) + 1_000, execution=workers)
     deflate = estimate(source, compressor="zlib", execution=workers)
     assert grown.estimated_working_memory_bytes - base.estimated_working_memory_bytes == 4_000
+    # And PPMd's stream residue (ADR 0027): each object opened four times, each pair three,
+    # and the largest object once more, every worker charged the whole run's.
+    residue = PPMD_STREAM_RESIDUE_BYTES * (base.object_count * 4 + base.pair_count * 3 + 1)
     assert base.estimated_working_memory_bytes - deflate.estimated_working_memory_bytes == 4 * (
-        (1 << 20) - 262_144
+        (1 << 20) - 262_144 + residue
     )
     assert estimate(source, execution=workers).within_limits
 
@@ -591,6 +604,246 @@ def test_a_pair_past_the_compressor_window_is_reported_and_refused(tmp_path: Pat
     manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["config"]["limits"]["max_pair_window_factor"] == 8.0
     result.close()
+
+
+def _restarting_corpus(directory: Path) -> Path:
+    """Two files of random bytes that each fill a 1 MiB PPMd model on their own."""
+    directory.mkdir()
+    for seed in (1, 2):
+        (directory / f"object_{seed}.bin").write_bytes(random.Random(seed).randbytes(262_144))
+    return directory
+
+
+def test_a_ppmd_model_an_object_fills_is_refused_and_can_be_lifted(tmp_path: Path) -> None:
+    """ADR 0025: under PPMd the stage refuses a run in which an object fills the model, before
+    any pair; ResourceLimits.allow_model_restart measures anyway and is recorded."""
+    corpus = _restarting_corpus(tmp_path / "corpus")
+    with pytest.raises(ResourceLimitError) as refused:
+        run(
+            corpus,
+            source_kind="files",
+            ppmd_memory_bytes=1_048_576,
+            output_dir=tmp_path / "refused",
+            progress=False,
+            execution=ExecutionConfig(workers=1),
+        )
+    assert refused.value.code == "resource_limit_error"
+    assert "ppmd_memory_bytes" in str(refused.value)
+    assert not (tmp_path / "refused" / "distance.npy").exists()
+
+    result = run(
+        corpus,
+        source_kind="files",
+        ppmd_memory_bytes=1_048_576,
+        output_dir=tmp_path / "allowed",
+        progress=False,
+        execution=ExecutionConfig(workers=1, limits=ResourceLimits(allow_model_restart=True)),
+    )
+    manifest = json.loads((result.artifacts.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["config"]["limits"]["allow_model_restart"] is True
+    assert manifest["stages"]["distancing"]["metrics"]["ppmd_model_checked"] is False
+    result.close()
+
+
+def test_a_refused_run_resumed_with_the_check_lifted_says_it_was_not_applied(
+    tmp_path: Path,
+) -> None:
+    """The refusal leaves the run directory behind, and manifest.json keeps the limits of the
+    invocation that created it. The distance receipt is written by the invocation that ran the
+    stage, so it is the record of whether the check applied (ADR 0025)."""
+    corpus = _restarting_corpus(tmp_path / "corpus")
+    output = tmp_path / "run"
+    arguments: dict[str, Any] = {
+        "source_kind": "files",
+        "ppmd_memory_bytes": 1_048_576,
+        "output_dir": output,
+        "progress": False,
+    }
+    with pytest.raises(ResourceLimitError):
+        run(corpus, execution=ExecutionConfig(workers=1), **arguments)
+    lifted = ExecutionConfig(workers=1, limits=ResourceLimits(allow_model_restart=True))
+    result = run(corpus, execution=lifted, **arguments)
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stages"]["distancing"]["metrics"]["ppmd_model_checked"] is False
+    result.close()
+
+    checked = run(_csv(tmp_path), output_dir=tmp_path / "checked", progress=False)
+    manifest = json.loads((tmp_path / "checked" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stages"]["distancing"]["metrics"]["ppmd_model_checked"] is True
+    checked.close()
+
+
+@pytest.mark.parametrize("completed", [True, False], ids=["reused", "resumed"])
+def test_a_call_with_the_check_refuses_a_directory_measured_without_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completed: bool
+) -> None:
+    """A call that applies the PPMd model check never returns a matrix measured without it
+    (ADR 0025). A directory whose distance stage completed with the check lifted is refused,
+    whether the run completed and would be reused or stopped later and would be resumed."""
+    corpus = _restarting_corpus(tmp_path / "corpus")
+    output = tmp_path / "run"
+    lifted = ExecutionConfig(workers=1, limits=ResourceLimits(allow_model_restart=True))
+    arguments: dict[str, Any] = {
+        "source_kind": "files",
+        "ppmd_memory_bytes": 1_048_576,
+        "output_dir": output,
+        "progress": False,
+    }
+    if completed:
+        run(corpus, execution=lifted, **arguments).close()
+    else:
+
+        def fail_clusterizing(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("injected clusterizer failure")
+
+        monkeypatch.setattr(api, "cluster_tree", fail_clusterizing)
+        with pytest.raises(DamicoreError):
+            run(corpus, execution=lifted, **arguments)
+        monkeypatch.undo()
+    with pytest.raises(ResourceLimitError) as refused:
+        run(corpus, execution=ExecutionConfig(workers=1), **arguments)
+    assert "allow_model_restart" in str(refused.value)
+    # The directory stays usable for the call that measured it.
+    run(corpus, execution=lifted, **arguments).close()
+
+
+def _near_copy_corpus(directory: Path, size: int) -> Path:
+    """Two files of ``size`` bytes, the second the first with one byte in a hundred changed."""
+    directory.mkdir()
+    original = bytes(random.Random(62).choice(b"abcdefgh0123456789\n") for _ in range(size))
+    copy = bytearray(original)
+    for index in range(0, size, 100):
+        copy[index] = ord("z")
+    (directory / "a.txt").write_bytes(original)
+    (directory / "b.txt").write_bytes(bytes(copy))
+    return directory
+
+
+def test_the_distance_stage_and_run_share_one_default_memory_limit() -> None:
+    """A caller of the distance stage who declares no limit gets the limit `run()` passes when
+    its caller declares none: one rule, so the stage behaves alike on both ways in."""
+    assert DistanceConfig().max_working_memory_bytes == ResourceLimits().max_working_memory_bytes
+
+
+def test_the_working_memory_limit_decides_the_second_look(tmp_path: Path) -> None:
+    """The PPMd check looks again under twice the model only within
+    `ResourceLimits.max_working_memory_bytes`: a pair half the model codes otherwise is
+    measured under the default limit, and refused, naming the limit, under one that admits the
+    run but holds no stream of twice the model (ADR 0025)."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    original = random.Random(12_000).randbytes(12_000)
+    copy = bytearray(original)
+    for index in random.Random(12_000).sample(range(len(copy)), 12):
+        copy[index] = random.Random(index).randrange(256)
+    (corpus / "a.bin").write_bytes(original)
+    (corpus / "b.bin").write_bytes(bytes(copy))
+    arguments: dict[str, Any] = {
+        "source_kind": "files",
+        "ppmd_memory_bytes": 1_048_576,
+        "progress": False,
+    }
+    run(
+        corpus, output_dir=tmp_path / "roomy", execution=ExecutionConfig(workers=1), **arguments
+    ).close()
+    # One worker is charged two 4 MiB chunks and the 1 MiB model; twice the model needs 1 MiB
+    # more than that, which this limit does not have.
+    tight = ExecutionConfig(
+        workers=1, limits=ResourceLimits(max_working_memory_bytes=9 * 1_048_576 + 524_288)
+    )
+    assert estimate(
+        corpus, execution=tight, **{k: v for k, v in arguments.items() if k != "progress"}
+    ).within_limits
+    with pytest.raises(ResourceLimitError, match="max_working_memory_bytes"):
+        run(corpus, output_dir=tmp_path / "tight", execution=tight, **arguments)
+
+
+def test_preflight_charges_the_disk_pairs_wait_on_for_the_second_look(tmp_path: Path) -> None:
+    """Under the PPMd check a pair waiting for its second look waits on disk, 40 bytes, and
+    preflight charges it for every pair: nothing else may differ (ADR 0025)."""
+    source = _csv(tmp_path)
+    checked = estimate(source)
+    lifted = estimate(
+        source, execution=ExecutionConfig(limits=ResourceLimits(allow_model_restart=True))
+    )
+    assert checked.estimated_artifact_bytes - lifted.estimated_artifact_bytes == (
+        checked.pair_count * 40
+    )
+    zlib = estimate(source, compressor="zlib")
+    assert zlib.estimated_artifact_bytes == lifted.estimated_artifact_bytes
+
+
+def test_the_pairing_is_recorded_and_named_by_its_rule(tmp_path: Path) -> None:
+    """The pairing changes every value, so it is configuration the hash covers and a rule the
+    manifest names: `ncd-max/v2` for the concatenation, `ncd-max-interleaved/v1` for
+    interleaving, whose block size is recorded beside it and absent otherwise (ADR 0026)."""
+    source = _csv(tmp_path)
+
+    def recorded(name: str, **pairing: Any) -> dict[str, Any]:
+        output = tmp_path / name
+        run(source, output_dir=output, progress=False, **pairing).close()
+        return json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+
+    concatenated = recorded("concat")
+    interleaved = recorded("interleave", pairing="interleave", interleave_block_bytes=512)
+    assert concatenated["config"]["pairing"] == "concat"
+    assert concatenated["config"]["interleave_block_bytes"] is None
+    assert concatenated["method"]["distance"]["name"] == "ncd-max/v2"
+    assert interleaved["config"]["pairing"] == "interleave"
+    assert interleaved["config"]["interleave_block_bytes"] == 512
+    assert interleaved["method"]["distance"]["name"] == "ncd-max-interleaved/v1"
+    assert concatenated["config_hash"] != interleaved["config_hash"]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"interleave_block_bytes": 512}, "interleave_block_bytes does not apply to concat"),
+        ({"pairing": "zip"}, "pairing must be exactly"),
+        ({"pairing": "interleave", "interleave_block_bytes": 0}, "interleave_block_bytes"),
+    ],
+)
+def test_a_pairing_setting_that_does_not_apply_is_refused(
+    tmp_path: Path, arguments: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ConfigurationError, match=message):
+        estimate(_csv(tmp_path), **arguments)
+
+
+def test_interleaving_admits_a_pair_past_the_window_and_gates_its_block(tmp_path: Path) -> None:
+    """Under interleaving the compressor holds one block of each object at once, not both
+    objects, so the window gate reads that span: two 40 KiB files are past DEFLATE's 32 KiB
+    window concatenated, within it in 1 KiB blocks, and past it again in 32 KiB blocks
+    (ADR 0026)."""
+    corpus = _near_copy_corpus(tmp_path / "corpus", 40_960)
+
+    def gate(**pairing: Any) -> tuple[int | None, list[str]]:
+        preview = estimate(corpus, source_kind="files", compressor="zlib", **pairing)
+        return preview.max_pair_bytes, preview.violations
+
+    assert gate() == (81_920, ["compressor_window"])
+    assert gate(pairing="interleave", interleave_block_bytes=1_024) == (2_048, [])
+    assert gate(pairing="interleave", interleave_block_bytes=32_768) == (
+        65_536,
+        ["compressor_window"],
+    )
+
+
+def test_preflight_charges_an_interleaving_worker_what_it_charges_a_concatenating_one(
+    tmp_path: Path,
+) -> None:
+    """An interleaving worker reads each block into the buffer it compresses from, a chunk at a
+    time, and never holds a block whole, so the block size is no part of its charge: a large
+    block must not refuse a run the concatenation admits (ADR 0026, ADR 0027)."""
+    source = _csv(tmp_path)
+    workers = ExecutionConfig(workers=2, compression_chunk_bytes=1_048_576)
+    base = estimate(source, execution=workers).estimated_working_memory_bytes
+    for block in (1_024, 4_194_304, 64 * 1_048_576):
+        interleaved = estimate(
+            source, execution=workers, pairing="interleave", interleave_block_bytes=block
+        )
+        assert interleaved.estimated_working_memory_bytes == base, block
+        assert "max_working_memory_bytes" not in interleaved.violations, block
 
 
 def test_the_refusal_advises_on_the_gates_it_actually_tripped(tmp_path: Path) -> None:

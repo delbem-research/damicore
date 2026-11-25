@@ -63,6 +63,9 @@ nitpick_ignore = [
     # `DeflateCompressor`, `Bzip2Compressor` or `LzmaCompressor`, each exported and
     # documented.
     ("py:class", "Compressor"),
+    # And for `DistanceConfig.pairing`: `ConcatPairing` or `InterleavePairing`, each exported
+    # and documented.
+    ("py:class", "Pairing"),
     # Manifest payloads, and the two unions over them, discriminated on `kind`. A caller
     # reads these off a validated manifest and branches on `kind`, whose values --
     # `delimited`, `xlsx`, `files` -- are the source axis `docs/input-contract.md` and

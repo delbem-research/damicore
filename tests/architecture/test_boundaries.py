@@ -189,6 +189,8 @@ def test_public_exports_are_exact() -> None:
         "DeflateCompressor",
         "Bzip2Compressor",
         "LzmaCompressor",
+        "ConcatPairing",
+        "InterleavePairing",
         "DistanceResult",
         "DistanceMatrixView",
         "DistanceError",

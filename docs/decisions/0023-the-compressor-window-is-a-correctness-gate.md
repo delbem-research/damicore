@@ -121,3 +121,7 @@ later declares its own, and `window_bytes` returning `None` stays available for 
 reach is not a byte count. Revisit the factor's default if a corpus is found whose
 measurement is sound past the window: that would be evidence that the window is the wrong
 place for the gate, which no corpus measured here shows.
+
+The exemption of PPMd is revised by [adr-0025]: the measurement above was taken on data whose
+model barely fills, and on data that fills it the model's restart is a limit after all. PPMd
+still declares no window; each of its measurements is checked instead.

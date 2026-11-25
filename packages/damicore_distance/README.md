@@ -40,6 +40,10 @@ from damicore_distance import DistanceConfig, LzmaCompressor
 config = DistanceConfig(compressor=LzmaCompressor(lzma_dictionary_bytes=67_108_864))
 ```
 
+How a pair becomes one stream is a setting too: `ConcatPairing()`, the default, compresses
+one object after the other, and `InterleavePairing(interleave_block_bytes=1024)` takes
+blocks of each in turn, the original DAMICORE's pairing for objects larger than a window.
+
 The manifest is produced by the sibling `damicore-normalizer` distribution; the
 call writes `distance.npy` and `labels.json`, the inputs the sibling
 `damicore-tree-builder` distribution consumes. Compression is incremental, pairs

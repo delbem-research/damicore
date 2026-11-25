@@ -43,11 +43,16 @@ class DatasetFormatError(InputValidationError):
 
 
 class ResourceLimitError(DamicoreError):
-    """Preflight projected a run outside the configured ``ResourceLimits``.
+    """Preflight projected a run outside the configured ``ResourceLimits``, or the distance
+    stage found an object or a pair that restarts the PPMd model, or fills more than half of
+    it with no memory to look again under twice it, or a call
+    applying that check met a directory measured without it (ADR 0025).
 
-    ``context["estimate"]`` holds the ``ResourceEstimate``, whose ``violations`` names every
-    gate that failed. The message carries what to do about it, and ``docs/scalability.md``
-    explains why the object count is what decides feasibility.
+    From preflight, ``context["estimate"]`` holds the ``ResourceEstimate``, whose
+    ``violations`` names every gate that failed; the distance stage's refusal, which needs the
+    object bytes preflight never reads, carries no estimate. The message carries what to do
+    about it, and ``docs/scalability.md`` explains why the object count is what decides
+    feasibility.
     """
 
 

@@ -34,11 +34,16 @@ References
 from __future__ import annotations
 
 import bz2
+import hashlib
 import lzma
+import threading
 import zlib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import ExitStack
 from importlib.metadata import version
+from io import BufferedReader
 from pathlib import Path
+from typing import cast
 
 import pyppmd
 
@@ -46,13 +51,16 @@ from damicore_distance.config import (
     Bzip2Compressor,
     DeflateCompressor,
     DistanceConfig,
+    InterleavePairing,
     LzmaCompressor,
     PpmdCompressor,
 )
 from damicore_distance.errors import DistanceError
 
 
-def _stream(config: DistanceConfig) -> tuple[Callable[[bytes], bytes], Callable[[], bytes]]:
+def _stream(
+    config: DistanceConfig,
+) -> tuple[Callable[[bytearray | memoryview], bytes], Callable[[], bytes]]:
     """Open one stream and return how to feed it and how to finish it.
 
     The match is total over the compressor union: a model added there without a case here
@@ -73,7 +81,22 @@ def _stream(config: DistanceConfig) -> tuple[Callable[[bytes], bytes], Callable[
                 settings.ppmd_memory_bytes,
                 pyppmd.PPMD8_RESTORE_METHOD_RESTART,
             )
-            return model.encode, model.flush
+            # pyppmd's stub declares `bytes`; its C extension takes any buffer (`y*`), which is
+            # what lets the stage hand it one reused buffer rather than a new object per piece.
+            code = cast("Callable[[bytearray | memoryview], bytes]", model.encode)
+
+            def encode(piece: bytearray | memoryview) -> bytes:
+                coded = code(piece)
+                # Unreachable by the bound on the piece; if it is ever reached, bytes may have
+                # been dropped, and the measurement is refused rather than reported.
+                if len(coded) >= _PPMD_FIRST_OUTPUT_BLOCK:
+                    raise DistanceError(
+                        "pyppmd coded a piece into a full output block, where it drops bytes",
+                        code="compression_error",
+                    )
+                return coded
+
+            return encode, model.flush
         case Bzip2Compressor():
             block = bz2.BZ2Compressor(settings.bzip2_block_size_100k)
             return block.compress, block.flush
@@ -112,7 +135,98 @@ def codec_fingerprint() -> dict[str, str]:
     }
 
 
+# pyppmd 1.3.1's `encode()` never releases the buffer it is handed, so the object it is given
+# stays alive for good: fed fresh bytes, every stream would leave its whole input resident.
+# Every compressor is therefore fed from one buffer per piece size and thread, kept for the
+# life of the thread, which it would outlive anyway; a stream leaves at most one view of it.
+# Per thread, so two streams compressed at once in one process never share one [adr-0027].
+_BUFFERS = threading.local()
+
+# pyppmd 1.3.1 writes an `encode()` call's output into blocks of which the first holds 32 KiB,
+# and drops a byte that finds the block full, growing it only between symbols: a symbol whose
+# code crosses the block's end loses its last bytes. A symbol is coded in at most order + 2
+# range-coder steps -- the first context and an escape from each order below -- each emitting
+# at most 4 bytes as its 32-bit register shifts out, so a piece of this many bytes or fewer
+# can never fill the first block, and nothing is dropped [adr-0027].
+_PPMD_FIRST_OUTPUT_BLOCK = 32 * 1_024
+
+
+def _piece_bytes(config: DistanceConfig) -> int:
+    """How much the compressor is handed per call: a compression chunk, or under PPMd the
+    most whose code cannot fill pyppmd's first output block [adr-0027]."""
+    compressor = config.compressor
+    if isinstance(compressor, PpmdCompressor):
+        return (_PPMD_FIRST_OUTPUT_BLOCK - 1) // (4 * (compressor.ppmd_order + 2))
+    return config.compression_chunk_bytes
+
+
+def _buffer(size: int) -> bytearray:
+    buffers: dict[int, bytearray] | None = getattr(_BUFFERS, "by_size", None)
+    if buffers is None:
+        buffers = _BUFFERS.by_size = {}
+    buffer = buffers.get(size)
+    if buffer is None:
+        buffer = buffers[size] = bytearray(size)
+    return buffer
+
+
+def _paired_chunks(
+    paths: tuple[Path, ...], config: DistanceConfig
+) -> Iterator[bytearray | memoryview]:
+    """The bytes the compressor is fed, in order, a buffer of ``_piece_bytes`` at a time; each
+    piece is valid until the next is requested.
+
+    Two paths are a pair, joined by ``config.pairing``: one after the other, or in blocks
+    taken in turn, the rest of the longer after the shorter ends [adr-0026]. One path, or any
+    other count, is fed whole in order. Full pieces are the buffer itself and only the last is
+    a view of it, so the compressor is handed no new object but one per stream [adr-0027].
+    """
+    pairing = config.pairing
+    block = (
+        pairing.interleave_block_bytes
+        if isinstance(pairing, InterleavePairing) and len(paths) == 2
+        else None
+    )
+    size = _piece_bytes(config)
+    buffer = _buffer(size)
+    view = memoryview(buffer)
+    filled = 0
+    with ExitStack() as stack:
+        sources: list[BufferedReader] = [stack.enter_context(path.open("rb")) for path in paths]
+        while True:
+            moved = 0
+            # A round reads each source to its end, or, interleaved, one block of each.
+            for source in sources:
+                taken = 0
+                while block is None or taken < block:
+                    if filled == size:
+                        yield buffer
+                        filled = 0
+                    room = size - filled if block is None else min(size - filled, block - taken)
+                    got = source.readinto(view[filled : filled + room])
+                    if not got:
+                        break
+                    filled += got
+                    taken += got
+                moved += taken
+            if block is None or not moved:
+                break
+    if filled:
+        yield view[:filled]
+
+
 def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:
+    return compressed_fingerprint(paths, config=config)[0]
+
+
+def compressed_fingerprint(paths: Iterable[Path], *, config: DistanceConfig) -> tuple[int, bytes]:
+    """The size of the compressed stream and the SHA-256 of its bytes.
+
+    Two streams of one size can still differ: the PPMd model check compares the bytes two
+    models code, because a model and its half that both restart were found coding the same
+    number of bytes as each other and not the number an unfilled model codes [adr-0025].
+    """
+    digest = hashlib.sha256()
     try:
         feed, finish = _stream(config)
     except MemoryError as exc:
@@ -124,11 +238,13 @@ def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:
         ) from exc
     total = 0
     try:
-        for path in paths:
-            with path.open("rb") as source:
-                while chunk := source.read(config.compression_chunk_bytes):
-                    total += len(feed(chunk))
-        total += len(finish())
+        for chunk in _paired_chunks(tuple(paths), config):
+            coded = feed(chunk)
+            digest.update(coded)
+            total += len(coded)
+        coded = finish()
+        digest.update(coded)
+        total += len(coded)
     except OSError as exc:
         raise DistanceError(f"Could not compress object: {exc}", code="compression_error") from exc
-    return total
+    return total, digest.digest()
