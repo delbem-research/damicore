@@ -87,8 +87,9 @@ carries anything else, a date included, matches neither and fails the release.
   replaced between shards. A run that fitted its limit runs as before.
   `DistanceConfig.worker_memory_bytes` and `DistanceConfig.stream_residue()` state what a worker
   is charged and how its residue is contained, and preflight reads them.
-  `DistanceConfig.max_working_memory_bytes` bounds the stage on its own, by default to the
-  512 MiB `ResourceLimits` passes, so a direct caller is contained as `run()` is. A worker killed while
+  `DistanceConfig.max_working_memory_bytes` sizes the stage's residue containment and second
+  look, by default to the 512 MiB `ResourceLimits` passes, so a direct caller gets both as
+  `run()` does; only `run()`'s preflight refuses workers whose streams outgrow it. A worker killed while
   idle surfaces as `distance_computation_error`, rather than as a raw broken pool, when a later
   task would have gone to it; when none would, nothing it held is lost and the run completes
   with the same values. ADR 0027.

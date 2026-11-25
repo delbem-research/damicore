@@ -227,7 +227,8 @@ class DistanceConfig(BaseModel):
     allow_model_restart: bool = False
     # The working memory the caller allows the stage, by default the limit `damicore.run()`
     # passes when its own caller declares none, so the stage contains its PPMd residue and
-    # sizes the second look alike on either way in [adr-0025] [adr-0027].
+    # sizes the second look alike on either way in [adr-0025] [adr-0027]. The stage does not
+    # refuse workers whose streams outgrow it; `run()`'s preflight does.
     max_working_memory_bytes: int = Field(default=536_870_912, gt=0)
 
     @property
