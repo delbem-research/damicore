@@ -4,7 +4,7 @@ import math
 import re
 import sys
 from collections.abc import Callable, Iterator
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future
 from concurrent.futures.process import BrokenProcessPool
 from importlib.metadata import version
 from pathlib import Path
@@ -946,7 +946,7 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
 
     class RecordingExecutor:
         def submit(
-            self, function: object, argument: distance_api.WorkerArguments
+            self, function: object, argument: distance_api.WorkerArguments, *, streams: int
         ) -> Future[distance_api.WorkerResult]:
             submitted.append(argument[0])
             future: Future[distance_api.WorkerResult] = Future()
@@ -965,7 +965,11 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
     ]
     arguments: Iterator[distance_api.WorkerArguments] = iter(shards)
     results = distance_api._bounded_submit(
-        cast(ProcessPoolExecutor, RecordingExecutor()), distance_api._worker, arguments, limit
+        cast(distance_api._WorkerPool, RecordingExecutor()),
+        distance_api._worker,
+        arguments,
+        limit,
+        lambda _: 1,
     )
 
     # Nothing is submitted until the first result is pulled, and then only enough to fill

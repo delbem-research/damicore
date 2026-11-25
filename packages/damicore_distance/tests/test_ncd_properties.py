@@ -16,8 +16,12 @@ import itertools
 import json
 import lzma
 import random
+import subprocess
+import sys
+import textwrap
 import tracemalloc
 import zlib
+from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any, Literal
@@ -125,14 +129,20 @@ def _direct_size(*payloads: bytes, config: DistanceConfig) -> int:
             }
             return len(lzma.compress(joined, format=lzma.FORMAT_RAW, filters=[lzma2]))
         case PpmdCompressor():
-            return len(
-                pyppmd.compress(
-                    joined,
-                    max_order=settings.ppmd_order,
-                    mem_size=settings.ppmd_memory_bytes,
-                    variant="I",
-                )
+            # 64 bytes a call: at most 4 bytes per range-coder step and order + 2 steps per
+            # byte keep every call's code under the 32 KiB block where pyppmd drops bytes,
+            # for any order up to 64 (ADR 0027). pyppmd keeps every slice it is handed, which
+            # in a test process costs only the payload.
+            encoder = pyppmd.Ppmd8Encoder(
+                settings.ppmd_order,
+                settings.ppmd_memory_bytes,
+                pyppmd.PPMD8_RESTORE_METHOD_RESTART,
             )
+            coded = sum(
+                len(encoder.encode(joined[start : start + 64]))
+                for start in range(0, len(joined), 64)
+            )
+            return coded + len(encoder.flush())
         case DeflateCompressor():
             stream = zlib.compressobj(
                 level=settings.compression_level,
@@ -950,43 +960,108 @@ def test_an_admitted_ppmd_run_measures_what_an_unfilled_model_measures(
 # --- The PPMd stream residue (ADR 0027) ------------------------------------------------
 
 
-def test_the_pool_is_built_with_the_planned_replacement(
+def test_no_worker_holds_more_residue_than_its_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Every worker is a process of its own, replaced before a task would take the PPMd
+    stream residue it holds past its budget, and never before its first task (ADR 0027)."""
     payloads = [random.Random(index).randbytes(200) for index in range(6)]
     manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
     built: list[dict[str, Any]] = []
+    held: list[int] = []
+    largest_task = [0]
+    streams: dict[str, Callable[[Any], int]] = {
+        "_size_worker": lambda _: 1,
+        "_check_worker": lambda _: 2,
+        "_escalation_worker": lambda _: 1,
+        "_worker": lambda shard: 2 * len(shard[1]),
+    }
 
     class RecordingExecutor:
         def __init__(self, **options: Any) -> None:
             built.append(options)
+            held.append(0)
+            self.slot = len(held) - 1
 
         def submit(self, function: Any, argument: Any) -> Future[Any]:
+            residue = PPMD_STREAM_RESIDUE_BYTES * streams[function.__name__](argument)
+            held[self.slot] += residue
+            largest_task[0] = max(largest_task[0], residue)
             future: Future[Any] = Future()
             future.set_result(function(argument))
             return future
-
-        def map(self, function: Any, arguments: Any) -> Any:
-            return iter([function(argument) for argument in arguments])
 
         def shutdown(self, **_options: Any) -> None:
             pass
 
     monkeypatch.setattr(distance_api, "ProcessPoolExecutor", RecordingExecutor)
     # One worker under a limit too small to hold its residue in process: a process of its
-    # own, replaced after every task.
+    # own, replaced as its residue grows.
     config = DistanceConfig(
         compressor=PpmdCompressor(ppmd_memory_bytes=1 << 20),
         workers=1,
         compression_chunk_bytes=1_024,
-        # The worker's stream and chunks, one pair's bookkeeping, and the residue of exactly
-        # one shard of one checked pair: room for one task before replacement.
-        max_working_memory_bytes=(1 << 20) + 2_048 + 24 + 2 * PPMD_STREAM_RESIDUE_BYTES + 100,
+        max_working_memory_bytes=(1 << 20) + 2_048 + 24 + 6 * PPMD_STREAM_RESIDUE_BYTES,
     )
+    _, budget, pooled = config.stream_residue(6, 15)
+    assert pooled and budget is not None
     compute_distance_matrix(manifest_path, tmp_path / "run", config=config)
-    assert len(built) == 1
-    assert built[0]["max_workers"] == 1
-    assert built[0]["max_tasks_per_child"] == config.stream_residue(6, 15)[1] == 1
+    assert all(options["max_workers"] == 1 for options in built)
+    assert all("max_tasks_per_child" not in options for options in built)
+    assert len(built) > 1
+    assert max(held) <= max(budget, largest_task[0])
+
+
+@pytest.mark.parametrize(("workers", "shards"), [(1, 3), (2, 1)])
+def test_replacing_workers_on_a_queue_finishes(tmp_path: Path, workers: int, shards: int) -> None:
+    """Workers replaced after a few shards, with more tasks queued than workers, must finish.
+    CPython's own `max_tasks_per_child` hangs here under 3.11 and 3.12 up to at least 3.12.3:
+    a retired worker is not replaced while tasks wait (ADR 0027). Run in a subprocess, so a
+    hang fails this test instead of the suite."""
+    count = 40
+    payloads = [random.Random(index).randbytes(300) for index in range(count)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    pairs = count * (count - 1) // 2
+    probe = DistanceConfig(
+        compressor=PpmdCompressor(ppmd_memory_bytes=1 << 20),
+        workers=workers,
+        compression_chunk_bytes=1_024,
+    )
+    shard = probe.effective_pairs_per_shard(pairs)
+    per_task = PPMD_STREAM_RESIDUE_BYTES * shard * 2
+    # Room for `shards` shards per worker and not one more.
+    limit = workers * (probe.worker_memory_bytes + per_task * shards + per_task // 2)
+    limit += shard * 24
+    _, budget, pooled = probe.model_copy(update={"max_working_memory_bytes": limit}).stream_residue(
+        count, pairs
+    )
+    assert pooled and budget is not None
+    assert per_task * shards <= budget < per_task * (shards + 1)
+    script = textwrap.dedent(
+        f"""
+        from damicore_distance import DistanceConfig, PpmdCompressor, compute_distance_matrix
+        if __name__ == "__main__":
+            config = DistanceConfig(
+                compressor=PpmdCompressor(ppmd_memory_bytes=1 << 20),
+                workers={workers},
+                compression_chunk_bytes=1_024,
+                max_working_memory_bytes={limit},
+            )
+            compute_distance_matrix(
+                {str(manifest_path)!r}, {str(tmp_path / "run")!r}, config=config
+            )
+        """
+    )
+    (tmp_path / "replaced.py").write_text(script, encoding="utf-8")
+    finished = subprocess.run(
+        [sys.executable, str(tmp_path / "replaced.py")],
+        capture_output=True,
+        text=True,
+        timeout=240,
+        check=False,
+    )
+    assert finished.returncode == 0, finished.stderr[-2_000:]
+    assert (tmp_path / "run" / "distance.npy").exists()
 
 
 def test_replacing_workers_changes_no_value(tmp_path: Path) -> None:

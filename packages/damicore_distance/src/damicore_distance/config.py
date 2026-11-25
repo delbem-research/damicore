@@ -242,16 +242,17 @@ class DistanceConfig(BaseModel):
 
     def stream_residue(self, object_count: int, pair_count: int) -> tuple[int, int | None, bool]:
         """How the PPMd stream residue is contained [adr-0027]: the bytes one process is
-        charged for it, how many tasks a pooled worker runs before it is replaced (``None``,
+        charged for it, the residue a pooled worker may hold before it is replaced (``None``,
         never), and whether the run needs worker processes at all.
 
         Every stream a process opens stays resident in it, so a process's residue grows with
-        the streams it has run. A pooled worker is replaced after as many tasks as the
-        working-memory budget leaves it -- the limit, less what every worker is charged for
-        its stream, shared among the workers -- and never before one task, whose residue
-        cannot be split. A single worker runs in the calling process, as it always has, while
-        the residue of the whole run fits that budget, and in one process of its own,
-        replaced the same way, once it does not. Other compressors leave nothing.
+        the streams it has run. A pooled worker is replaced before a task would take it past
+        what the working-memory budget leaves it -- the limit, less what every worker is
+        charged for its stream, shared among the workers -- and never before its first task,
+        whose residue cannot be split, so it holds at most the larger of the two. A single
+        worker runs in the calling process, as it always has, while the residue of the whole
+        run fits that budget, and in one process of its own, replaced the same way, once it
+        does not. Other compressors leave nothing.
         """
         workers = self.effective_workers
         if not isinstance(self.compressor, PpmdCompressor):
@@ -273,8 +274,8 @@ class DistanceConfig(BaseModel):
             budget = (spare - pairs_per_shard * 24) // workers
             if workers == 1 and total <= budget:
                 return total, None, False
-        tasks = max(1, budget // per_task)
-        return min(total, tasks * per_task), tasks, True
+        held = max(budget, per_task)
+        return min(total, held), held, True
 
     @field_validator("compressor", mode="before")
     @classmethod

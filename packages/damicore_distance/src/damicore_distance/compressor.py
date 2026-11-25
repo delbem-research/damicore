@@ -36,6 +36,7 @@ from __future__ import annotations
 import bz2
 import hashlib
 import lzma
+import threading
 import zlib
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import ExitStack
@@ -82,7 +83,19 @@ def _stream(
             )
             # pyppmd's stub declares `bytes`; its C extension takes any buffer (`y*`), which is
             # what lets the stage hand it one reused buffer rather than a new object per piece.
-            encode = cast("Callable[[bytearray | memoryview], bytes]", model.encode)
+            code = cast("Callable[[bytearray | memoryview], bytes]", model.encode)
+
+            def encode(piece: bytearray | memoryview) -> bytes:
+                coded = code(piece)
+                # Unreachable by the bound on the piece; if it is ever reached, bytes may have
+                # been dropped, and the measurement is refused rather than reported.
+                if len(coded) >= _PPMD_FIRST_OUTPUT_BLOCK:
+                    raise DistanceError(
+                        "pyppmd coded a piece into a full output block, where it drops bytes",
+                        code="compression_error",
+                    )
+                return coded
+
             return encode, model.flush
         case Bzip2Compressor():
             block = bz2.BZ2Compressor(settings.bzip2_block_size_100k)
@@ -124,16 +137,44 @@ def codec_fingerprint() -> dict[str, str]:
 
 # pyppmd 1.3.1's `encode()` never releases the buffer it is handed, so the object it is given
 # stays alive for good: fed fresh bytes, every stream would leave its whole input resident.
-# Every compressor is therefore fed from one buffer per chunk size, kept for the life of the
-# process, which it would outlive anyway; a stream leaves at most one view of it [adr-0027].
-_BUFFERS: dict[int, bytearray] = {}
+# Every compressor is therefore fed from one buffer per piece size and thread, kept for the
+# life of the thread, which it would outlive anyway; a stream leaves at most one view of it.
+# Per thread, so two streams compressed at once in one process never share one [adr-0027].
+_BUFFERS = threading.local()
+
+# pyppmd 1.3.1 writes an `encode()` call's output into blocks of which the first holds 32 KiB,
+# and drops a byte that finds the block full, growing it only between symbols: a symbol whose
+# code crosses the block's end loses its last bytes. A symbol is coded in at most order + 2
+# range-coder steps -- the first context and an escape from each order below -- each emitting
+# at most 4 bytes as its 32-bit register shifts out, so a piece of this many bytes or fewer
+# can never fill the first block, and nothing is dropped [adr-0027].
+_PPMD_FIRST_OUTPUT_BLOCK = 32 * 1_024
+
+
+def _piece_bytes(config: DistanceConfig) -> int:
+    """How much the compressor is handed per call: a compression chunk, or under PPMd the
+    most whose code cannot fill pyppmd's first output block [adr-0027]."""
+    compressor = config.compressor
+    if isinstance(compressor, PpmdCompressor):
+        return (_PPMD_FIRST_OUTPUT_BLOCK - 1) // (4 * (compressor.ppmd_order + 2))
+    return config.compression_chunk_bytes
+
+
+def _buffer(size: int) -> bytearray:
+    buffers: dict[int, bytearray] | None = getattr(_BUFFERS, "by_size", None)
+    if buffers is None:
+        buffers = _BUFFERS.by_size = {}
+    buffer = buffers.get(size)
+    if buffer is None:
+        buffer = buffers[size] = bytearray(size)
+    return buffer
 
 
 def _paired_chunks(
     paths: tuple[Path, ...], config: DistanceConfig
 ) -> Iterator[bytearray | memoryview]:
-    """The bytes the compressor is fed, in order, a buffer of ``compression_chunk_bytes`` at a
-    time; each piece is valid until the next is requested.
+    """The bytes the compressor is fed, in order, a buffer of ``_piece_bytes`` at a time; each
+    piece is valid until the next is requested.
 
     Two paths are a pair, joined by ``config.pairing``: one after the other, or in blocks
     taken in turn, the rest of the longer after the shorter ends [adr-0026]. One path, or any
@@ -146,10 +187,8 @@ def _paired_chunks(
         if isinstance(pairing, InterleavePairing) and len(paths) == 2
         else None
     )
-    size = config.compression_chunk_bytes
-    buffer = _BUFFERS.get(size)
-    if buffer is None:
-        buffer = _BUFFERS[size] = bytearray(size)
+    size = _piece_bytes(config)
+    buffer = _buffer(size)
     view = memoryview(buffer)
     filled = 0
     with ExitStack() as stack:

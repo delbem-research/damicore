@@ -11,7 +11,7 @@ import struct
 import tempfile
 import time
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
@@ -33,7 +33,12 @@ from damicore_distance.compressor import (
     compressed_fingerprint,
     compressed_size,
 )
-from damicore_distance.config import PPMD_MEMORY_LIMIT, DistanceConfig, PpmdCompressor
+from damicore_distance.config import (
+    PPMD_MEMORY_LIMIT,
+    PPMD_STREAM_RESIDUE_BYTES,
+    DistanceConfig,
+    PpmdCompressor,
+)
 from damicore_distance.errors import DistanceError
 from damicore_distance.matrix import DistanceResult
 from damicore_distance.ncd import normalized_compression_distance
@@ -207,7 +212,7 @@ Refusal = tuple[int, Literal["restarted", "no_look"]]
 
 
 def _second_look(
-    streams: Iterator[Look], settings: DistanceConfig, executor: ProcessPoolExecutor | None
+    streams: Iterator[Look], settings: DistanceConfig, executor: _WorkerPool | None
 ) -> Refusal | None:
     """The first stream to refuse and why, or ``None`` when every one passes [adr-0025]: twice
     the PPMd model codes it otherwise than the model (``"restarted"``), or no second look is
@@ -226,7 +231,7 @@ def _second_look(
     results = (
         map(_escalation_worker, arguments)
         if executor is None
-        else _bounded_submit(executor, _escalation_worker, arguments, slots)
+        else _bounded_submit(executor, _escalation_worker, arguments, slots, lambda _: 1)
     )
     return next(((tag, "restarted") for tag, fits in _typed_results(results) if not fits), None)
 
@@ -276,11 +281,75 @@ def _worker(arguments: WorkerArguments) -> WorkerResult:
     return shard_index, left, right, values, flagged
 
 
+class _WorkerPool:
+    """Worker processes, each replaced before the PPMd stream residue it holds would pass its
+    budget [adr-0027].
+
+    One single-process executor per worker, not one executor with `max_tasks_per_child`:
+    under CPython 3.11 and 3.12, 3.12.3 included, such an executor stops replacing retired
+    workers while tasks are queued, and hangs. A task goes to a worker that can take it
+    without replacement, the least busy of them; a worker is replaced only once the tasks it
+    took have finished, and never before its first, whose residue cannot be split. With no
+    budget, no worker is ever replaced.
+    """
+
+    def __init__(self, workers: int, budget: int | None) -> None:
+        self._budget = budget
+        self._executors = [self._spawn() for _ in range(workers)]
+        self._held = [0] * workers
+        self._in_flight: list[deque[Future[Any]]] = [deque() for _ in range(workers)]
+
+    @staticmethod
+    def _spawn() -> ProcessPoolExecutor:
+        return ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+
+    def submit(
+        self, function: Callable[[ArgumentT], ResultT], argument: ArgumentT, *, streams: int
+    ) -> Future[ResultT]:
+        """Submit a task that opens ``streams`` PPMd streams, replacing its worker first if
+        their residue would take it past the budget."""
+        residue = streams * PPMD_STREAM_RESIDUE_BYTES if self._budget is not None else 0
+        for flight in self._in_flight:
+            # One process per executor runs its tasks in order, so they finish in order.
+            while flight and flight[0].done():
+                flight.popleft()
+
+        def full(index: int) -> bool:
+            held = self._held[index]
+            return self._budget is not None and held > 0 and held + residue > self._budget
+
+        index = min(range(len(self._executors)), key=lambda i: (full(i), len(self._in_flight[i])))
+        if full(index):
+            self._executors[index].shutdown(wait=True)
+            self._executors[index] = self._spawn()
+            self._held[index] = 0
+            self._in_flight[index].clear()
+        future = self._executors[index].submit(function, argument)
+        self._held[index] += residue
+        self._in_flight[index].append(future)
+        return future
+
+    def map(
+        self,
+        function: Callable[[ArgumentT], ResultT],
+        arguments: Iterable[ArgumentT],
+        *,
+        streams: int,
+    ) -> Iterator[ResultT]:
+        futures = [self.submit(function, argument, streams=streams) for argument in arguments]
+        return (future.result() for future in futures)
+
+    def shutdown(self, *, cancel_futures: bool) -> None:
+        for executor in self._executors:
+            executor.shutdown(cancel_futures=cancel_futures)
+
+
 def _bounded_submit(
-    executor: ProcessPoolExecutor,
+    executor: _WorkerPool,
     function: Callable[[ArgumentT], ResultT],
     arguments: Iterator[ArgumentT],
     limit: int,
+    streams: Callable[[ArgumentT], int],
 ) -> Iterator[ResultT]:
     """Yield results in submission order, keeping at most `limit` tasks in flight.
 
@@ -292,7 +361,7 @@ def _bounded_submit(
     """
     pending: deque[Future[ResultT]] = deque()
     for argument in arguments:
-        pending.append(executor.submit(function, argument))
+        pending.append(executor.submit(function, argument, streams=streams(argument)))
         if len(pending) >= limit:
             yield pending.popleft().result()
     while pending:
@@ -447,7 +516,7 @@ def _load_or_compute_sizes(
     identity: dict[str, object],
     paths: list[Path],
     settings: DistanceConfig,
-    executor: ProcessPoolExecutor | None,
+    executor: _WorkerPool | None,
 ) -> list[int]:
     if checkpoint_path.exists():
         if not settings.resume:
@@ -471,7 +540,9 @@ def _load_or_compute_sizes(
     # Executor.map submits every argument up front, which is bounded here: one short tuple
     # per object, where a shard's carries every path and size (see _bounded_submit).
     results = (
-        map(_size_worker, arguments) if executor is None else executor.map(_size_worker, arguments)
+        map(_size_worker, arguments)
+        if executor is None
+        else executor.map(_size_worker, arguments, streams=1)
     )
     sizes = list(_typed_results(results))
     checkpoint = CompressedSizesCheckpoint(identity=identity, sizes=tuple(sizes))
@@ -514,7 +585,7 @@ def _refuse_model_restart(
     paths: list[Path],
     labels: list[str],
     settings: DistanceConfig,
-    executor: ProcessPoolExecutor | None,
+    executor: _WorkerPool | None,
 ) -> None:
     """Refuse, before any pair, a PPMd run in which an object alone restarts the model, or
     fills more than half of it with no room for a second look [adr-0025].
@@ -529,7 +600,7 @@ def _refuse_model_restart(
     results = (
         map(_check_worker, arguments)
         if executor is None
-        else executor.map(_check_worker, arguments)
+        else executor.map(_check_worker, arguments, streams=2)
     )
     flagged = [
         (index, coded) for index, coded in enumerate(_typed_results(results)) if coded is not None
@@ -739,18 +810,8 @@ def compute_distance_matrix(
     # serially in this process while the workers wait.
     # Workers are replaced before the PPMd stream residue they accumulate outgrows the
     # budget, and a single worker leaves the calling process only when it would [adr-0027].
-    _, tasks_per_child, pooled = settings.stream_residue(
-        len(paths), len(paths) * (len(paths) - 1) // 2
-    )
-    executor = (
-        ProcessPoolExecutor(
-            max_workers=settings.effective_workers,
-            mp_context=get_context("spawn"),
-            max_tasks_per_child=tasks_per_child,
-        )
-        if pooled
-        else None
-    )
+    _, budget, pooled = settings.stream_residue(len(paths), len(paths) * (len(paths) - 1) // 2)
+    executor = _WorkerPool(settings.effective_workers, budget) if pooled else None
     try:
         sizes = _load_or_compute_sizes(
             checkpoints / "compressed-sizes.json",
@@ -771,7 +832,9 @@ def compute_distance_matrix(
         )
         doubled: list[SizeArguments] = [((str(paths[largest]),) * 2, settings)]
         self_size = (
-            map(_size_worker, doubled) if executor is None else executor.map(_size_worker, doubled)
+            map(_size_worker, doubled)
+            if executor is None
+            else executor.map(_size_worker, doubled, streams=1)
         )
 
         pair_count = len(paths) * (len(paths) - 1) // 2
@@ -816,7 +879,14 @@ def compute_distance_matrix(
             if executor is None
             # Two shards per worker: enough that a worker never idles waiting for the next
             # submission, small enough that the queued payload stays proportional to the pool.
-            else _bounded_submit(executor, _worker, arguments, settings.effective_workers * 2)
+            else _bounded_submit(
+                executor,
+                _worker,
+                arguments,
+                settings.effective_workers * 2,
+                # Each pair opens one stream, and a second under the model check.
+                lambda shard: len(shard[1]) * (1 if _model_check(settings) is None else 2),
+            )
         )
 
         def complete(

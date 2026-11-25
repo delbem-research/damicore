@@ -14,8 +14,10 @@ more. Checked against the implementation: `C(x)=100`, `C(y)=140`, `C(xy)=180` gi
 
 `C(s)` is not a property of `s` alone. It is the byte length of **one** compressor stream
 fed the object's bytes, from `damicore_distance.compressor.compressed_size`: a single
-stream is opened, every chunk of every path is pushed through it, and the returned total is
-the sum of the compressed output plus the final flush. `C(xy)` is the same call given two
+stream is opened, the bytes of every path are pushed through it in pieces, and the returned
+total is the sum of the compressed output plus the final flush. How the bytes are cut into
+pieces changes no value: under PPMd each piece is small enough that pyppmd cannot drop part of
+its code, which in larger calls it did [adr-0027]. `C(xy)` is the same call given two
 paths, so the concatenation is never materialised on disk. Which of the two goes first is
 fixed by content: the object whose SHA-256 is lower, as the normalization manifest records it
 [adr-0024]. The matrix is therefore a function of the objects, not of their order in the
@@ -197,6 +199,8 @@ it.
   measurement of what input order did to the partition.
 - [adr-0025] — why every PPMd measurement is checked against half the model, with the
   measurements that revised ADR 0023's exemption and refuted a check per object.
+- [adr-0027] — the three pyppmd 1.3.1 encoder defects the stage works around, and how the
+  PPMd stream residue is charged and contained.
 - [adr-0026] — why the pairing is a named rule, the original implementation's interleaving
   it brings back, each way it departs from that implementation with the evidence, and the
   calibration on columns of a table.
