@@ -15,8 +15,9 @@ import hashlib
 from collections.abc import Iterable, Sequence
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
+from io import FileIO
 from pathlib import Path
-from typing import BinaryIO, Literal
+from typing import Literal
 
 from damicore_normalizer.errors import NormalizerError
 from damicore_normalizer.manifest import ObjectDescriptor
@@ -60,7 +61,7 @@ class _ColumnWriter:
         self._kept = columns if columns <= limit else limit - 1
         self._buffers = [bytearray() for _ in range(columns)]
         self._held = 0
-        self._streams: list[BinaryIO] = []
+        self._streams: list[FileIO] = []
 
     def _path(self, index: int) -> Path:
         return self._root / f"column_{index + 1:06d}.jsonl"
@@ -83,24 +84,30 @@ class _ColumnWriter:
                 buffer.clear()
         self._held = 0
 
+    def _open(self, index: int) -> FileIO:
+        # Unbuffered: the column buffer already batches the writes, and a buffer per open file
+        # would hold up to a block of bytes each beside it -- 8 MiB more for 2,000 kept files --
+        # and defer their write, and its errors, to the close.
+        return self._path(index).open("ab", buffering=0)
+
     def _write_out(self, index: int, data: bytes | bytearray) -> None:
         if index < len(self._streams):
-            self._streams[index].write(data)
+            _write_all(self._streams[index], data)
         elif index < self._kept and index == len(self._streams):
-            self._streams.append(self._path(index).open("ab"))
-            self._streams[index].write(data)
+            self._streams.append(self._open(index))
+            _write_all(self._streams[index], data)
         else:
-            stream = self._path(index).open("ab")
+            stream = self._open(index)
             try:
-                stream.write(data)
+                _write_all(stream, data)
             except BaseException:
                 _close_quietly(stream)
                 raise
             stream.close()
 
     def close(self) -> None:
-        """Close every kept file after the last flush. Closing writes what a file still holds,
-        so an error here is a lost write and is raised -- after every file is closed."""
+        """Close every kept file after the last flush. Every byte was written before, so
+        closing writes nothing; an error here is still raised, after every file is closed."""
         streams, self._streams = self._streams, []
         with ExitStack() as closing:
             for stream in streams:
@@ -116,7 +123,17 @@ class _ColumnWriter:
         self._held = 0
 
 
-def _close_quietly(stream: BinaryIO) -> None:
+def _write_all(stream: FileIO, data: bytes | bytearray) -> None:
+    # A raw file may take less than it is handed; what it does not take is handed again.
+    view = memoryview(data)
+    while view:
+        written = stream.write(view)
+        if not written:
+            raise OSError(f"{stream.name} took no bytes")
+        view = view[written:]
+
+
+def _close_quietly(stream: FileIO) -> None:
     # Only on a path already raising: the object is incomplete either way, and closing it
     # must not replace the error that says why.
     with suppress(OSError):

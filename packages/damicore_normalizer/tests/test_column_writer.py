@@ -303,3 +303,31 @@ def test_a_cell_larger_than_the_buffer_does_not_grow_it(tmp_path: Path) -> None:
     assert (tmp_path / "out" / "column_000002.jsonl").read_bytes() == (
         ('"' + "é" * (3 * budget) + '"\n"y"\n').encode()
     )
+
+
+def test_files_kept_open_hold_no_column_bytes_beside_the_buffer(tmp_path: Path) -> None:
+    """With every file kept open, what the open files hold must not add to the buffer: two
+    thousand kept files once held 4 KiB each of their own, 15 MiB over measuring alone."""
+    columns = 2_000
+    header = [f"c{index}" for index in range(columns)]
+    rows = [["abcdefgh"] * columns for _ in range(800)]
+
+    def peak(objects_dir: Path | None) -> int:
+        if objects_dir is not None:
+            objects_dir.mkdir()
+        tracemalloc.start()
+        try:
+            table_split.split_table(
+                header,
+                iter(rows),
+                split="columns",
+                chunk_rows=50_000,
+                max_open_files=columns,
+                objects_dir=objects_dir,
+            )
+            return tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+    extra = peak(tmp_path / "out") - peak(None)
+    assert extra <= table_split._WRITE_BUFFER_BYTES + 1_048_576, extra
