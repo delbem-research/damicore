@@ -135,12 +135,13 @@ it.
   every column, nor even per object: the memory a pair needs grows with what the two share,
   so near-duplicates can fill a model each of them fits. Each measurement is checked instead:
   the distance stage compresses every object, before any pair, and every pair, as it is
-  computed, again under half the model, and refuses the run if the coded bytes differ. A
-  stream that half the model codes into the same bytes was not changed by a restart under all
-  of it, so an admitted size is the objects' own unless both models restarted into the same
-  bytes, which no search has found; one that needs between half and all of the model is
-  refused although it measured correctly, and a larger `ppmd_memory_bytes` admits it with the
-  same values. The
+  computed, again under half the model. A stream that half the model codes into the same
+  bytes was not changed by a restart under all of it; one coded otherwise gets a second look
+  under twice the model, as many at once as the working-memory budget holds, once no pair is
+  in flight, and is refused only if the model and twice it code it differently -- the model
+  restarted. An admitted size is therefore the objects' own unless two models restarted into
+  the same bytes, which no search has found. Without memory for the second look, a stream
+  half the model codes otherwise is refused, and the refusal names the limit. The
   pairs then cost twice the time and no more memory. `ResourceLimits.allow_model_restart`
   lifts the check [adr-0025]. Measuring objects past the model -- interleaved pairing -- is
   still open work.

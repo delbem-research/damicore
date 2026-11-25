@@ -44,7 +44,8 @@ class DatasetFormatError(InputValidationError):
 
 class ResourceLimitError(DamicoreError):
     """Preflight projected a run outside the configured ``ResourceLimits``, or the distance
-    stage found an object or a pair that fills more than half the PPMd model, or a call
+    stage found an object or a pair that restarts the PPMd model, or fills more than half of
+    it with no memory to look again under twice it, or a call
     applying that check met a directory measured without it (ADR 0025).
 
     From preflight, ``context["estimate"]`` holds the ``ResourceEstimate``, whose

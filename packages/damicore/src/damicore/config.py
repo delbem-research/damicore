@@ -28,11 +28,14 @@ class ResourceLimits(BaseModel):
     gated here at all. See ADR 0023.
     ``allow_model_restart`` lifts the check PPMd gets instead, which preflight cannot apply
     because it needs the object bytes: the distance stage compresses every object and every
-    pair again under half the PPMd model and refuses the run if a size differs, because past
-    half the model can fill, restart and code the rest with what it had read forgotten. An
-    object is refused before any pair, a pair as it is computed. The check doubles the cost
-    of the pairs, not the memory. Raise ``ppmd_memory_bytes``, or set this to measure anyway;
-    the value is recorded in the manifest. See ADR 0025.
+    pair again under half the PPMd model, and one half the model codes otherwise once more
+    under twice it, within ``max_working_memory_bytes`` and once no pair is in flight. The run
+    is refused if the model and twice it code a stream differently -- the model restarted and
+    coded the rest with what it had read forgotten -- or, where the limit holds no stream of
+    twice the model, if half the model codes it otherwise. The check doubles the cost of the
+    pairs, not the memory preflight charges. Raise ``ppmd_memory_bytes`` or
+    ``max_working_memory_bytes``, or set this to measure anyway; the value is recorded in the
+    manifest. See ADR 0025.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

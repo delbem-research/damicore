@@ -31,7 +31,7 @@ pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
 WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[str], list[int], DistanceConfig]
-WorkerResult = tuple[int, list[int], list[int], list[float], tuple[int, int] | None]
+WorkerResult = tuple[int, list[int], list[int], list[float], list[tuple[int, int, bytes]]]
 
 
 def _normalized(tmp_path: Path) -> NormalizationResult:
@@ -671,7 +671,7 @@ def test_a_worker_returning_a_non_finite_shard_is_rejected(
             [i for i, _ in pairs],
             [j for _, j in pairs],
             [float("nan")] * len(pairs),
-            None,
+            [],
         )
 
     monkeypatch.setattr(distance_api, "_worker", broken_worker)
@@ -950,7 +950,7 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
         ) -> Future[distance_api.WorkerResult]:
             submitted.append(argument[0])
             future: Future[distance_api.WorkerResult] = Future()
-            future.set_result((argument[0], [], [], [], None))
+            future.set_result((argument[0], [], [], [], []))
             return future
 
     total = 10
@@ -965,7 +965,7 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
     ]
     arguments: Iterator[distance_api.WorkerArguments] = iter(shards)
     results = distance_api._bounded_submit(
-        cast(ProcessPoolExecutor, RecordingExecutor()), arguments, limit
+        cast(ProcessPoolExecutor, RecordingExecutor()), distance_api._worker, arguments, limit
     )
 
     # Nothing is submitted until the first result is pulled, and then only enough to fill

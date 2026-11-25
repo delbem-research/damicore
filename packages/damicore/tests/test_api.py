@@ -714,6 +714,39 @@ def _near_copy_corpus(directory: Path, size: int) -> Path:
     return directory
 
 
+def test_the_working_memory_limit_decides_the_second_look(tmp_path: Path) -> None:
+    """The PPMd check looks again under twice the model only within
+    `ResourceLimits.max_working_memory_bytes`: a pair half the model codes otherwise is
+    measured under the default limit, and refused, naming the limit, under one that admits the
+    run but holds no stream of twice the model (ADR 0025)."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    original = random.Random(12_000).randbytes(12_000)
+    copy = bytearray(original)
+    for index in random.Random(12_000).sample(range(len(copy)), 12):
+        copy[index] = random.Random(index).randrange(256)
+    (corpus / "a.bin").write_bytes(original)
+    (corpus / "b.bin").write_bytes(bytes(copy))
+    arguments: dict[str, Any] = {
+        "source_kind": "files",
+        "ppmd_memory_bytes": 1_048_576,
+        "progress": False,
+    }
+    run(
+        corpus, output_dir=tmp_path / "roomy", execution=ExecutionConfig(workers=1), **arguments
+    ).close()
+    # One worker is charged two 4 MiB chunks and the 1 MiB model; twice the model needs 1 MiB
+    # more than that, which this limit does not have.
+    tight = ExecutionConfig(
+        workers=1, limits=ResourceLimits(max_working_memory_bytes=9 * 1_048_576 + 524_288)
+    )
+    assert estimate(
+        corpus, execution=tight, **{k: v for k, v in arguments.items() if k != "progress"}
+    ).within_limits
+    with pytest.raises(ResourceLimitError, match="max_working_memory_bytes"):
+        run(corpus, output_dir=tmp_path / "tight", execution=tight, **arguments)
+
+
 def test_the_pairing_is_recorded_and_named_by_its_rule(tmp_path: Path) -> None:
     """The pairing changes every value, so it is configuration the hash covers and a rule the
     manifest names: `ncd-max/v2` for the concatenation, `ncd-max-interleaved/v1` for

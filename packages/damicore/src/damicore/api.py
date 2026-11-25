@@ -220,6 +220,7 @@ def _distance_config(
                 "resume": execution.resume,
                 "save_diagnostics": save_diagnostics,
                 "allow_model_restart": execution.limits.allow_model_restart,
+                "max_working_memory_bytes": execution.limits.max_working_memory_bytes,
             }
         )
     except ValidationError as exc:

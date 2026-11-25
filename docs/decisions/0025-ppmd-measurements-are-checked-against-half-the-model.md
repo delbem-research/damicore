@@ -61,20 +61,37 @@ where a model that does not fill codes 1,077, and comparing sizes admitted that 
 wrong distance. The bytes of the two streams differ, and the stage compares their SHA-256.
 
 So, under PPMd, the distance stage compresses every object under the model and under half of
-it, on the same pool, and refuses the run before any pair if the bytes differ: every distance
-to that object would hold it. Then every pair is compressed under half the model too as it is
-computed, and the run is refused at the first pair whose bytes differ, naming the two
-objects. The refusal asks for a larger `ppmd_memory_bytes`. `ResourceLimits.allow_model_restart`
+it, on the same pool, before any pair; then every pair, under both, as it is computed. Half
+the model coding a stream into other bytes does not yet mean the model restarted: the stream
+may need more than half the model and no more than all of it. So such a stream gets a second
+look: it is compressed once more under **twice** the model, and if that codes the bytes the
+model did, the model did not restart on it -- its memory never mattered -- and the value
+stands. Only a stream the model and twice the model code differently is refused, naming the
+object or the pair, and asking for a larger `ppmd_memory_bytes`.
+
+The second look runs only once no pair is in flight -- objects before the pairs, pairs after
+the last shard -- so the working-memory budget is its own: `max_working_memory_bytes` where
+the caller set it, `ResourceLimits.max_working_memory_bytes` through `run()`, else what the
+workers are charged. It runs as many streams of twice the model at once as that budget holds
+and at most one per worker. Where the budget holds none, or twice the model is past what the
+codec takes, a stream half the model codes otherwise is refused as before, and the refusal
+names the limit; it is never measured on trust. Until a flagged pair's second look passes, its
+shard is written and not completed, so an interruption before the look computes that shard
+again rather than resuming it unchecked. `ResourceLimits.allow_model_restart`
 (`--allow-model-restart`) measures anyway and skips the check; like every limit it is not part
 of run identity [adr-0022]. The aggregate reports the refusal as `ResourceLimitError`, since it
 is lifted the way the other limits are.
 
 A test holds the guarantee where it can fail: for eight kinds of content, at sizes either side
 of where a small model fills, with a near-duplicate and an unrelated object, every admitted
-run returns bit for bit the matrix of a model sixteen times larger, and every refused run
-holds a stream that half the model codes into other bytes than that larger model. Two more
-hold the cases that broke earlier checks: the near-duplicate pair a per-object check admitted,
-and the restart whose size coincided.
+run returns bit for bit the matrix of a model sixteen times larger, and, with room for the
+second look, every refused run holds a stream that the model itself codes into other bytes
+than that larger model. Others hold the cases that broke earlier checks -- the near-duplicate
+pair a per-object check admitted, the restart whose size coincided -- and the second look:
+an object and a pair that need more than half the model and no more than all of it are
+measured with the larger model's values, on one worker and on a pool alike; without the
+memory for it they are refused naming the limit; and a shard interrupted before its look is
+computed again.
 
 What the check does not prove: if both the model and its half restart and still code the same
 bytes, a wrong size is admitted. A fourth verification classified one search of 30,000 runs --
@@ -111,27 +128,30 @@ Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes`
 ## What it costs
 
 - **Time.** Every pair is compressed twice, so the pair stage, which dominates a run, takes
-  about twice as long; the objects add two compressions each.
-- **Refusals within a factor of two.** A stream that needs more than half the model and no
-  more than all of it measures correctly and is refused. Under the default model, pairs of
-  unrelated objects were refused from 2 MiB per object for random bytes and integers, from 2
-  to 8 MiB for numbers with six decimals depending on their distribution -- a wide normal
-  from 2, a standard normal from 8, a uniform on [0, 1) not at 8 -- and not at 8 MiB for a
-  5,000-word vocabulary; at 1 MiB per object none of these were. Twice the model admits them, at twice the memory per worker, and
-  measures the same values, since a stream that fits does not depend on the model's size.
-- **Not memory.** The check never runs a model larger than the one configured, so preflight
-  charges each worker what it charged before.
+  about twice as long; the objects add two compressions each, and a stream that needs more
+  than half the model one more under twice it.
+- **No refusal the measurement did not need, where memory allows the second look.** Under
+  the default model, pairs of unrelated objects need more than half of it from 2 MiB per
+  object for random bytes and integers, and from 2 to 8 MiB for numbers with six decimals
+  depending on their distribution; before the second look those were refused although they
+  measured correctly, and now they are measured. Two such 2 MiB random objects under the
+  defaults and two workers complete, checked, in about 10 seconds. Where the budget holds no
+  stream of twice the model -- one worker under a limit within one model of what it is
+  charged -- they are refused as before, and raising the limit or the model admits them with
+  the same values.
+- **Not the memory preflight charges.** The second look never runs beside a pair, and never
+  more streams of twice the model than the budget holds, so preflight charges each worker
+  what it charged before.
 
 ## What was not chosen
 
 - **A margin per object**, at a half or a quarter of the model: refuted above, by pairs that
   fill the model together while each object fits.
-- **Checking against twice the model.** It refuses only streams that restart, with no factor
-  of two, but each worker then holds a stream of twice the model: at the default 64 MiB and
-  the four workers `"auto"` resolves to, 544 MiB, past the default 512 MiB limit that ADR 0021
-  keeps every compressor's defaults inside. Admitting the default would have meant raising
-  the limit for everyone, to spare a refusal that a larger model resolves for the runs that
-  meet it.
+- **Checking every stream against twice the model.** It refuses only streams that restart,
+  but each worker then holds a stream of twice the model beside every pair: at the default
+  64 MiB and the four workers `"auto"` resolves to, 544 MiB, past the default 512 MiB limit
+  that ADR 0021 keeps every compressor's defaults inside. The second look takes the same
+  answer only for the streams half the model flags, and only once the pairs are done.
 - **A declared window for PPMd**, derived from the model memory. Any byte count conservative
   enough for random data refuses vocabulary columns that measure correctly at 32 MiB, and any
   count that admits those admits numeric columns that do not.
@@ -144,9 +164,9 @@ Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes`
 
 This revises ADR 0023's exemption of PPMd, not its gate: the windowed compressors are gated
 as before, and PPMd is now checked by measurement instead of not at all. Runs under PPMd in
-which an object or a pair needs more than half the model, which completed under 0.5, are
-refused until the model is raised or the check is lifted. Skipping the second compression for
-pairs too short to fill half the model, from a bound on what PPMd can allocate per byte, would
-remove most of the time cost without weakening the check; it needs that bound derived from the
-codec first. Interleaved pairing, which might let a pair be measured past the model without
-the memory to hold it, remains issue 62.
+which an object or a pair restarts the model, which completed under 0.5 with a distance that
+was not the objects', are refused until the model is raised or the check is lifted; so are
+those that need more than half the model where the budget holds no second look. Skipping the
+check for pairs too short to fill half the model, from a bound on what PPMd can allocate per
+byte, would remove most of the time cost without weakening the check, if such a bound can be
+proved from the codec. Interleaved pairing (ADR 0026) is checked like any other stream.

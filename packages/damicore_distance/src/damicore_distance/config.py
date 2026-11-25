@@ -46,6 +46,10 @@ class DeflateCompressor(BaseModel):
         return 32_768
 
 
+# pyppmd's own ceiling on model memory, past which it clamps without saying so.
+PPMD_MEMORY_LIMIT = 4_294_967_259
+
+
 class PpmdCompressor(BaseModel):
     """PPMd variant I with model restart, at ``ppmd_order`` with ``ppmd_memory_bytes`` of
     model [adr-0020]. The bounds are the codec's own -- pyppmd would clamp a value outside them
@@ -57,7 +61,7 @@ class PpmdCompressor(BaseModel):
 
     name: Literal["ppmd"] = "ppmd"
     ppmd_order: int = Field(default=6, ge=2, le=64)
-    ppmd_memory_bytes: int = Field(default=67_108_864, ge=4_096, le=4_294_967_259)
+    ppmd_memory_bytes: int = Field(default=67_108_864, ge=4_096, le=PPMD_MEMORY_LIMIT)
 
     @property
     def stream_memory_bytes(self) -> int:
@@ -194,10 +198,13 @@ class DistanceConfig(BaseModel):
     computes.
 
     ``allow_model_restart`` lifts the one admission check this stage makes itself: under
-    PPMd, every object and every pair is compressed again under half the model, and the run
-    is refused if a size differs: only a stream that fits half the model is known to be coded
-    without a restart under all of it [adr-0025]. An object is checked before any pair, a pair
-    as it is computed. Setting it measures anyway, and skips the check and its cost.
+    PPMd, every object and every pair is compressed again under half the model. A stream half
+    the model codes into other bytes may have restarted the model, so it is compressed once
+    more under twice the model, as many at once as ``max_working_memory_bytes`` holds, and the
+    run is refused if the model's bytes differ from those: the model restarted, and the size
+    is not the objects' own [adr-0025]. Objects are checked before any pair, pairs as they are
+    computed and looked at again once all are. Setting it measures anyway, and skips the check
+    and its cost.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -210,6 +217,18 @@ class DistanceConfig(BaseModel):
     resume: bool = True
     save_diagnostics: bool = False
     allow_model_restart: bool = False
+    # The working memory the caller allows the stage, or `None` for what its workers are
+    # charged. It bounds the second look under twice the PPMd model [adr-0025].
+    max_working_memory_bytes: int | None = Field(default=None, gt=0)
+
+    @property
+    def worker_memory_bytes(self) -> int:
+        """The memory one worker is charged, which is its compressor stream and two of whatever
+        it reads at once -- a compression chunk, or under interleaving a block of each object
+        if that is larger [adr-0021] [adr-0026]."""
+        pairing = self.pairing
+        block = pairing.interleave_block_bytes if isinstance(pairing, InterleavePairing) else 0
+        return 2 * max(self.compression_chunk_bytes, block) + self.compressor.stream_memory_bytes
 
     @field_validator("compressor", mode="before")
     @classmethod

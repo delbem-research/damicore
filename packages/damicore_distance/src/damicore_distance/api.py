@@ -11,7 +11,7 @@ import struct
 import tempfile
 import time
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
@@ -33,7 +33,7 @@ from damicore_distance.compressor import (
     compressed_fingerprint,
     compressed_size,
 )
-from damicore_distance.config import DistanceConfig, PpmdCompressor
+from damicore_distance.config import PPMD_MEMORY_LIMIT, DistanceConfig, PpmdCompressor
 from damicore_distance.errors import DistanceError
 from damicore_distance.matrix import DistanceResult
 from damicore_distance.ncd import normalized_compression_distance
@@ -42,6 +42,7 @@ from damicore_distance.shards import iter_pair_shards
 logger = logging.getLogger(__name__)
 CheckpointT = TypeVar("CheckpointT", bound=BaseModel)
 ResultT = TypeVar("ResultT")
+ArgumentT = TypeVar("ArgumentT")
 
 
 class ProgressCallback(Protocol):
@@ -129,9 +130,10 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
 # One shard's work: its index, its pairs, and the run-wide inputs a worker process needs --
 # each object's path, its SHA-256 and its compressed size.
 WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[str], list[int], DistanceConfig]
-# The shard's values, or the first pair whose PPMd model restarted [adr-0025]. Returned rather
-# than raised: an exception crosses the pool without its code.
-WorkerResult = tuple[int, list[int], list[int], list[float], tuple[int, int] | None]
+# The shard's values, and the pairs half the PPMd model coded differently, each with the bytes'
+# digest under the whole model, for a second look under twice it [adr-0025].
+Flagged = list[tuple[int, int, bytes]]
+WorkerResult = tuple[int, list[int], list[int], list[float], Flagged]
 # One stream's work: the paths it compresses in order and the run's settings -- one path for
 # C(x), the largest object twice for C(xx).
 SizeArguments = tuple[tuple[str, ...], DistanceConfig]
@@ -142,18 +144,75 @@ def _size_worker(arguments: SizeArguments) -> int:
     return compressed_size(tuple(Path(path) for path in raw_paths), config=config)
 
 
-def _check_worker(arguments: SizeArguments) -> bool:
-    """Whether a stream is coded into the same bytes under half the PPMd model as under all
-    of it [adr-0025]."""
+def _check_worker(arguments: SizeArguments) -> bytes | None:
+    """``None`` when a stream is coded into the same bytes under half the PPMd model as under
+    all of it, else the digest of its bytes under all of it, for a second look [adr-0025]."""
     raw_paths, config = arguments
     check = _model_check(config)
     if check is None:
-        return True
+        return None
     paths = tuple(Path(path) for path in raw_paths)
-    return (
-        compressed_fingerprint(paths, config=config)[1]
-        == compressed_fingerprint(paths, config=check)[1]
+    coded = compressed_fingerprint(paths, config=config)[1]
+    return None if compressed_fingerprint(paths, config=check)[1] == coded else coded
+
+
+# One stream's second look: its paths, the settings under twice the model, and the digest of
+# its bytes under the model [adr-0025].
+EscalationArguments = tuple[tuple[str, ...], DistanceConfig, bytes]
+
+
+def _escalation_worker(arguments: EscalationArguments) -> bool:
+    """Whether twice the model codes a stream into the bytes the model did: if so, the model
+    did not restart on it, since its memory never mattered."""
+    raw_paths, escalation, coded = arguments
+    paths = tuple(Path(path) for path in raw_paths)
+    return compressed_fingerprint(paths, config=escalation)[1] == coded
+
+
+def _model_escalation(settings: DistanceConfig) -> tuple[DistanceConfig, int] | None:
+    """The settings under twice the PPMd model, and how many such streams the working-memory
+    budget holds at once; ``None`` when no second look is possible [adr-0025].
+
+    The budget is ``max_working_memory_bytes`` where the caller set it, else what the workers
+    are charged. A second look runs only while no pair is in flight, so the whole budget is
+    its own, and twice a model the codec cannot take is no look at all.
+    """
+    compressor = settings.compressor
+    if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
+        return None
+    doubled = 2 * compressor.ppmd_memory_bytes
+    if doubled > PPMD_MEMORY_LIMIT:
+        return None
+    escalation = settings.model_copy(
+        update={"compressor": compressor.model_copy(update={"ppmd_memory_bytes": doubled})}
     )
+    budget = settings.max_working_memory_bytes
+    if budget is None:
+        budget = settings.effective_workers * settings.worker_memory_bytes
+    slots = min(settings.effective_workers, budget // escalation.worker_memory_bytes)
+    return (escalation, slots) if slots else None
+
+
+def _second_look(
+    streams: list[tuple[tuple[Path, ...], bytes]],
+    settings: DistanceConfig,
+    executor: ProcessPoolExecutor | None,
+) -> list[bool] | None:
+    """For each stream, whether twice the PPMd model codes it as the model did; ``None`` when
+    the budget holds no stream of twice the model [adr-0025]."""
+    escalation = _model_escalation(settings)
+    if escalation is None:
+        return None
+    doubled, slots = escalation
+    arguments = iter(
+        [(tuple(str(path) for path in paths), doubled, coded) for paths, coded in streams]
+    )
+    results = (
+        map(_escalation_worker, arguments)
+        if executor is None
+        else _bounded_submit(executor, _escalation_worker, arguments, slots)
+    )
+    return list(_typed_results(results))
 
 
 def _model_check(settings: DistanceConfig) -> DistanceConfig | None:
@@ -182,6 +241,7 @@ def _worker(arguments: WorkerArguments) -> WorkerResult:
     left: list[int] = []
     right: list[int] = []
     values: list[float] = []
+    flagged: Flagged = []
     for i, j in pairs:
         # No compressor here is symmetric, so the pair goes in the order of its contents'
         # digests, never of the input: a reordered input then measures the same value. Equal
@@ -193,19 +253,20 @@ def _worker(arguments: WorkerArguments) -> WorkerResult:
         else:
             cxy, coded = compressed_fingerprint(pair, config=config)
             if compressed_fingerprint(pair, config=check)[1] != coded:
-                return shard_index, left, right, values, (i, j)
+                flagged.append((i, j, coded))
         left.append(i)
         right.append(j)
         values.append(normalized_compression_distance(sizes[i], sizes[j], cxy))
-    return shard_index, left, right, values, None
+    return shard_index, left, right, values, flagged
 
 
 def _bounded_submit(
     executor: ProcessPoolExecutor,
-    arguments: Iterator[WorkerArguments],
+    function: Callable[[ArgumentT], ResultT],
+    arguments: Iterator[ArgumentT],
     limit: int,
-) -> Iterator[WorkerResult]:
-    """Yield worker results in submission order, keeping at most `limit` shards in flight.
+) -> Iterator[ResultT]:
+    """Yield results in submission order, keeping at most `limit` tasks in flight.
 
     ``Executor.map`` cannot be used here: it materialises its whole argument iterable before
     yielding anything, and every shard's tuple carries a full copy of the object paths and
@@ -213,9 +274,9 @@ def _bounded_submit(
     than staying bounded by the worker count, which is what the streaming invariant of this
     stage requires.
     """
-    pending: deque[Future[WorkerResult]] = deque()
+    pending: deque[Future[ResultT]] = deque()
     for argument in arguments:
-        pending.append(executor.submit(_worker, argument))
+        pending.append(executor.submit(function, argument))
         if len(pending) >= limit:
             yield pending.popleft().result()
     while pending:
@@ -348,6 +409,7 @@ def _checkpoint_identity(
                 "resume",
                 "save_diagnostics",
                 "allow_model_restart",
+                "max_working_memory_bytes",
             },
         ),
         "runtime": _runtime_fingerprint(),
@@ -401,12 +463,24 @@ def _load_or_compute_sizes(
     return sizes
 
 
-def _model_capacity_error(subject: str) -> DistanceError:
+def _model_capacity_error(subject: str, *, looked: bool) -> DistanceError:
+    """The refusal, saying whether twice the model confirmed the restart or there was no room
+    to look [adr-0025]."""
+    if looked:
+        cause = (
+            f"{subject} the PPMd model, which restarted and coded the rest with what it had "
+            "read forgotten -- twice the model codes it otherwise -- so the distance would not "
+            "be the one the objects have. Raise ppmd_memory_bytes -- each worker is charged "
+            "that memory --"
+        )
+    else:
+        cause = (
+            f"{subject} more than half the PPMd model, past which the model can restart, and "
+            "max_working_memory_bytes leaves no room to compress it again under twice the "
+            "model, which would tell. Raise max_working_memory_bytes or ppmd_memory_bytes,"
+        )
     return DistanceError(
-        f"{subject} more than half the PPMd model, past which the model can fill, "
-        "restart and code the rest with what it had read forgotten, so the distance would not be "
-        "the one the objects have. Raise ppmd_memory_bytes -- each worker is charged that "
-        "memory -- or set allow_model_restart to measure anyway. See ADR 0025.",
+        f"{cause} or set allow_model_restart to measure anyway. See ADR 0025.",
         code="model_capacity_error",
     )
 
@@ -417,11 +491,12 @@ def _refuse_model_restart(
     settings: DistanceConfig,
     executor: ProcessPoolExecutor | None,
 ) -> None:
-    """Refuse, before any pair, a PPMd run in which an object alone fills more than half the
-    model [adr-0025].
+    """Refuse, before any pair, a PPMd run in which an object alone restarts the model, or
+    fills more than half of it with no room for a second look [adr-0025].
 
     Every pair with it holds it, so no pair needs computing to know the run cannot be
-    admitted: two compressions per object here spare the pairs.
+    admitted: two compressions per object here, and a third for one half the model codes
+    otherwise, spare the pairs.
     """
     if _model_check(settings) is None:
         return
@@ -431,10 +506,17 @@ def _refuse_model_restart(
         if executor is None
         else executor.map(_check_worker, arguments)
     )
-    over = [index for index, fits in enumerate(_typed_results(results)) if not fits]
+    flagged = [
+        (index, coded) for index, coded in enumerate(_typed_results(results)) if coded is not None
+    ]
+    if not flagged:
+        return
+    looks = _second_look([((paths[index],), coded) for index, coded in flagged], settings, executor)
+    over = [index for (index, _), fits in zip(flagged, looks or [False] * len(flagged)) if not fits]
     if over:
         raise _model_capacity_error(
-            f"{len(over)} of {len(paths)} objects, among them {labels[over[0]]!r}, each fill"
+            f"{len(over)} of {len(paths)} objects, among them {labels[over[0]]!r}, each fill",
+            looked=looks is not None,
         )
 
 
@@ -705,12 +787,31 @@ def compute_distance_matrix(
             if executor is None
             # Two shards per worker: enough that a worker never idles waiting for the next
             # submission, small enough that the queued payload stays proportional to the pool.
-            else _bounded_submit(executor, arguments, settings.effective_workers * 2)
+            else _bounded_submit(executor, _worker, arguments, settings.effective_workers * 2)
         )
-        for shard_index, left, right, values, restarted in _typed_results(results):
-            if restarted is not None:
-                i, j = restarted
-                raise _model_capacity_error(f"The pair {labels[i]!r} and {labels[j]!r} fills")
+
+        def complete(
+            written: np.memmap[Any, Any], shard_index: int, shard: list[tuple[int, int]]
+        ) -> None:
+            completed_shards[shard_index] = _shard_digest(written, shard)
+            if lifted:
+                unchecked.add(shard_index)
+            logger.info("shard_completed", extra={"shard": shard_index, "pairs": len(shard)})
+            checkpoint = DistanceShardsCheckpoint(
+                identity=identity,
+                pair_count=pair_count,
+                shard_count=shard_count,
+                completed=tuple(sorted(completed_shards)),
+                digests={str(index): completed_shards[index] for index in sorted(completed_shards)},
+                unchecked=tuple(sorted(unchecked)),
+            )
+            _atomic_json(shard_checkpoint, checkpoint.model_dump(mode="json"))
+
+        # Shards holding a pair half the model coded otherwise wait, written but not completed,
+        # for the second look once no pair is in flight: interrupted before it, they are
+        # computed again rather than resumed unchecked [adr-0025].
+        waiting: list[tuple[int, list[tuple[int, int]], Flagged]] = []
+        for shard_index, left, right, values, flagged in _typed_results(results):
             if len(left) != len(values) or not all(math.isfinite(value) for value in values):
                 raise DistanceError(
                     "Worker returned an invalid shard",
@@ -720,32 +821,36 @@ def compute_distance_matrix(
                 matrix[i, j] = value
                 matrix[j, i] = value
             matrix.flush()
-            _validate_completed_shard(matrix, list(zip(left, right, strict=True)))
-            completed_shards[shard_index] = _shard_digest(
-                matrix, list(zip(left, right, strict=True))
-            )
-            if lifted:
-                unchecked.add(shard_index)
-            logger.info(
-                "shard_completed",
-                extra={"shard": shard_index, "pairs": len(values)},
-            )
-            checkpoint = DistanceShardsCheckpoint(
-                identity=identity,
-                pair_count=pair_count,
-                shard_count=shard_count,
-                completed=tuple(sorted(completed_shards)),
-                digests={str(index): completed_shards[index] for index in sorted(completed_shards)},
-                unchecked=tuple(sorted(unchecked)),
-            )
-            _atomic_json(
-                shard_checkpoint,
-                checkpoint.model_dump(mode="json"),
-            )
+            shard = list(zip(left, right, strict=True))
+            _validate_completed_shard(matrix, shard)
+            if flagged:
+                waiting.append((shard_index, shard, flagged))
+            else:
+                complete(matrix, shard_index, shard)
             completed_pairs += len(values)
             if progress is not None:
                 progress(completed_pairs, pair_count, "distance")
         (doubled_size,) = _typed_results(self_size)
+        if waiting:
+            pairs = [pair for _, _, flagged in waiting for pair in flagged]
+            looks = _second_look(
+                [
+                    (
+                        (paths[i], paths[j]) if digests[i] <= digests[j] else (paths[j], paths[i]),
+                        coded,
+                    )
+                    for i, j, coded in pairs
+                ],
+                settings,
+                executor,
+            )
+            for (i, j, _), fits in zip(pairs, looks or [False] * len(pairs), strict=True):
+                if not fits:
+                    raise _model_capacity_error(
+                        f"The pair {labels[i]!r} and {labels[j]!r} fills", looked=looks is not None
+                    )
+            for shard_index, shard, _ in waiting:
+                complete(matrix, shard_index, shard)
         ncd_self_largest = normalized_compression_distance(
             sizes[largest], sizes[largest], doubled_size
         )

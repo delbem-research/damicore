@@ -26,6 +26,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+import damicore_distance.api as distance_api
 from damicore_distance import (
     Bzip2Compressor,
     ConcatPairing,
@@ -520,6 +521,9 @@ def test_the_largest_object_is_chosen_by_content_when_sizes_tie(tmp_path: Path) 
 # one would measure if it never restarted.
 SMALL_MODEL = PpmdCompressor(ppmd_memory_bytes=1_048_576)
 HALF_MODEL = PpmdCompressor(ppmd_memory_bytes=524_288)
+# A working-memory budget that holds a stream of twice the small model, so a stream half the
+# model codes differently is measured again under twice it rather than refused (ADR 0025).
+ROOMY = 1 << 30
 UNFILLED_MODEL = PpmdCompressor(ppmd_memory_bytes=16 * 1_048_576)
 
 
@@ -538,13 +542,21 @@ def _near_duplicate(payload: bytes, seed: int) -> bytes:
 
 
 def _matrix(
-    manifest_path: Path, output: Path, compressor: PpmdCompressor, *, allow_model_restart: bool
+    manifest_path: Path,
+    output: Path,
+    compressor: PpmdCompressor,
+    *,
+    allow_model_restart: bool,
+    max_working_memory_bytes: int | None = ROOMY,
 ) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
     result = compute_distance_matrix(
         manifest_path,
         output,
         config=DistanceConfig(
-            compressor=compressor, workers=1, allow_model_restart=allow_model_restart
+            compressor=compressor,
+            workers=1,
+            allow_model_restart=allow_model_restart,
+            max_working_memory_bytes=max_working_memory_bytes,
         ),
     )
     return np.load(result.matrix_path, allow_pickle=False)
@@ -591,7 +603,11 @@ def test_a_pair_of_near_duplicates_that_restarts_the_model_is_refused(tmp_path: 
         compute_distance_matrix(
             manifest_path,
             tmp_path / "run",
-            config=DistanceConfig(compressor=SMALL_MODEL, workers=1),
+            # Room to measure it again under twice the model, which restarts too: refused
+            # because the model restarted, not for want of memory.
+            config=DistanceConfig(
+                compressor=SMALL_MODEL, workers=1, max_working_memory_bytes=ROOMY
+            ),
         )
     assert raised.value.code == "model_capacity_error"
     assert "ppmd_memory_bytes" in str(raised.value)
@@ -651,6 +667,121 @@ def test_shards_measured_with_the_check_lifted_are_checked_when_it_applies_again
     assert raised.value.code == "model_capacity_error"
 
 
+def _size(compressor: PpmdCompressor, *parts: bytes) -> int:
+    return _direct_size(*parts, config=DistanceConfig(compressor=compressor))
+
+
+def test_a_pair_that_fills_half_the_model_but_not_all_of_it_is_measured(tmp_path: Path) -> None:
+    """Half the model codes this pair differently, so it might have restarted the model; under
+    twice the model it codes the same bytes as under the model, so it did not, and the value
+    is the objects' own. Where memory allows that second look, the run is measured, not
+    refused (ADR 0025)."""
+    original = random.Random(12_000).randbytes(12_000)
+    payloads = [original, _near_duplicate(original, 12_000)]
+    # The scenario, established by the codec alone: each object fits half the model, the
+    # pair does not, and the whole model holds it.
+    for payload in payloads:
+        assert _size(HALF_MODEL, payload) == _size(UNFILLED_MODEL, payload)
+    assert _size(HALF_MODEL, *sorted(payloads, key=lambda p: hashlib.sha256(p).digest())) != (
+        _size(UNFILLED_MODEL, *sorted(payloads, key=lambda p: hashlib.sha256(p).digest()))
+    )
+
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    measured = _matrix(manifest_path, tmp_path / "checked", SMALL_MODEL, allow_model_restart=False)
+    expected = _matrix(
+        manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
+    )
+    assert measured.tolist() == expected.tolist()
+
+
+def test_an_object_that_fills_half_the_model_but_not_all_of_it_is_measured(
+    tmp_path: Path,
+) -> None:
+    """The same second look for an object, before any pair (ADR 0025)."""
+    noise = random.Random(34_000).randbytes(34_000)
+    assert _size(HALF_MODEL, noise) != _size(UNFILLED_MODEL, noise)
+    assert _size(SMALL_MODEL, noise) == _size(UNFILLED_MODEL, noise)
+    payloads = [noise, _column(1, 10, 2_000)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    measured = _matrix(manifest_path, tmp_path / "checked", SMALL_MODEL, allow_model_restart=False)
+    expected = _matrix(
+        manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
+    )
+    assert measured.tolist() == expected.tolist()
+
+
+def test_the_second_look_runs_on_the_pool_and_agrees_with_one_worker(tmp_path: Path) -> None:
+    """On a pool the second look is submitted to the workers, as many at once as the budget
+    holds; the matrix is the one a single worker measures, bit for bit (ADR 0025)."""
+    original = random.Random(12_000).randbytes(12_000)
+    payloads = [original, _near_duplicate(original, 12_000), random.Random(7).randbytes(34_000)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+
+    def measured(name: str, workers: int) -> list[list[float]]:
+        result = compute_distance_matrix(
+            manifest_path,
+            tmp_path / name,
+            config=DistanceConfig(
+                compressor=SMALL_MODEL, workers=workers, max_working_memory_bytes=ROOMY
+            ),
+        )
+        return np.load(result.matrix_path, allow_pickle=False).tolist()
+
+    assert measured("pool", 2) == measured("serial", 1)
+
+
+def test_shards_waiting_for_the_second_look_are_not_resumed_unlooked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A shard holding a pair half the model coded otherwise is written but not completed
+    until the second look passes, so a run interrupted before it computes that shard again
+    on resume instead of inheriting it (ADR 0025)."""
+    original = random.Random(12_000).randbytes(12_000)
+    payloads = [original, _near_duplicate(original, 12_000)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    config = DistanceConfig(
+        compressor=SMALL_MODEL, workers=1, pairs_per_shard=1, max_working_memory_bytes=ROOMY
+    )
+
+    def interrupted(*_arguments: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(distance_api, "_second_look", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        compute_distance_matrix(manifest_path, tmp_path / "run", config=config)
+    checkpoint = json.loads(
+        (tmp_path / "run" / "checkpoints" / "distance-shards.json").read_text(encoding="utf-8")
+        if (tmp_path / "run" / "checkpoints" / "distance-shards.json").exists()
+        else '{"completed": []}'
+    )
+    assert checkpoint["completed"] == []
+    monkeypatch.undo()
+    resumed = compute_distance_matrix(manifest_path, tmp_path / "run", config=config)
+    expected = _matrix(
+        manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
+    )
+    assert np.load(resumed.matrix_path, allow_pickle=False).tolist() == expected.tolist()
+
+
+def test_without_memory_for_a_second_look_the_half_model_refuses(tmp_path: Path) -> None:
+    """Twice the model is measured only within the working-memory budget: without it, a
+    stream half the model codes differently is refused, as before the second look existed,
+    never measured on trust (ADR 0025)."""
+    original = random.Random(12_000).randbytes(12_000)
+    payloads = [original, _near_duplicate(original, 12_000)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    with pytest.raises(DistanceError) as raised:
+        _matrix(
+            manifest_path,
+            tmp_path / "tight",
+            SMALL_MODEL,
+            allow_model_restart=False,
+            max_working_memory_bytes=4 * 1_048_576,
+        )
+    assert raised.value.code == "model_capacity_error"
+    assert "max_working_memory_bytes" in str(raised.value)
+
+
 def test_a_caller_who_allows_the_restart_gets_the_measurement(tmp_path: Path) -> None:
     payloads = [_restarting_object(), _column(1, 10, 262_144)]
     manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
@@ -701,11 +832,11 @@ def test_an_admitted_ppmd_run_measures_what_an_unfilled_model_measures(
     starts to fill, for every kind of content, with a near-duplicate and an unrelated object.
 
     A run the stage admits must return, bit for bit, the matrix a model none of the objects
-    fills returns; a margin per object admitted near-duplicates that broke this (ADR 0025). A
-    run it refuses must hold a stream -- an object, or a pair in digest order -- that half the
-    model codes into other bytes than a model none of them fills: the stage refuses within a
-    factor of two of where the model fills, never further from it. Bytes, because two models
-    that both restart can code the same number of them.
+    fills returns; a margin per object admitted near-duplicates that broke this (ADR 0025). With
+    memory for a second look under twice the model, a run it refuses must hold a stream -- an
+    object, or a pair in digest order -- that the model itself codes into other bytes than a
+    model none of them fills: it refuses only where the measurement would be wrong. Bytes,
+    because two models that both restart can code the same number of them.
     """
 
     def coded(payload: bytes, compressor: PpmdCompressor) -> bytes:
@@ -736,7 +867,7 @@ def test_an_admitted_ppmd_run_measures_what_an_unfilled_model_measures(
         except DistanceError as refused:
             assert refused.code == "model_capacity_error"
             assert any(
-                coded(stream, HALF_MODEL) != coded(stream, UNFILLED_MODEL)
+                coded(stream, SMALL_MODEL) != coded(stream, UNFILLED_MODEL)
                 for stream in streams(payloads)
             ), (kind, size)
             outcomes.append(False)

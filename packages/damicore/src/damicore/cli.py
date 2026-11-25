@@ -213,7 +213,8 @@ def _parser() -> argparse.ArgumentParser:
             action="store_true",
             help=(
                 "measure under `ppmd` without checking each object and pair again under half "
-                "the model memory; without it a run in which one fills more than half the model "
+                "the model memory, and under twice it where half disagrees and "
+                "--max-working-memory-bytes holds it; without it a run whose model restarts "
                 "is refused and asks for a larger --ppmd-memory-bytes, and the check doubles "
                 "the cost of the pairs (ADR 0025)"
             ),

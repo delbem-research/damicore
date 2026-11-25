@@ -27,15 +27,16 @@ carries anything else, a date included, matches neither and fails the release.
   at 32 MiB per column, and a pair of near-duplicates measured 0.198 where a model that does
   not fill gives 0.006. ADR 0023 had exempted PPMd on data whose model barely fills (#132).
   The distance stage now compresses every object, before any pair, and every pair, as it is
-  computed, again under half the model, and refuses if the coded bytes differ: a stream half
-  the model codes into the same bytes has the size any larger model gives. A run resumed with
-  the check measures again the shards measured without it, and a directory whose distance
-  stage completed without it is refused by a call that applies it. The pairs take about twice as long; the memory
-  each worker is charged does not change. Pairs that need between half and all of the model
-  are refused although they measured correctly -- under the default model, unrelated objects
-  of random bytes or integers from 2 MiB each and of six-decimal numbers from 2 to 8 MiB,
-  depending on their distribution -- and a
-  larger `ppmd_memory_bytes` admits them with the same values. The refusal is a
+  computed, again under half the model: a stream half the model codes into the same bytes has
+  the size any larger model gives. A stream half the model codes otherwise is compressed once
+  more under twice the model, as many at once as `max_working_memory_bytes` holds and only
+  once no pair is in flight, and the run is refused only if the model and twice it code it
+  differently, that is, if the model restarted. A run resumed with the check measures again
+  the shards measured without it, and a directory whose distance stage completed without it
+  is refused by a call that applies it. The pairs take about twice as long; the memory
+  each worker is charged does not change. Where the budget holds no stream of twice the model,
+  a stream that needs between half and all of the model is refused, naming the limit, and a
+  larger limit or `ppmd_memory_bytes` admits it with the same values. The refusal is a
   `ResourceLimitError` naming the object or the pair and asking for a larger
   `ppmd_memory_bytes`; `ResourceLimits.allow_model_restart` (`--allow-model-restart`)
   measures anyway, and the distance stage's receipt records `ppmd_model_checked`.

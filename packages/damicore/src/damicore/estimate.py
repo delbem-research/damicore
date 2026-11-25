@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
-from damicore_distance import DistanceConfig, InterleavePairing
+from damicore_distance import DistanceConfig
 from damicore_normalizer import NormalizationConfig, NormalizerError
 from damicore_normalizer.api import scan_source
 from damicore_normalizer.config import ObjectSource
@@ -82,12 +82,6 @@ def _fingerprints(paths: Sequence[Path]) -> tuple[tuple[int, int], ...]:
     return tuple((item.st_size, item.st_mtime_ns) for item in stats)
 
 
-def _block_bytes(distance: DistanceConfig) -> int:
-    """The block an interleaving worker reads from each object at once, or 0 [adr-0026]."""
-    pairing = distance.pairing
-    return pairing.interleave_block_bytes if isinstance(pairing, InterleavePairing) else 0
-
-
 def preflight(
     source: str | Path | Sequence[str | Path],
     *,
@@ -143,12 +137,7 @@ def preflight(
     # incompressible data, so that size is charged rather than any multiple of the object bytes.
     working_memory = max(
         6 * scan.max_serialized_chunk_bytes,
-        execution.effective_workers
-        * (
-            2 * max(execution.compression_chunk_bytes, _block_bytes(distance))
-            + distance.compressor.stream_memory_bytes
-        )
-        + pairs_per_shard * 24,
+        execution.effective_workers * distance.worker_memory_bytes + pairs_per_shard * 24,
     )
     # Declared by the compressor, or `None` where there is none to declare: see
     # `PpmdCompressor.window_bytes`. A missing window is not a window of zero.
