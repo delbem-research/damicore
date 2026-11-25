@@ -343,10 +343,10 @@ def estimate(
         every worker's stream holds, which the working-memory projection charges once per
         worker.
     bzip2_block_size_100k, lzma_dictionary_bytes, pairing, interleave_block_bytes
-        As for :func:`run`, and validated the same way. An interleaving worker holds a block
-        of each object at once, which the working-memory projection charges where it
-        exceeds a compression chunk, and the window gate reads one block of each object
-        where the concatenation reads both objects.
+        As for :func:`run`, and validated the same way. An interleaving worker reads each
+        block a compression chunk at a time, so it is charged what a concatenating one is,
+        and the window gate reads one block of each object where the concatenation reads
+        both objects.
     keep_normalized
         Accepted for parity with :func:`run` and deliberately ignored: object bytes exist on
         disk while a run is in progress either way, so they are always counted.

@@ -39,7 +39,7 @@ they change every value.
 | departure | the reference | here | evidence |
 |---|---|---|---|
 | which object goes first | the file name that sorts first | the lower SHA-256 [adr-0024] | ADR 0024: renaming files changed the partition (ARI 0.76 and 0.81). Digest order costs nothing more, and renaming cannot move a value |
-| how the pair reaches the compressor | written to a temporary file per pair, then compressed | streamed from both files, one block at a time | a property test holds the bytes fed to the compressor equal to a line-for-line port of `interleave`, and the compressed size equal to compressing that port's output, for every compressor, empty objects, a block of one byte and a block longer than both objects included. It writes nothing per pair, and a worker holds two blocks at most |
+| how the pair reaches the compressor | written to a temporary file per pair, then compressed | streamed from both files, one block at a time | a property test holds the bytes fed to the compressor equal to a line-for-line port of `interleave`, and the compressed size equal to compressing that port's output, for every compressor, empty objects, a block of one byte and a block longer than both objects included. It writes nothing per pair, and a worker reads each block a compression chunk at a time, holding none whole |
 | a block the window cannot hold | measured, and reported as a distance | refused by preflight, like any pair past the window [adr-0023] | below. `max_pair_window_factor` measures it anyway, so nothing the reference could do is lost |
 | `ncd_self_largest` | not computed | `C` of the largest object paired with itself under the run's pairing | it is the reference's own `NCD(x, x)` under interleaving, the quantity its docstring names |
 
@@ -131,8 +131,9 @@ some of their row-by-row association, in a proportion it cannot report.
   support, but not in every run, so it is not an improvement that loses nothing: a default
   is every user's result. The concatenation stays the default, as in the reference.
 - **A lower or upper bound on the block.** The reference takes any positive block. A small
-  one costs time and a large one memory, and preflight charges the memory -- two blocks per
-  worker where they exceed a compression chunk -- so neither needs a bound to stay safe.
+  one costs time. A large one costs no memory, since a block is read into the compressor's
+  buffer a chunk at a time and never held whole [adr-0027], and one past the compressor's
+  window is refused by the window gate, so neither needs a bound to stay safe.
 - **A smaller default block.** 256 bytes separated the groups significantly better than
   1 KiB and recovered them no better, at four times the reads per pair. The reference's
   1,024 bytes stays.

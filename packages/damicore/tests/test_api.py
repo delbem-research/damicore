@@ -822,22 +822,21 @@ def test_interleaving_admits_a_pair_past_the_window_and_gates_its_block(tmp_path
     )
 
 
-def test_preflight_charges_two_blocks_per_worker_when_they_outgrow_a_chunk(
+def test_preflight_charges_an_interleaving_worker_what_it_charges_a_concatenating_one(
     tmp_path: Path,
 ) -> None:
-    """An interleaving worker holds a block of each object at once, so a block larger than the
-    compression chunk is what its working memory is charged for (ADR 0026)."""
+    """An interleaving worker reads each block into the buffer it compresses from, a chunk at a
+    time, and never holds a block whole, so the block size is no part of its charge: a large
+    block must not refuse a run the concatenation admits (ADR 0026, ADR 0027)."""
     source = _csv(tmp_path)
     workers = ExecutionConfig(workers=2, compression_chunk_bytes=1_048_576)
     base = estimate(source, execution=workers).estimated_working_memory_bytes
-    small = estimate(
-        source, execution=workers, pairing="interleave", interleave_block_bytes=1_024
-    ).estimated_working_memory_bytes
-    large = estimate(
-        source, execution=workers, pairing="interleave", interleave_block_bytes=4_194_304
-    ).estimated_working_memory_bytes
-    assert small == base
-    assert large - base == 2 * 2 * (4_194_304 - 1_048_576)
+    for block in (1_024, 4_194_304, 64 * 1_048_576):
+        interleaved = estimate(
+            source, execution=workers, pairing="interleave", interleave_block_bytes=block
+        )
+        assert interleaved.estimated_working_memory_bytes == base, block
+        assert "max_working_memory_bytes" not in interleaved.violations, block
 
 
 def test_the_refusal_advises_on_the_gates_it_actually_tripped(tmp_path: Path) -> None:

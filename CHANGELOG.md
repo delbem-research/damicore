@@ -58,8 +58,9 @@ carries anything else, a date included, matches neither and fails the release.
   digest rather than by file name (ADR 0024), and a block the compressor's window cannot hold
   is refused by the window gate, which under interleaving reads one block of each object --
   past the window the original reported a near-copy as unrelated (0.980 against 0.997);
-  `max_pair_window_factor` still measures it. Preflight charges an interleaving worker two
-  blocks where they exceed a compression chunk. On columns of a table interleaving also
+  `max_pair_window_factor` still measures it. A block is read a compression chunk at a time,
+  so an interleaving worker holds no block whole and is charged what a concatenating one is.
+  On columns of a table interleaving also
   pairs values of the same rows wherever widths align them, so it measures some row-by-row
   association with the distributions. ADR 0026.
 

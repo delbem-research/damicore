@@ -233,12 +233,10 @@ class DistanceConfig(BaseModel):
 
     @property
     def worker_memory_bytes(self) -> int:
-        """The memory one worker is charged, which is its compressor stream and two of whatever
-        it reads at once -- a compression chunk, or under interleaving a block of each object
-        if that is larger [adr-0021] [adr-0026]."""
-        pairing = self.pairing
-        block = pairing.interleave_block_bytes if isinstance(pairing, InterleavePairing) else 0
-        return 2 * max(self.compression_chunk_bytes, block) + self.compressor.stream_memory_bytes
+        """The memory one worker is charged, which is its compressor stream and two compression
+        chunks [adr-0021], whatever the pairing: an interleaved block is read into the same
+        buffer a chunk at a time and never held whole [adr-0026]."""
+        return 2 * self.compression_chunk_bytes + self.compressor.stream_memory_bytes
 
     def stream_residue(self, object_count: int, pair_count: int) -> tuple[int, int | None, bool]:
         """How the PPMd stream residue is contained [adr-0027]: the bytes one process is

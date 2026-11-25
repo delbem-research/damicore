@@ -314,6 +314,35 @@ def test_concatenation_is_interleaving_with_a_block_that_holds_either_object(
     assert compressed_size(paths, config=holding) == compressed_size(paths, config=concatenated)
 
 
+def test_interleaving_holds_no_block_whatever_its_size(tmp_path: Path) -> None:
+    """A block is read into the compressor's buffer a chunk at a time and never held whole, so
+    an interleaving worker is charged what a concatenating one is: the memory traced while a
+    pair of 4 MiB objects is interleaved in 4 MiB blocks is what concatenating them traces,
+    nowhere near one block (ADR 0026)."""
+    block = 4 * 1_048_576
+    paths = (
+        _object_file(tmp_path, "left.jsonl", random.Random(1).randbytes(block)),
+        _object_file(tmp_path, "right.jsonl", random.Random(2).randbytes(block)),
+    )
+
+    def peak(pairing: Pairing, chunk: int) -> int:
+        # A chunk size of its own, so its buffer is allocated, and traced, in this call.
+        config = DistanceConfig(
+            compressor=DeflateCompressor(), compression_chunk_bytes=chunk, pairing=pairing
+        )
+        tracemalloc.start()
+        try:
+            compressed_size(paths, config=config)
+            return tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+    concatenated = peak(ConcatPairing(), 65_537)
+    interleaved = peak(InterleavePairing(interleave_block_bytes=block), 65_539)
+    assert interleaved <= concatenated + 4_096, (interleaved, concatenated)
+    assert interleaved < block // 4, interleaved
+
+
 def test_the_default_compressor_reproduces_a_known_size(tmp_path: Path) -> None:
     """A size computed once with pyppmd 1.3.1, so a codec build that encodes differently --
     another platform, another patch release -- fails here instead of shifting every NCD."""
