@@ -95,6 +95,26 @@ from 0.021-0.126 to 0.042-0.163, under `zlib` from 0.000-0.002 to 0.036-0.060. N
 past the window are where interleaving recovers what concatenation loses, which is the
 reference's own claim.
 
+A second calibration replicated this through the stage's own code: every compressed size from
+`compressed_size`, pairs in digest order, five seeds, 256 KiB per column under all four
+compressors and 1 MiB under PPMd and `zlib`, blocks of 256 bytes to 16 KiB -- 150 runs per
+pairing, each paired with the concatenated run of the same columns:
+
+| pairing | adjusted Rand index, pooled | exact partitions | higher / equal / lower | sign test | separation |
+|---|---|---|---|---|---|
+| concatenated | 0.750 | 81 of 150 | | | 0.076 |
+| blocks of 256 B | 0.898 | 98 | 57 / 63 / 30 | p = 0.005 | 0.153, higher in 139 |
+| blocks of 1 KiB | 0.907 | 98 | 57 / 61 / 32 | p = 0.011 | 0.148, higher in 133 |
+| blocks of 4 KiB | 0.917 | 101 | 62 / 57 / 31 | p = 0.002 | 0.145, higher in 134 |
+| blocks of 16 KiB | 0.902 | 95 | 59 / 63 / 28 | p = 0.001 | 0.138, higher in 131 |
+
+No combination of kind of column, compressor and size lost more than 0.2 of its mean index to
+interleaving under any block. Single runs did, 4 to 7 of 150 per block, mostly by FastGreedy
+splitting a true group in two, against 37 to 43 that gained as much. The block sizes do not
+differ on the index (every pairwise sign test p >= 0.165); separation falls as the block grows,
+significantly between every two sizes. The gains are where concatenation sees nothing: near-
+copies past `zlib`'s window (0.22-0.31 to 0.85-0.98) and columns related only row by row.
+
 The last row is a caution, not a feature. Columns whose values have similar widths keep the
 same rows in the same block, so interleaving partly pairs each value with its row's value in
 the other column and sees a relation concatenation cannot -- but by accident of width: under
@@ -107,14 +127,15 @@ some of their row-by-row association, in a proportion it cannot report.
 - **Interleaving line by line.** It measures how two columns relate record by record, a
   quantity the reference never measured, and it means something only where each line of an
   object is a record. It needs its own record and its own issue.
-- **Interleaving by default.** The PPMd results above point that way; twelve columns and one
-  seed per cell cannot carry a change to every user's results. That needs the benchmark of
-  issue 82.
+- **Interleaving by default.** It recovered the groups better on average, with statistical
+  support, but not in every run, so it is not an improvement that loses nothing: a default
+  is every user's result. The concatenation stays the default, as in the reference.
 - **A lower or upper bound on the block.** The reference takes any positive block. A small
   one costs time and a large one memory, and preflight charges the memory -- two blocks per
   worker where they exceed a compression chunk -- so neither needs a bound to stay safe.
-- **Other block sizes as evidence.** Only 1 KiB was calibrated on tables; the window table
-  covers 1 KiB to 512 KiB on near-copies.
+- **A smaller default block.** 256 bytes separated the groups significantly better than
+  1 KiB and recovered them no better, at four times the reads per pair. The reference's
+  1,024 bytes stays.
 
 ## Status
 
