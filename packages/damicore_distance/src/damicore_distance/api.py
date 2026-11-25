@@ -28,7 +28,11 @@ from damicore_distance.artifacts import (
     LabelsArtifact,
     NormalizationManifest,
 )
-from damicore_distance.compressor import codec_fingerprint, compressed_size
+from damicore_distance.compressor import (
+    codec_fingerprint,
+    compressed_fingerprint,
+    compressed_size,
+)
 from damicore_distance.config import DistanceConfig, PpmdCompressor
 from damicore_distance.errors import DistanceError
 from damicore_distance.matrix import DistanceResult
@@ -138,17 +142,31 @@ def _size_worker(arguments: SizeArguments) -> int:
     return compressed_size(tuple(Path(path) for path in raw_paths), config=config)
 
 
+def _check_worker(arguments: SizeArguments) -> bool:
+    """Whether a stream is coded into the same bytes under half the PPMd model as under all
+    of it [adr-0025]."""
+    raw_paths, config = arguments
+    check = _model_check(config)
+    if check is None:
+        return True
+    paths = tuple(Path(path) for path in raw_paths)
+    return (
+        compressed_fingerprint(paths, config=config)[1]
+        == compressed_fingerprint(paths, config=check)[1]
+    )
+
+
 def _model_check(settings: DistanceConfig) -> DistanceConfig | None:
     """The same settings with half the PPMd model, or ``None`` when no check applies.
 
     PPMd codes identically whatever its memory until the memory fills, and then restarts its
-    model from nothing. A stream that gives the same size under half the model therefore
-    gives, under the whole model, the size it would give under any larger one: the measured
-    value is the objects' own, unless both models restarted and still coded the same number
-    of bytes, a coincidence no test has produced [adr-0025]. Half and not twice, so the check
-    never needs more memory than the run already declares; the price is refusing a stream that
-    fills more than half the model and less than all of it, which a larger
-    ``ppmd_memory_bytes`` admits.
+    model from nothing. A stream coded into the same bytes under half the model and under all
+    of it therefore gives, under the whole model, the size any larger one gives: the measured
+    value is the objects' own, unless both models restarted and still coded the same bytes
+    [adr-0025]. Bytes and not sizes: sizes alone were found to coincide across two restarts.
+    Half and not twice, so the check never needs more memory than the run already declares;
+    the price is refusing a stream that fills more than half the model and less than all of
+    it, which a larger ``ppmd_memory_bytes`` admits.
     """
     compressor = settings.compressor
     if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
@@ -170,9 +188,12 @@ def _worker(arguments: WorkerArguments) -> WorkerResult:
         # digests are equal bytes, where the order cannot matter [adr-0024].
         first, second = (i, j) if digests[i] <= digests[j] else (j, i)
         pair = (paths[first], paths[second])
-        cxy = compressed_size(pair, config=config)
-        if check is not None and compressed_size(pair, config=check) != cxy:
-            return shard_index, left, right, values, (i, j)
+        if check is None:
+            cxy = compressed_size(pair, config=config)
+        else:
+            cxy, coded = compressed_fingerprint(pair, config=config)
+            if compressed_fingerprint(pair, config=check)[1] != coded:
+                return shard_index, left, right, values, (i, j)
         left.append(i)
         right.append(j)
         values.append(normalized_compression_distance(sizes[i], sizes[j], cxy))
@@ -393,7 +414,6 @@ def _model_capacity_error(subject: str) -> DistanceError:
 def _refuse_model_restart(
     paths: list[Path],
     labels: list[str],
-    sizes: list[int],
     settings: DistanceConfig,
     executor: ProcessPoolExecutor | None,
 ) -> None:
@@ -401,18 +421,17 @@ def _refuse_model_restart(
     model [adr-0025].
 
     Every pair with it holds it, so no pair needs computing to know the run cannot be
-    admitted: one compression per object here spares the pairs.
+    admitted: two compressions per object here spare the pairs.
     """
-    check = _model_check(settings)
-    if check is None:
+    if _model_check(settings) is None:
         return
-    arguments: list[SizeArguments] = [((str(path),), check) for path in paths]
+    arguments: list[SizeArguments] = [((str(path),), settings) for path in paths]
     results = (
-        map(_size_worker, arguments) if executor is None else executor.map(_size_worker, arguments)
+        map(_check_worker, arguments)
+        if executor is None
+        else executor.map(_check_worker, arguments)
     )
-    over = [
-        index for index, checked in enumerate(_typed_results(results)) if checked != sizes[index]
-    ]
+    over = [index for index, fits in enumerate(_typed_results(results)) if not fits]
     if over:
         raise _model_capacity_error(
             f"{len(over)} of {len(paths)} objects, among them {labels[over[0]]!r}, each fill"
@@ -453,9 +472,9 @@ def _load_completed_shards(
     shard_count: int,
     *,
     resume: bool,
-) -> dict[int, str]:
+) -> tuple[dict[int, str], set[int]]:
     if not path.exists():
-        return {}
+        return {}, set()
     if not resume:
         raise DistanceError(
             "Distance shard checkpoint exists but resume is disabled",
@@ -481,7 +500,10 @@ def _load_completed_shards(
     # only the key set is checked here.
     if set(checkpoint.digests) != expected_keys:
         raise DistanceError("Invalid completed shard digests", code="checkpoint_mismatch_error")
-    return {index: checkpoint.digests[str(index)] for index in completed}
+    unchecked = set(checkpoint.unchecked)
+    if len(unchecked) != len(checkpoint.unchecked) or not unchecked <= completed:
+        raise DistanceError("Invalid unchecked shard index", code="checkpoint_mismatch_error")
+    return {index: checkpoint.digests[str(index)] for index in completed}, unchecked
 
 
 def _validate_completed_shard(
@@ -624,7 +646,7 @@ def compute_distance_matrix(
             executor,
         )
 
-        _refuse_model_restart(paths, labels, sizes, settings, executor)
+        _refuse_model_restart(paths, labels, settings, executor)
 
         # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
         # defers it until it is read after the last shard.
@@ -644,13 +666,19 @@ def compute_distance_matrix(
         matrix_path = destination / "distance.npy"
         matrix = _open_matrix(matrix_path, len(paths), resume=settings.resume)
         shard_checkpoint = checkpoints / "distance-shards.json"
-        completed_shards = _load_completed_shards(
+        completed_shards, unchecked = _load_completed_shards(
             shard_checkpoint,
             identity,
             pair_count,
             shard_count,
             resume=settings.resume,
         )
+        lifted = isinstance(settings.compressor, PpmdCompressor) and settings.allow_model_restart
+        if not lifted:
+            # Measured with the check lifted, so computed again under it [adr-0025].
+            for index in unchecked:
+                del completed_shards[index]
+            unchecked = set[int]()
         completed_pairs = 0
         for index, shard in iter_pair_shards(len(paths), pairs_per_shard):
             if index in completed_shards:
@@ -693,6 +721,8 @@ def compute_distance_matrix(
             completed_shards[shard_index] = _shard_digest(
                 matrix, list(zip(left, right, strict=True))
             )
+            if lifted:
+                unchecked.add(shard_index)
             logger.info(
                 "shard_completed",
                 extra={"shard": shard_index, "pairs": len(values)},
@@ -703,6 +733,7 @@ def compute_distance_matrix(
                 shard_count=shard_count,
                 completed=tuple(sorted(completed_shards)),
                 digests={str(index): completed_shards[index] for index in sorted(completed_shards)},
+                unchecked=tuple(sorted(unchecked)),
             )
             _atomic_json(
                 shard_checkpoint,

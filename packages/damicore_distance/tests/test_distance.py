@@ -368,20 +368,26 @@ def test_every_compression_runs_on_the_pool_when_there_is_one(
         def shutdown(self, **_options: object) -> None:
             pass
 
-    original = distance_api.compressed_size
+    original_size = distance_api.compressed_size
+    original_fingerprint = distance_api.compressed_fingerprint
 
     def placed(*args: Any, **kwargs: Any) -> int:
         placements.append(in_pool)
-        return original(*args, **kwargs)
+        return original_size(*args, **kwargs)
+
+    def fingerprinted(*args: Any, **kwargs: Any) -> tuple[int, bytes]:
+        placements.append(in_pool)
+        return original_fingerprint(*args, **kwargs)
 
     monkeypatch.setattr(distance_api, "ProcessPoolExecutor", MarkingExecutor)
     monkeypatch.setattr(distance_api, "compressed_size", placed)
+    monkeypatch.setattr(distance_api, "compressed_fingerprint", fingerprinted)
     compute_distance_matrix(
         normalized.manifest_path, tmp_path / "out", config=DistanceConfig(workers=2)
     )
-    # Three objects and three pairs, each again under half the PPMd model (ADR 0025), and the
-    # largest object after itself: every one of the thirteen compressions ran in the pool.
-    assert placements == [True] * 13
+    # Three objects; each object and each of the three pairs under the PPMd model and under half
+    # of it (ADR 0025); and the largest object after itself: all sixteen ran in the pool.
+    assert placements == [True] * 16
 
 
 def test_the_default_compressor_is_ppmd_variant_i_at_order_six_with_64_mib() -> None:

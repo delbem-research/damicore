@@ -51,14 +51,20 @@ check has to see each compressed stream the matrix uses.
 
 ## The check
 
-Until the model fills, PPMd codes a stream identically whatever its memory: a stream that
-gives the same size under half the model as under all of it was not changed by a restart
-under all of it, and the size is the objects' own -- the one any larger model gives.
+Until the model fills, PPMd codes a stream identically whatever its memory, byte for byte: a
+stream that half the model codes into the same bytes as all of it was not changed by a
+restart under all of it, and its size is the objects' own -- the one any larger model gives.
 
-So, under PPMd, the distance stage compresses every object again under half the model, on the
-same pool, and refuses the run before any pair if a size differs: every distance to that
-object would hold it. Then every pair is compressed again under half the model as it is
-computed, and the run is refused at the first pair whose size differs, naming the two
+Bytes, not sizes. A third verification found sizes alone coinciding across two restarts: 1,001
+random bytes under an 8 KiB model and under its half both restart and both code 1,088 bytes,
+where a model that does not fill codes 1,077, and comparing sizes admitted that run with a
+wrong distance -- 6 such runs in 7,628 admitted ones, across orders 2 to 16 and models from 4
+to 128 KiB. The bytes of the two streams differ, and the stage compares their SHA-256.
+
+So, under PPMd, the distance stage compresses every object under the model and under half of
+it, on the same pool, and refuses the run before any pair if the bytes differ: every distance
+to that object would hold it. Then every pair is compressed under half the model too as it is
+computed, and the run is refused at the first pair whose bytes differ, naming the two
 objects. The refusal asks for a larger `ppmd_memory_bytes`. `ResourceLimits.allow_model_restart`
 (`--allow-model-restart`) measures anyway and skips the check; like every limit it is not part
 of run identity [adr-0022]. The aggregate reports the refusal as `ResourceLimitError`, since it
@@ -66,24 +72,30 @@ is lifted the way the other limits are.
 
 A test holds the guarantee where it can fail: for eight kinds of content, at sizes either side
 of where a small model fills, with a near-duplicate and an unrelated object, every admitted
-run returns bit for bit the matrix of a model sixteen times larger, and every refused run is
-one half the model measures wrongly. Another holds the near-duplicate pair a per-object check
-admitted; it fails on that check.
+run returns bit for bit the matrix of a model sixteen times larger, and every refused run
+holds a stream that half the model codes into other bytes than that larger model. Two more
+hold the cases that broke earlier checks: the near-duplicate pair a per-object check admitted,
+and the restart whose size coincided.
 
 What the check does not prove: if both the model and its half restart and still code the same
-number of bytes, a wrong size is admitted. No measurement here produced that, and pyppmd
-exposes no restart signal that would close it by construction. `ncd_self_largest`, which is a
-diagnostic and never a gate, is not checked.
+bytes, a wrong size is admitted. The runs the verification found admitted with a wrong size are
+refused when bytes are compared, and pyppmd exposes no restart signal that would close the
+case by construction.
+`ncd_self_largest`, which is a diagnostic and never a gate, is not checked.
 
 Preflight cannot apply the check: it needs the object bytes, which do not exist before
 normalization, and a pair's need is only known by compressing it. So unlike the window gate,
 the refusal comes after the run directory exists, and a pair can be refused after other shards
 are written. That directory belongs to the refused call's configuration: running again with a
 larger model is another configuration and needs another directory, as after any failed run,
-while running again with the check lifted resumes it from the shards already done.
-`manifest.json` keeps the limits of the call that created the directory, so the distance
-stage's receipt records `ppmd_model_checked`, written by the call that ran the stage, as the
-record of whether the check applied.
+while running again with the check lifted resumes it from the shards already done. The
+reverse is not a resume of the same values: `allow_model_restart` is not checkpoint identity,
+so the shard checkpoint lists the shards measured with the check lifted, and a call that
+applies the check computes those again instead of inheriting them -- without that, a run
+interrupted with the check lifted and resumed with it completed as checked while holding a
+restarted near-duplicate pair. `manifest.json` keeps the limits of the call that created the
+directory, so the distance stage's receipt records `ppmd_model_checked`, written by the call
+that ran the stage, as the record of whether the check applied to the whole matrix.
 
 Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes` starts at
 4,096, twice the codec's own minimum.
@@ -91,12 +103,12 @@ Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes`
 ## What it costs
 
 - **Time.** Every pair is compressed twice, so the pair stage, which dominates a run, takes
-  about twice as long; the objects add one compression each.
+  about twice as long; the objects add two compressions each.
 - **Refusals within a factor of two.** A stream that needs more than half the model and no
   more than all of it measures correctly and is refused. Under the default model, pairs of
-  unrelated objects were refused from 2 MiB per object for random bytes and integers and from
-  8 MiB for numbers with six decimals, and not at 8 MiB for a 5,000-word vocabulary; at 1 MiB
-  per object none were. Twice the model admits them, at twice the memory per worker, and
+  unrelated objects were refused from 2 MiB per object for random bytes and integers, from 4
+  or 8 MiB for numbers with six decimals depending on their distribution, and not at 8 MiB for
+  a 5,000-word vocabulary; at 1 MiB per object none were. Twice the model admits them, at twice the memory per worker, and
   measures the same values, since a stream that fits does not depend on the model's size.
 - **Not memory.** The check never runs a model larger than the one configured, so preflight
   charges each worker what it charged before.

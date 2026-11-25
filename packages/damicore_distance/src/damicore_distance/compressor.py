@@ -34,6 +34,7 @@ References
 from __future__ import annotations
 
 import bz2
+import hashlib
 import lzma
 import zlib
 from collections.abc import Callable, Iterable
@@ -113,6 +114,17 @@ def codec_fingerprint() -> dict[str, str]:
 
 
 def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:
+    return compressed_fingerprint(paths, config=config)[0]
+
+
+def compressed_fingerprint(paths: Iterable[Path], *, config: DistanceConfig) -> tuple[int, bytes]:
+    """The size of the compressed stream and the SHA-256 of its bytes.
+
+    Two streams of one size can still differ: the PPMd model check compares the bytes two
+    models code, because a model and its half that both restart were found coding the same
+    number of bytes as each other and not the number an unfilled model codes [adr-0025].
+    """
+    digest = hashlib.sha256()
     try:
         feed, finish = _stream(config)
     except MemoryError as exc:
@@ -127,8 +139,12 @@ def compressed_size(paths: Iterable[Path], *, config: DistanceConfig) -> int:
         for path in paths:
             with path.open("rb") as source:
                 while chunk := source.read(config.compression_chunk_bytes):
-                    total += len(feed(chunk))
-        total += len(finish())
+                    coded = feed(chunk)
+                    digest.update(coded)
+                    total += len(coded)
+        coded = finish()
+        digest.update(coded)
+        total += len(coded)
     except OSError as exc:
         raise DistanceError(f"Could not compress object: {exc}", code="compression_error") from exc
-    return total
+    return total, digest.digest()

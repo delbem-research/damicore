@@ -512,6 +512,59 @@ def test_a_pair_of_near_duplicates_that_restarts_the_model_is_refused(tmp_path: 
     assert "label_000001" in str(raised.value) and "label_000002" in str(raised.value)
 
 
+def test_a_restart_that_codes_as_many_bytes_is_still_refused(tmp_path: Path) -> None:
+    """Sizes alone are not the check: here the model and its half both restart and code the
+    same number of bytes, 1,088, where a model that does not fill codes 1,077. Comparing sizes
+    admitted this run with a wrong distance; the bytes the two models code differ, and the
+    stage compares those (ADR 0025)."""
+    noise = random.Random(2).randbytes(1_001)
+    tiny = PpmdCompressor(ppmd_memory_bytes=8_192)
+
+    def size(memory: int) -> int:
+        return _direct_size(
+            noise, config=DistanceConfig(compressor=PpmdCompressor(ppmd_memory_bytes=memory))
+        )
+
+    # The scenario, established by the codec alone.
+    assert size(4_096) == size(8_192) != size(1 << 20)
+
+    manifest_path = _normalization_manifest(tmp_path / "normalized", [noise, b"hello"])
+    with pytest.raises(DistanceError) as raised:
+        compute_distance_matrix(
+            manifest_path, tmp_path / "run", config=DistanceConfig(compressor=tiny, workers=1)
+        )
+    assert raised.value.code == "model_capacity_error"
+
+
+def test_shards_measured_with_the_check_lifted_are_checked_when_it_applies_again(
+    tmp_path: Path,
+) -> None:
+    """A run measured with the check lifted and resumed without it must not inherit the
+    unchecked values: the check applies to the whole matrix the resumed run returns, not to
+    the shards it happens to compute itself (ADR 0025)."""
+    original = random.Random(16).randbytes(16_000)
+    payloads = [original, _near_duplicate(original, 16), _column(1, 10, 4_000)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    output = tmp_path / "run"
+
+    def measure(*, allow_model_restart: bool) -> None:
+        compute_distance_matrix(
+            manifest_path,
+            output,
+            config=DistanceConfig(
+                compressor=SMALL_MODEL,
+                workers=1,
+                pairs_per_shard=1,
+                allow_model_restart=allow_model_restart,
+            ),
+        )
+
+    measure(allow_model_restart=True)
+    with pytest.raises(DistanceError) as raised:
+        measure(allow_model_restart=False)
+    assert raised.value.code == "model_capacity_error"
+
+
 def test_a_caller_who_allows_the_restart_gets_the_measurement(tmp_path: Path) -> None:
     payloads = [_restarting_object(), _column(1, 10, 262_144)]
     manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
@@ -563,9 +616,24 @@ def test_an_admitted_ppmd_run_measures_what_an_unfilled_model_measures(
 
     A run the stage admits must return, bit for bit, the matrix a model none of the objects
     fills returns; a margin per object admitted near-duplicates that broke this (ADR 0025). A
-    run it refuses must be one that half the model measures wrongly: the stage refuses within
-    a factor of two of where the model fills, never further from it.
+    run it refuses must hold a stream -- an object, or a pair in digest order -- that half the
+    model codes into other bytes than a model none of them fills: the stage refuses within a
+    factor of two of where the model fills, never further from it. Bytes, because two models
+    that both restart can code the same number of them.
     """
+
+    def coded(payload: bytes, compressor: PpmdCompressor) -> bytes:
+        encoder = pyppmd.Ppmd8Encoder(
+            compressor.ppmd_order,
+            compressor.ppmd_memory_bytes,
+            pyppmd.PPMD8_RESTORE_METHOD_RESTART,
+        )
+        return encoder.encode(payload) + encoder.flush()
+
+    def streams(payloads: list[bytes]) -> list[bytes]:
+        ordered = sorted(payloads, key=lambda payload: hashlib.sha256(payload).digest())
+        return payloads + [x + y for x, y in itertools.combinations(ordered, 2)]
+
     outcomes: list[bool] = []
     for size in (4_000, 12_000, 24_000, 40_000):
         original = _kind(kind, 1, size)
@@ -581,8 +649,10 @@ def test_an_admitted_ppmd_run_measures_what_an_unfilled_model_measures(
             )
         except DistanceError as refused:
             assert refused.code == "model_capacity_error"
-            anyway = _matrix(manifest_path, case / "anyway", HALF_MODEL, allow_model_restart=True)
-            assert anyway.tolist() != expected.tolist(), (kind, size)
+            assert any(
+                coded(stream, HALF_MODEL) != coded(stream, UNFILLED_MODEL)
+                for stream in streams(payloads)
+            ), (kind, size)
             outcomes.append(False)
         else:
             assert measured.tolist() == expected.tolist(), (kind, size)
