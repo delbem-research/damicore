@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable, Sequence
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Literal
@@ -44,18 +45,23 @@ class _ColumnWriter:
 
     A table no wider than ``limit`` keeps every file open for the whole split, as before. A
     wider one keeps its first ``limit - 1`` files open and opens each of the rest once per
-    flush, one at a time, so no more than ``limit`` object files are ever open at once. The
-    bytes of every column reach its file in the order they came, so the objects do not depend
-    on when the buffers are flushed.
+    flush, one at a time, so no more than ``limit`` object files are ever open at once. A flush
+    writes at least the budget, so each of those opens writes on average a column's share of
+    it; only a row larger than the budget brings back an open per cell, as before this writer.
+    The bytes of every column reach its file in the order they came, so the objects do not
+    depend on when the buffers are flushed. Beside the budget it holds one buffer per column,
+    as `split_table` already holds a digest and a size per column.
     """
 
-    def __init__(self, root: Path, names: Sequence[str], limit: int) -> None:
+    def __init__(self, root: Path, columns: int, limit: int) -> None:
         self._root = root
-        self._names = names
-        self._kept = len(names) if len(names) <= limit else limit - 1
-        self._buffers = [bytearray() for _ in names]
+        self._kept = columns if columns <= limit else limit - 1
+        self._buffers = [bytearray() for _ in range(columns)]
         self._held = 0
         self._streams: list[BinaryIO] = []
+
+    def _path(self, index: int) -> Path:
+        return self._root / f"column_{index + 1:06d}.jsonl"
 
     def write(self, index: int, payload: bytes) -> None:
         self._buffers[index] += payload
@@ -70,23 +76,42 @@ class _ColumnWriter:
             if index < len(self._streams):
                 self._streams[index].write(buffer)
             elif index < self._kept and index == len(self._streams):
-                stream = (self._root / self._names[index]).open("ab")
-                self._streams.append(stream)
-                stream.write(buffer)
+                self._streams.append(self._path(index).open("ab"))
+                self._streams[index].write(buffer)
             else:
-                with (self._root / self._names[index]).open("ab") as stream:
+                stream = self._path(index).open("ab")
+                try:
                     stream.write(buffer)
+                except BaseException:
+                    _close_quietly(stream)
+                    raise
+                stream.close()
             buffer.clear()
         self._held = 0
 
     def close(self) -> None:
-        """Release every file without writing what is held: called on success after the last
-        flush, and on failure, where writing could raise over the error that stopped the split."""
+        """Close every kept file after the last flush. Closing writes what a file still holds,
+        so an error here is a lost write and is raised -- after every file is closed."""
+        streams, self._streams = self._streams, []
+        with ExitStack() as closing:
+            for stream in streams:
+                closing.callback(stream.close)
+
+    def abandon(self) -> None:
+        """Close every file without reporting what closing them raises, so the error that
+        stopped the split is the one that propagates; what is held is dropped."""
         for stream in self._streams:
-            stream.close()
-        self._streams.clear()
-        self._buffers = [bytearray() for _ in self._names]
+            _close_quietly(stream)
+        self._streams = []
+        self._buffers = []
         self._held = 0
+
+
+def _close_quietly(stream: BinaryIO) -> None:
+    # Only on a path already raising: the object is incomplete either way, and closing it
+    # must not replace the error that says why.
+    with suppress(OSError):
+        stream.close()
 
 
 def validate_header_names(header: Sequence[str]) -> None:
@@ -141,9 +166,8 @@ def split_table(
     max_chunk_bytes = 0
     chunk_bytes = 0
     row_count = 0
-    names = [f"column_{index + 1:06d}.jsonl" for index in range(len(header))]
     writer = (
-        _ColumnWriter(objects_dir, names, max_open_files)
+        _ColumnWriter(objects_dir, len(header), max_open_files)
         if objects_dir is not None and split == "columns"
         else None
     )
@@ -191,9 +215,12 @@ def split_table(
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
         if writer is not None:
             writer.flush()
-    finally:
+    except BaseException:
         if writer is not None:
-            writer.close()
+            writer.abandon()
+        raise
+    if writer is not None:
+        writer.close()
 
     if row_count == 0 or (split == "rows" and row_count < 2):
         raise NormalizerError(

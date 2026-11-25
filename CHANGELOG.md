@@ -16,9 +16,13 @@ carries anything else, a date included, matches neither and fails the release.
   file about 735 million times and spent about three hours normalizing. The writer now holds at
   most 8 MiB of column bytes and flushes them in order; a wide table keeps `max_open_files - 1`
   files open and opens each of the others once per flush, so it never holds more than
-  `max_open_files` open. A table no wider than the limit is written as before, and every
-  object's bytes, size and SHA-256 are unchanged. If reading fails partway, the held bytes are
-  dropped and every file closed, so the reader's own error is the one raised (#134).
+  `max_open_files` open. Each of those opens writes on average a column's share of the 8 MiB,
+  so opens grow with the bytes written rather than with the cells; only a single row larger
+  than 8 MiB still opens a file per cell, as before. A table no wider than the limit is written
+  as before, and every object's bytes, size and SHA-256 are unchanged. If reading or writing
+  fails partway -- a full disk included -- every object file is closed and the error that
+  stopped the split is the one raised, where a full disk used to be reported as a second error
+  from closing the files, with most of them left open (#134).
 
 ## 0.6.0
 

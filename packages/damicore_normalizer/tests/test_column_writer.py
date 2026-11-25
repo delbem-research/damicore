@@ -185,3 +185,65 @@ def test_a_failed_read_closes_every_object_file_and_raises_its_own_error(tmp_pat
         if os.path.realpath(f"/proc/self/fd/{descriptor}").startswith(str(tmp_path))
     ]
     assert left_open == []
+
+
+def test_each_open_of_a_wide_split_writes_a_share_of_the_buffer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the buffer, opens grow with the bytes written, not with the cells: the columns
+    that do not keep their file open are opened once per flush, and a flush happens once per
+    buffer's worth of bytes. With a buffer of a few rows, that is far below one per cell."""
+    monkeypatch.setattr(table_split, "_WRITE_BUFFER_BYTES", 16_384)
+    source = _wide_csv(tmp_path / "wide.csv", 600)
+    limit = NormalizationConfig().max_open_files
+    opens = _openings(source, tmp_path / "out", NormalizationConfig())
+    total = sum(path.stat().st_size for path in (tmp_path / "out" / "objects").iterdir())
+    flushes = -(-total // 16_384) + 1
+    # Every object is also read back once, to check it against its digest.
+    bound = (limit - 1) + (_COLUMNS - (limit - 1)) * flushes + _COLUMNS
+    assert len(opens) <= bound, (len(opens), bound)
+    assert len(opens) < 600 * _COLUMNS // 10
+
+
+def _unwritable(objects: Path) -> None:
+    """Every column's object file is /dev/full, whose writes fail with ENOSPC."""
+    objects.mkdir()
+    for index in range(_COLUMNS):
+        (objects / f"column_{index + 1:06d}.jsonl").symlink_to("/dev/full")
+
+
+def _open_objects(objects: Path) -> list[str]:
+    held: list[str] = []
+    for descriptor in os.listdir("/proc/self/fd"):
+        try:
+            target = os.readlink(f"/proc/self/fd/{descriptor}")
+        except OSError:
+            continue
+        if target == "/dev/full":
+            held.append(target)
+    return held
+
+
+@pytest.mark.parametrize("rows", [3, 400])
+def test_a_failed_write_raises_its_own_error_and_closes_every_object_file(
+    tmp_path: Path, rows: int
+) -> None:
+    """A full disk is reported as the write that failed, never as a second error from closing
+    the files after it, and no object file stays open: 3 rows fail as the files are closed at
+    the end, 400 fail in the middle of a flush."""
+    if not Path("/dev/full").exists() or not Path("/proc/self/fd").is_dir():
+        pytest.skip("needs /dev/full and /proc")
+    objects = tmp_path / "objects"
+    _unwritable(objects)
+    with pytest.raises(OSError) as raised:
+        table_split.split_table(
+            [f"c{index}" for index in range(_COLUMNS)],
+            _rows(rows),
+            split="columns",
+            chunk_rows=50_000,
+            max_open_files=64,
+            objects_dir=objects,
+        )
+    assert raised.value.errno == 28  # ENOSPC
+    assert raised.value.__context__ is None, raised.value.__context__
+    assert _open_objects(objects) == []
