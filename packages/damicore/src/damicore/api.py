@@ -921,6 +921,22 @@ def run(
         )
         if not compatible:
             raise OutputDirectoryConflictError("Output directory belongs to another run")
+        # `allow_model_restart` is a limit, not run identity, so a directory measured with the
+        # check lifted is compatible with a call that applies it. Reused or resumed past the
+        # distance stage, it would hand that call a matrix the check never saw [adr-0025].
+        distancing = json_mapping(json_mapping(existing_manifest.get("stages")).get("distancing"))
+        if (
+            isinstance(distance_config.compressor, PpmdCompressor)
+            and not distance_config.allow_model_restart
+            and distancing.get("status") == "completed"
+            and json_mapping(distancing.get("metrics")).get("ppmd_model_checked") is not True
+        ):
+            raise ResourceLimitError(
+                "This run directory's distance matrix was measured with the PPMd model check "
+                "lifted, and this call applies it. Set allow_model_restart to use the directory "
+                "as it is, or choose another output directory to measure with the check. "
+                "See ADR 0025."
+            )
         recorded_runtime = {
             key: str(item) for key, item in json_mapping(existing_manifest.get("runtime")).items()
         }

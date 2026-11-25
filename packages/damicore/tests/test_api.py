@@ -8,6 +8,7 @@ from typing import Any
 import pyppmd
 import pytest
 
+import damicore.api as api
 from damicore import (
     ArtifactValidationError,
     ConfigurationError,
@@ -665,6 +666,40 @@ def test_a_refused_run_resumed_with_the_check_lifted_says_it_was_not_applied(
     manifest = json.loads((tmp_path / "checked" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["stages"]["distancing"]["metrics"]["ppmd_model_checked"] is True
     checked.close()
+
+
+@pytest.mark.parametrize("completed", [True, False], ids=["reused", "resumed"])
+def test_a_call_with_the_check_refuses_a_directory_measured_without_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completed: bool
+) -> None:
+    """A call that applies the PPMd model check never returns a matrix measured without it
+    (ADR 0025). A directory whose distance stage completed with the check lifted is refused,
+    whether the run completed and would be reused or stopped later and would be resumed."""
+    corpus = _restarting_corpus(tmp_path / "corpus")
+    output = tmp_path / "run"
+    lifted = ExecutionConfig(workers=1, limits=ResourceLimits(allow_model_restart=True))
+    arguments: dict[str, Any] = {
+        "source_kind": "files",
+        "ppmd_memory_bytes": 1_048_576,
+        "output_dir": output,
+        "progress": False,
+    }
+    if completed:
+        run(corpus, execution=lifted, **arguments).close()
+    else:
+
+        def fail_clusterizing(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("injected clusterizer failure")
+
+        monkeypatch.setattr(api, "cluster_tree", fail_clusterizing)
+        with pytest.raises(DamicoreError):
+            run(corpus, execution=lifted, **arguments)
+        monkeypatch.undo()
+    with pytest.raises(ResourceLimitError) as refused:
+        run(corpus, execution=ExecutionConfig(workers=1), **arguments)
+    assert "allow_model_restart" in str(refused.value)
+    # The directory stays usable for the call that measured it.
+    run(corpus, execution=lifted, **arguments).close()
 
 
 def test_the_refusal_advises_on_the_gates_it_actually_tripped(tmp_path: Path) -> None:

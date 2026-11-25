@@ -58,8 +58,7 @@ restart under all of it, and its size is the objects' own -- the one any larger 
 Bytes, not sizes. A third verification found sizes alone coinciding across two restarts: 1,001
 random bytes under an 8 KiB model and under its half both restart and both code 1,088 bytes,
 where a model that does not fill codes 1,077, and comparing sizes admitted that run with a
-wrong distance -- 6 such runs in 7,628 admitted ones, across orders 2 to 16 and models from 4
-to 128 KiB. The bytes of the two streams differ, and the stage compares their SHA-256.
+wrong distance. The bytes of the two streams differ, and the stage compares their SHA-256.
 
 So, under PPMd, the distance stage compresses every object under the model and under half of
 it, on the same pool, and refuses the run before any pair if the bytes differ: every distance
@@ -78,11 +77,15 @@ hold the cases that broke earlier checks: the near-duplicate pair a per-object c
 and the restart whose size coincided.
 
 What the check does not prove: if both the model and its half restart and still code the same
-bytes, a wrong size is admitted. The verification's search, rerun with bytes compared over the
-same 30,000 runs, admitted 7,883 and refused 22,117: no admitted run differed from a 256 MiB
-model, and every refused one held a stream half the model codes differently from it. That is
-a search, not a proof; pyppmd exposes no restart signal that would close the case by
-construction.
+bytes, a wrong size is admitted. A fourth verification classified one search of 30,000 runs --
+eleven kinds of content and twelve kinds of near-duplicate, orders 2 to 16, models from 4 to
+128 KiB, pairs at a hundredth to three times the model -- under both comparisons. Comparing
+sizes admitted 7,905 runs, 4 of them with a distance a 256 MiB model does not give; comparing
+bytes admitted 7,882, none of them wrong, refused those 4, and refused no run whose half
+model coded every stream as the 256 MiB model does. A targeted search for two restarts coding
+the same bytes found none. That is a search, not a proof; pyppmd exposes no restart signal
+that would close the case by construction. (Part of the search's content is the repository's
+own documentation, so rerun on another revision its counts move by a few runs.)
 `ncd_self_largest`, which is a diagnostic and never a gate, is not checked.
 
 Preflight cannot apply the check: it needs the object bytes, which do not exist before
@@ -97,7 +100,10 @@ applies the check computes those again instead of inheriting them -- without tha
 interrupted with the check lifted and resumed with it completed as checked while holding a
 restarted near-duplicate pair. `manifest.json` keeps the limits of the call that created the
 directory, so the distance stage's receipt records `ppmd_model_checked`, written by the call
-that ran the stage, as the record of whether the check applied to the whole matrix.
+that ran the stage, as the record of whether the check applied to the whole matrix. A call
+that applies the check refuses a directory whose distance stage completed with it lifted,
+whether the run would be reused or resumed past that stage: it would otherwise hand that call
+a matrix the check never saw, under a receipt saying so but without a refusal.
 
 Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes` starts at
 4,096, twice the codec's own minimum.
@@ -108,9 +114,10 @@ Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes`
   about twice as long; the objects add two compressions each.
 - **Refusals within a factor of two.** A stream that needs more than half the model and no
   more than all of it measures correctly and is refused. Under the default model, pairs of
-  unrelated objects were refused from 2 MiB per object for random bytes and integers, from 4
-  or 8 MiB for numbers with six decimals depending on their distribution, and not at 8 MiB for
-  a 5,000-word vocabulary; at 1 MiB per object none were. Twice the model admits them, at twice the memory per worker, and
+  unrelated objects were refused from 2 MiB per object for random bytes and integers, from 2
+  to 8 MiB for numbers with six decimals depending on their distribution -- a wide normal
+  from 2, a standard normal from 8, a uniform on [0, 1) not at 8 -- and not at 8 MiB for a
+  5,000-word vocabulary; at 1 MiB per object none of these were. Twice the model admits them, at twice the memory per worker, and
   measures the same values, since a stream that fits does not depend on the model's size.
 - **Not memory.** The check never runs a model larger than the one configured, so preflight
   charges each worker what it charged before.

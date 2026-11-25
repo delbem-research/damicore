@@ -28,11 +28,12 @@ carries anything else, a date included, matches neither and fails the release.
   not fill gives 0.006. ADR 0023 had exempted PPMd on data whose model barely fills (#132).
   The distance stage now compresses every object, before any pair, and every pair, as it is
   computed, again under half the model, and refuses if the coded bytes differ: a stream half
-  the model codes into the same bytes has the size any larger model gives. Shards measured
-  with the check lifted are measured again when a resumed run applies it. The pairs take about twice as long; the memory
+  the model codes into the same bytes has the size any larger model gives. A run resumed with
+  the check measures again the shards measured without it, and a directory whose distance
+  stage completed without it is refused by a call that applies it. The pairs take about twice as long; the memory
   each worker is charged does not change. Pairs that need between half and all of the model
   are refused although they measured correctly -- under the default model, unrelated objects
-  of random bytes or integers from 2 MiB each and of six-decimal numbers from 4 or 8 MiB,
+  of random bytes or integers from 2 MiB each and of six-decimal numbers from 2 to 8 MiB,
   depending on their distribution -- and a
   larger `ppmd_memory_bytes` admits them with the same values. The refusal is a
   `ResourceLimitError` naming the object or the pair and asking for a larger
