@@ -87,7 +87,9 @@ carries anything else, a date included, matches neither and fails the release.
   replaced between shards. A run that fitted its limit runs as before.
   `DistanceConfig.worker_memory_bytes` and `DistanceConfig.stream_residue()` state what a worker
   is charged and how its residue is contained, and preflight reads them. A worker killed while
-  idle now surfaces as `distance_computation_error` rather than as a raw broken pool. ADR 0027.
+  idle surfaces as `distance_computation_error`, rather than as a raw broken pool, when a later
+  task would have gone to it; when none would, nothing it held is lost and the run completes
+  with the same values. ADR 0027.
 
 ## 0.5.0
 

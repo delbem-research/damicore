@@ -75,8 +75,9 @@ are owned.
   of five configurations here; a second machine finished it in 21 others, so the race is real
   but its window depends on timing. A task goes to a worker that can
   take it without replacement, the least busy of them. A worker is shut down only once the
-  tasks it took have finished, and a dead worker still surfaces as the broken pool it always
-  did.
+  tasks it took have finished. A worker that dies with work left, or with work still to be
+  sent to it, surfaces as `distance_computation_error`, as a broken pool always did; one that
+  dies idle with nothing more to do loses nothing, and the run completes with the same values.
 - **A single worker stays in the calling process** while the residue of the whole run fits its
   budget, as every single-worker run has until now. Only a run whose residue would outgrow the
   limit gets one worker process of its own, replaced the same way. That process is spawned, so
