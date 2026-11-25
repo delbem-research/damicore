@@ -746,6 +746,75 @@ def test_the_second_look_runs_on_the_pool_and_agrees_with_one_worker(tmp_path: P
     assert measured("pool", 2) == measured("serial", 1)
 
 
+def test_the_second_look_and_the_residue_workers_hold_fit_the_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second look shares ``max_working_memory_bytes`` with the PPMd stream residue the
+    workers still hold, which preflight charged against the same limit: the streams it runs at
+    once under twice the model, with that residue, must fit the limit (ADR 0025, ADR 0027).
+    The residue is counted from the encoders each worker actually opened, not from what the
+    stage declares."""
+    original = random.Random(12_000).randbytes(12_000)
+    payloads = [original, _near_duplicate(original, 12_000)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    held: dict[int, int] = {}
+    running = [-1]
+
+    class InlineExecutor:
+        def __init__(self, **_options: Any) -> None:
+            self.slot = len(held)
+            held[self.slot] = 0
+
+        def submit(self, function: Any, argument: Any) -> Future[Any]:
+            running[0] = self.slot
+            future: Future[Any] = Future()
+            future.set_result(function(argument))
+            return future
+
+        def shutdown(self, **_options: Any) -> None:
+            held.pop(self.slot, None)
+
+    encoder = pyppmd.Ppmd8Encoder
+
+    def counted(*arguments: Any) -> Any:
+        if running[0] in held:
+            held[running[0]] += PPMD_STREAM_RESIDUE_BYTES
+        return encoder(*arguments)
+
+    looks: list[tuple[int, int]] = []
+    bounded = distance_api._bounded_submit
+
+    def recorded(executor: Any, function: Any, arguments: Any, limit: int, streams: Any) -> Any:
+        if function is distance_api._escalation_worker:
+            first = next(arguments, None)
+            if first is None:
+                return iter(())
+            looks.append((limit, sum(held.values())))
+            arguments = itertools.chain([first], arguments)
+        return bounded(executor, function, arguments, limit, streams)
+
+    monkeypatch.setattr(distance_api, "ProcessPoolExecutor", InlineExecutor)
+    monkeypatch.setattr(pyppmd, "Ppmd8Encoder", counted)
+    monkeypatch.setattr(distance_api, "_bounded_submit", recorded)
+    probe = DistanceConfig(compressor=SMALL_MODEL, workers=2)
+    doubled = PpmdCompressor(ppmd_memory_bytes=2 * SMALL_MODEL.ppmd_memory_bytes)
+    look_bytes = probe.model_copy(update={"compressor": doubled}).worker_memory_bytes
+    # Room for two streams under twice the model and less than the residue already held.
+    limit = 2 * look_bytes + PPMD_STREAM_RESIDUE_BYTES
+    result = compute_distance_matrix(
+        manifest_path,
+        tmp_path / "run",
+        config=probe.model_copy(update={"max_working_memory_bytes": limit}),
+    )
+    assert looks, "the second look never ran"
+    for slots, residue in looks:
+        assert slots * look_bytes + residue <= limit, (slots, residue, limit)
+    expected = _matrix(
+        manifest_path, tmp_path / "unfilled", UNFILLED_MODEL, allow_model_restart=True
+    )
+    assert np.load(result.matrix_path, allow_pickle=False).tolist() == expected.tolist()
+
+
 def test_shards_waiting_for_the_second_look_are_not_resumed_unlooked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

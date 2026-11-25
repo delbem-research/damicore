@@ -179,32 +179,41 @@ def _escalation_worker(arguments: EscalationArguments) -> tuple[int, bool]:
     return tag, compressed_fingerprint(paths, config=escalation)[1] == coded
 
 
-def _model_escalation(
-    settings: DistanceConfig, *, past_budget: bool = False
-) -> tuple[DistanceConfig, int] | None:
-    """The settings under twice the PPMd model, and how many such streams the working-memory
-    budget holds at once; ``None`` when no second look is possible [adr-0025].
-
-    The budget is ``max_working_memory_bytes`` where the caller set it, else what the workers
-    are charged. A second look runs only while no pair is in flight, so the whole budget is
-    its own, and twice a model the codec cannot take is no look at all. ``past_budget`` asks
-    only whether the codec could take it, for the refusal to say which limit stood in the way.
-    """
+def _doubled_model(settings: DistanceConfig) -> DistanceConfig | None:
+    """The settings under twice the PPMd model, or ``None`` when no check applies or the codec
+    cannot take twice the model, which is then no look at all [adr-0025]."""
     compressor = settings.compressor
     if not isinstance(compressor, PpmdCompressor) or settings.allow_model_restart:
         return None
     doubled = 2 * compressor.ppmd_memory_bytes
     if doubled > PPMD_MEMORY_LIMIT:
         return None
-    escalation = settings.model_copy(
+    return settings.model_copy(
         update={"compressor": compressor.model_copy(update={"ppmd_memory_bytes": doubled})}
     )
-    if past_budget:
-        return escalation, 1
-    budget = settings.max_working_memory_bytes
-    if budget is None:
-        budget = settings.effective_workers * settings.worker_memory_bytes
-    slots = min(settings.effective_workers, budget // escalation.worker_memory_bytes)
+
+
+def _model_escalation(settings: DistanceConfig, residue: int) -> tuple[DistanceConfig, int] | None:
+    """The settings under twice the PPMd model, and how many such streams the working-memory
+    budget holds at once; ``None`` when no second look is possible [adr-0025].
+
+    A second look runs only while no pair is in flight, so no worker holds a stream then, but
+    each still holds the PPMd stream residue of what it ran, ``residue`` at most, which
+    preflight charged against the same limit [adr-0027]. The budget is therefore
+    ``max_working_memory_bytes`` less every worker's residue where the caller set a limit, and
+    otherwise what the workers are charged for their streams, beside which the residue was
+    charged on its own.
+    """
+    escalation = _doubled_model(settings)
+    if escalation is None:
+        return None
+    workers = settings.effective_workers
+    limit = settings.max_working_memory_bytes
+    if limit is None:
+        budget = workers * settings.worker_memory_bytes
+    else:
+        budget = limit - workers * residue
+    slots = min(workers, max(budget, 0) // escalation.worker_memory_bytes)
     return (escalation, slots) if slots else None
 
 
@@ -212,7 +221,7 @@ Refusal = tuple[int, Literal["restarted", "no_look"]]
 
 
 def _second_look(
-    streams: Iterator[Look], settings: DistanceConfig, executor: _WorkerPool | None
+    streams: Iterator[Look], settings: DistanceConfig, executor: _WorkerPool | None, residue: int
 ) -> Refusal | None:
     """The first stream to refuse and why, or ``None`` when every one passes [adr-0025]: twice
     the PPMd model codes it otherwise than the model (``"restarted"``), or no second look is
@@ -221,7 +230,7 @@ def _second_look(
     The streams are consumed as they are submitted, at most as many in flight as the budget
     holds, so neither they nor their results are ever all in memory.
     """
-    escalation = _model_escalation(settings)
+    escalation = _model_escalation(settings, residue)
     if escalation is None:
         return next(((tag, "no_look") for tag, _, _ in streams), None)
     doubled, slots = escalation
@@ -567,7 +576,7 @@ def _model_capacity_error(
             "one the objects have"
         )
         advice = "Raise ppmd_memory_bytes -- each worker is charged that memory -- or set"
-    elif _model_escalation(settings, past_budget=True) is None:
+    elif _doubled_model(settings) is None:
         found = (
             "fills more than half the PPMd model, past which the model can restart, and twice "
             "the model is past what the codec takes, so nothing can tell whether it did"
@@ -591,6 +600,7 @@ def _refuse_model_restart(
     labels: list[str],
     settings: DistanceConfig,
     executor: _WorkerPool | None,
+    residue: int,
 ) -> None:
     """Refuse, before any pair, a PPMd run in which an object alone restarts the model, or
     fills more than half of it with no room for a second look [adr-0025].
@@ -611,7 +621,7 @@ def _refuse_model_restart(
         (index, coded) for index, coded in enumerate(_typed_results(results)) if coded is not None
     ]
     refused = _second_look(
-        ((index, (paths[index],), coded) for index, coded in flagged), settings, executor
+        ((index, (paths[index],), coded) for index, coded in flagged), settings, executor, residue
     )
     if refused is not None:
         index, cause = refused
@@ -815,7 +825,9 @@ def compute_distance_matrix(
     # serially in this process while the workers wait.
     # Workers are replaced before the PPMd stream residue they accumulate outgrows the
     # budget, and a single worker leaves the calling process only when it would [adr-0027].
-    _, budget, pooled = settings.stream_residue(len(paths), len(paths) * (len(paths) - 1) // 2)
+    residue, budget, pooled = settings.stream_residue(
+        len(paths), len(paths) * (len(paths) - 1) // 2
+    )
     executor = _WorkerPool(settings.effective_workers, budget) if pooled else None
     try:
         sizes = _load_or_compute_sizes(
@@ -826,7 +838,7 @@ def compute_distance_matrix(
             executor,
         )
 
-        _refuse_model_restart(paths, labels, settings, executor)
+        _refuse_model_restart(paths, labels, settings, executor, residue)
 
         # Submitted ahead of the shards so a pool runs it beside them; without a pool, `map`
         # defers it until it is read after the last shard.
@@ -948,7 +960,7 @@ def compute_distance_matrix(
                         first, second = (i, j) if digests[i] <= digests[j] else (j, i)
                         yield i * len(paths) + j, (paths[first], paths[second]), coded
 
-                refused = _second_look(waiting_pairs(), settings, executor)
+                refused = _second_look(waiting_pairs(), settings, executor, residue)
                 if refused is not None:
                     tag, cause = refused
                     i, j = divmod(tag, len(paths))

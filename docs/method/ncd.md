@@ -139,14 +139,14 @@ it.
   the distance stage compresses every object, before any pair, and every pair, as it is
   computed, again under half the model. A stream that half the model codes into the same
   bytes was not changed by a restart under all of it; one coded otherwise gets a second look
-  under twice the model, as many at once as the working-memory budget holds, once no pair is
-  in flight, and is refused only if the model and twice it code it differently -- the model
-  restarted. An admitted size is therefore the objects' own unless two models restarted into
-  the same bytes, which no search has found. Without memory for the second look, a stream
-  half the model codes otherwise is refused, and the refusal names the limit. The
-  pairs then cost twice the time and no more memory. `ResourceLimits.allow_model_restart`
-  lifts the check [adr-0025]. Measuring objects past the model -- interleaved pairing -- is
-  still open work.
+  under twice the model, as many at once as the working-memory budget holds beside the
+  stream residue the workers keep [adr-0027], once no pair is in flight, and is refused only
+  if the model and twice it code it differently -- the model restarted. An admitted size is
+  therefore the objects' own unless two models restarted into the same bytes, which no
+  search has found. Without memory for the second look, a stream half the model codes
+  otherwise is refused, and the refusal names the limit. The pairs then cost twice the time,
+  within the same memory limit. `ResourceLimits.allow_model_restart` lifts the check
+  [adr-0025]. Measuring objects past the model -- interleaved pairing -- is still open work.
 - **Idempotency is measured once, not established.** The largest object is compressed a
   second time after itself, and `ncd_self_largest`, `(C(xx) - C(x)) / C(x)`, reports how
   much of it the compressor recognized; the paper's normal compressor gives zero. It is

@@ -70,9 +70,12 @@ stands. Only a stream the model and twice the model code differently is refused,
 object or the pair, and asking for a larger `ppmd_memory_bytes`.
 
 The second look runs only once no pair is in flight -- objects before the pairs, pairs after
-the last shard -- so the working-memory budget is its own: `max_working_memory_bytes` where
-the caller set it, `ResourceLimits.max_working_memory_bytes` through `run()`, else what the
-workers are charged. It runs as many streams of twice the model at once as that budget holds
+the last shard -- so no worker holds a stream then, and the working-memory budget is the
+look's, less what the workers still hold: the PPMd stream residue of ADR 0027, which preflight
+charged against the same limit. That budget is `max_working_memory_bytes` where the caller set
+it, `ResourceLimits.max_working_memory_bytes` through `run()`, less every worker's charged
+residue; else what the workers are charged for their streams, beside which their residue is
+charged on its own. It runs as many streams of twice the model at once as that budget holds
 and at most one per worker. Where the budget holds none, or twice the model is past what the
 codec takes, a stream half the model codes otherwise is refused as before, and the refusal
 names the limit; it is never measured on trust. Until a flagged pair's second look passes, its
@@ -143,8 +146,9 @@ Half of the model must itself be a model the codec takes, so `ppmd_memory_bytes`
   charged -- they are refused as before, and raising the limit or the model admits them with
   the same values.
 - **Not the memory preflight charges.** The second look never runs beside a pair, and never
-  more streams of twice the model than the budget holds, so preflight charges each worker
-  what it charged before.
+  more streams of twice the model than the budget left beside the workers' residue holds, so
+  the look and the residue together stay within the limit preflight admitted the run under,
+  which a test holds by counting the encoders each worker opens.
 
 ## What was not chosen
 
