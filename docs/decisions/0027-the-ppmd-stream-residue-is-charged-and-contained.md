@@ -125,12 +125,9 @@ are owned.
 
 ## Status
 
-Added in 0.6.0. The fixes upstream are a line each:
-
-- in `Writer`, grow the block instead of returning;
-- `PyBuffer_Release(&data)` before each encoder's `encode` returns;
-- `PyMem_Free(self->cPpmd8)` and `PyMem_Free(self->cPpmd7)` in the encoders' `dealloc`.
-
-When a pyppmd release carries them, the measurement tests still hold, and a new record can
-retire the containment, the piece bound and the pin's lower bound together. When the supported
-Pythons all carry the fix for `max_tasks_per_child`, the worker pool can give way to it.
+Added in 0.6.0. How pyppmd fixes its encoder is pyppmd's decision; this record depends only on
+the behavior. When a pyppmd release codes a call of any size into a stream its decoder accepts,
+releases what `encode()` is handed, and frees an encoder's state -- which the round-trip and
+residue tests here measure, and still pass once it does -- a new record can retire the piece
+bound, the containment and the pin's lower bound together. When the supported Pythons all carry
+the fix for `max_tasks_per_child`, the worker pool can give way to it.
