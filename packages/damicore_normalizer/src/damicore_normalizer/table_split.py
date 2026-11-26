@@ -51,6 +51,7 @@ class _ColumnWriter:
     a column's share of it; only rows larger than the budget bring back an open per cell, as
     before this writer. The bytes held never exceed the budget: a larger cell is written as it
     comes.
+
     The bytes of every column reach its file in the order they came, so the objects do not
     depend on when the buffers are flushed. Beside the budget it holds one buffer per column,
     as `split_table` already holds a digest and a size per column.
