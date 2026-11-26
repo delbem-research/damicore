@@ -12,11 +12,12 @@ References
 from __future__ import annotations
 
 import hashlib
-from collections import OrderedDict
 from collections.abc import Iterable, Sequence
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
+from io import FileIO
 from pathlib import Path
-from typing import BinaryIO, Literal
+from typing import Literal
 
 from damicore_normalizer.errors import NormalizerError
 from damicore_normalizer.manifest import ObjectDescriptor
@@ -31,26 +32,113 @@ class TableScan:
     row_count: int
 
 
-class _FilePool:
-    def __init__(self, root: Path, limit: int) -> None:
-        self._root = root
-        self._limit = limit
-        self._streams: OrderedDict[str, BinaryIO] = OrderedDict()
+# The column bytes held before they are written, across all columns. A split writes the cells
+# of a row to every column in turn, so writing each cell as it comes opens every file once per
+# row as soon as the files do not all fit `max_open_files` (issue #134). Held to this budget,
+# each file is opened once per budget's worth of bytes instead. Measured on tables of 80 and
+# 1,000 columns, 4 to 8 MiB normalized as fast as keeping every file open, and 1 MiB was 5%
+# slower at 1,000 columns; 8 MiB gives wider tables the larger writes, at a fixed cost.
+_WRITE_BUFFER_BYTES = 8 * 1_048_576
 
-    def write(self, name: str, payload: bytes) -> None:
-        stream = self._streams.pop(name, None)
-        if stream is None:
-            if len(self._streams) >= self._limit:
-                _, oldest = self._streams.popitem(last=False)
-                oldest.close()
-            stream = (self._root / name).open("ab")
-        self._streams[name] = stream
-        stream.write(payload)
+
+class _ColumnWriter:
+    """Append each column's bytes to its object file, holding at most a fixed budget of them.
+
+    A table no wider than ``limit`` keeps every file open for the whole split, as before. A
+    wider one keeps its first ``limit - 1`` files open and opens each of the rest once per
+    flush, one at a time, so no more than ``limit`` object files are ever open at once. A flush
+    is due once the next cell would not fit, so each of those opens writes on average close to
+    a column's share of it; only rows larger than the budget bring back an open per cell, as
+    before this writer. The bytes held never exceed the budget: a larger cell is written as it
+    comes.
+
+    The bytes of every column reach its file in the order they came, so the objects do not
+    depend on when the buffers are flushed. Beside the budget it holds one buffer per column,
+    as `split_table` already holds a digest and a size per column.
+    """
+
+    def __init__(self, root: Path, columns: int, limit: int) -> None:
+        self._root = root
+        self._kept = columns if columns <= limit else limit - 1
+        self._buffers = [bytearray() for _ in range(columns)]
+        self._held = 0
+        self._streams: list[FileIO] = []
+
+    def _path(self, index: int) -> Path:
+        return self._root / f"column_{index + 1:06d}.jsonl"
+
+    def write(self, index: int, payload: bytes) -> None:
+        # Never past the budget: what does not fit flushes what is held first, and a cell the
+        # budget cannot hold is written as it is, after the bytes of its column that came first.
+        if self._held + len(payload) > _WRITE_BUFFER_BYTES:
+            self.flush()
+            if len(payload) > _WRITE_BUFFER_BYTES:
+                self._write_out(index, payload)
+                return
+        self._buffers[index] += payload
+        self._held += len(payload)
+
+    def flush(self) -> None:
+        for index, buffer in enumerate(self._buffers):
+            if buffer:
+                self._write_out(index, buffer)
+                buffer.clear()
+        self._held = 0
+
+    def _open(self, index: int) -> FileIO:
+        # Unbuffered: the column buffer already batches the writes, and a buffer per open file
+        # would hold up to a block of bytes each beside it -- 8 MiB more for 2,000 kept files --
+        # and defer their write, and its errors, to the close.
+        return self._path(index).open("ab", buffering=0)
+
+    def _write_out(self, index: int, data: bytes | bytearray) -> None:
+        if index < len(self._streams):
+            _write_all(self._streams[index], data)
+        elif index < self._kept and index == len(self._streams):
+            self._streams.append(self._open(index))
+            _write_all(self._streams[index], data)
+        else:
+            stream = self._open(index)
+            try:
+                _write_all(stream, data)
+            except BaseException:
+                _close_quietly(stream)
+                raise
+            stream.close()
 
     def close(self) -> None:
-        for stream in self._streams.values():
-            stream.close()
-        self._streams.clear()
+        """Close every kept file after the last flush. Every byte was written before, so
+        closing writes nothing; an error here is still raised, after every file is closed."""
+        streams, self._streams = self._streams, []
+        with ExitStack() as closing:
+            for stream in streams:
+                closing.callback(stream.close)
+
+    def abandon(self) -> None:
+        """Close every file without reporting what closing them raises, so the error that
+        stopped the split is the one that propagates; what is held is dropped."""
+        for stream in self._streams:
+            _close_quietly(stream)
+        self._streams = []
+        self._buffers = []
+        self._held = 0
+
+
+def _write_all(stream: FileIO, data: bytes | bytearray) -> None:
+    # A raw file may take less than it is handed; what it does not take is handed again.
+    view = memoryview(data)
+    while view:
+        written = stream.write(view)
+        if not written:
+            raise OSError(f"{stream.name} took no bytes")
+        view = view[written:]
+
+
+def _close_quietly(stream: FileIO) -> None:
+    # Only on a path already raising: the object is incomplete either way, and closing it
+    # must not replace the error that says why.
+    with suppress(OSError):
+        stream.close()
 
 
 def validate_header_names(header: Sequence[str]) -> None:
@@ -105,7 +193,11 @@ def split_table(
     max_chunk_bytes = 0
     chunk_bytes = 0
     row_count = 0
-    pool = _FilePool(objects_dir, max_open_files) if objects_dir is not None else None
+    writer = (
+        _ColumnWriter(objects_dir, len(header), max_open_files)
+        if objects_dir is not None and split == "columns"
+        else None
+    )
 
     try:
         for values in rows:
@@ -142,15 +234,20 @@ def split_table(
                     column_hashes[index].update(payload)
                     column_sizes[index] += len(payload)
                     chunk_bytes += len(payload)
-                    if pool is not None:
-                        pool.write(f"column_{index + 1:06d}.jsonl", payload)
+                    if writer is not None:
+                        writer.write(index, payload)
             if row_count % chunk_rows == 0:
                 max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
                 chunk_bytes = 0
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
-    finally:
-        if pool is not None:
-            pool.close()
+        if writer is not None:
+            writer.flush()
+    except BaseException:
+        if writer is not None:
+            writer.abandon()
+        raise
+    if writer is not None:
+        writer.close()
 
     if row_count == 0 or (split == "rows" and row_count < 2):
         raise NormalizerError(
