@@ -232,9 +232,17 @@ jobs:
         run: |
           uv pip uninstall --python "$SMOKE_VENV/bin/python" \
             $(printf -- '%s ' $PUBLIC_PACKAGES | tr '_' '-')
-          uv pip install --python "$SMOKE_VENV/bin/python" \
-            --index-url https://test.pypi.org/simple --no-deps \
-            $(printf -- "%s==$VERSION " $PUBLIC_PACKAGES | tr '_' '-')
+          # TestPyPI can take a while to serve files uploaded seconds before; 0.6.1 stopped
+          # here 22 s after its upload. Retry for up to five minutes, then fail. --refresh
+          # stops uv from answering a retry with the index page it cached on the miss.
+          for attempt in $(seq 1 16); do
+            uv pip install --python "$SMOKE_VENV/bin/python" --refresh \
+              --index-url https://test.pypi.org/simple --no-deps \
+              $(printf -- "%s==$VERSION " $PUBLIC_PACKAGES | tr '_' '-') && break
+            test "$attempt" -lt 16
+            echo "TestPyPI does not serve $VERSION yet (attempt $attempt of 16); retrying in 20 s"
+            sleep 20
+          done
 
       - name: Smoke the TestPyPI publication
         env:
