@@ -423,6 +423,94 @@ def test_the_first_join_follows_the_rule_a_float_comparison_would_lose(seed: int
     assert joined == {expected_left, expected_right}
 
 
+def _exact_branch_lengths(
+    matrix: npt.NDArray[np.float64], labels: list[str], tree: Tree
+) -> dict[tuple[str, str], Fraction]:
+    """Replay the joins `tree` made, in Fractions, and return every branch's exact length.
+
+    The joins are read from the tree rather than re-chosen, so this checks the lengths and
+    the reduction independently of the tie rule.
+    """
+    distance = {
+        (left, right): Fraction(float(matrix[i][j]))
+        for i, left in enumerate(labels)
+        for j, right in enumerate(labels)
+    }
+    children: dict[str, list[str]] = {}
+    for edge in tree.edges:
+        children.setdefault(edge.source, []).append(edge.target)
+    active = list(labels)
+    exact: dict[tuple[str, str], Fraction] = {}
+    for internal in sorted(node for node in children if node != tree.root_id):
+        left, right = children[internal]
+        sums = {
+            node: sum((distance[(node, other)] for other in active if other != node), Fraction(0))
+            for node in active
+        }
+        pair = distance[(left, right)]
+        delta = (sums[left] - sums[right]) / (len(active) - 2)
+        exact[(internal, left)] = (pair + delta) / 2
+        exact[(internal, right)] = (pair - delta) / 2
+        active = [node for node in active if node not in (left, right)]
+        for other in active:
+            reduced = (distance[(left, other)] + distance[(right, other)] - pair) / 2
+            distance[(internal, other)] = distance[(other, internal)] = reduced
+        active.append(internal)
+    left, right = active
+    exact[(tree.root_id, left)] = exact[(tree.root_id, right)] = distance[(left, right)] / 2
+    return exact
+
+
+# Three objects with one distance profile form a star, which a binary tree draws as two joins
+# with a branch between them that is zero in exact arithmetic. float64 leaves that branch as
+# a residue of either sign, and the residue alone would decide what the clusterizer does with
+# it: refuse a 0.0, weaken a negative, or make a positive the strongest edge [adr-0028].
+NOISY_STARS = [
+    pytest.param((0.66, 0.18, 0.83, 0.54), id="residue-below-zero"),
+    pytest.param((0.52, 0.32, 0.53, 0.55), id="residue-above-zero"),
+]
+
+
+@pytest.mark.parametrize("values", NOISY_STARS)
+def test_a_branch_is_zero_exactly_when_its_exact_length_is_zero(
+    values: tuple[float, float, float, float],
+) -> None:
+    between, within, from_a, from_b = values
+    labels = ["a", "b", "z1", "z2", "z3"]
+    matrix = np.array(
+        [
+            [0.0, between, from_a, from_a, from_a],
+            [between, 0.0, from_b, from_b, from_b],
+            [from_a, from_b, 0.0, within, within],
+            [from_a, from_b, within, 0.0, within],
+            [from_a, from_b, within, within, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    tree = neighbor_joining(matrix, labels)
+    exact = _exact_branch_lengths(matrix, labels, tree)
+
+    assert sum(length == 0 for length in exact.values()) == 1
+    for edge in tree.edges:
+        expected = exact[(edge.source, edge.target)]
+        if expected == 0:
+            # Positive zero, so tree.json and tree.nwk never print a signed residue.
+            assert (edge.length, np.copysign(1.0, edge.length)) == (0.0, 1.0), edge
+        else:
+            assert edge.length == pytest.approx(float(expected), rel=1e-12), edge
+
+
+def test_branches_far_from_zero_are_left_as_computed() -> None:
+    """The additive fixture has no branch near zero, so snapping must leave every length
+    bit-for-bit as the formulas compute them."""
+    tree = neighbor_joining(ADDITIVE_MATRIX, ADDITIVE_LABELS)
+    exact = _exact_branch_lengths(ADDITIVE_MATRIX, ADDITIVE_LABELS, tree)
+    assert all(length != 0 for length in exact.values())
+    assert [edge.length for edge in tree.edges] == [
+        float(exact[(edge.source, edge.target)]) for edge in tree.edges
+    ]
+
+
 @pytest.mark.parametrize("q_block_size", [1, 2, 3, 512])
 def test_the_q_block_size_does_not_change_the_tree(q_block_size: int) -> None:
     """Blocking bounds how much of the Q scan is in flight, never

@@ -297,26 +297,67 @@ def test_a_branch_far_below_zero_is_weighted_rather_than_refused(tmp_path: Path)
     assert result.cluster_count >= 1
 
 
-@pytest.mark.parametrize(
-    ("length", "discriminator"),
-    [
-        pytest.param(0.0, "no reciprocal", id="zero-length"),
-        pytest.param(5e-324, "finite weight", id="reciprocal-overflows"),
-    ],
-)
-def test_a_branch_without_a_usable_reciprocal_is_rejected(
-    tmp_path: Path, length: float, discriminator: str
-) -> None:
-    """The weighting is total over every finite length except these two, where the reciprocal
-    does not exist as a float. Repairing them silently would reintroduce the unbounded weight
-    the formula exists to avoid, so they are refused with the reason named."""
+def test_a_branch_whose_reciprocal_overflows_is_rejected(tmp_path: Path) -> None:
+    """A nonzero length too small for its reciprocal to be a float has no usable weight.
+    Repairing it silently would reintroduce the unbounded weight the formula exists to avoid,
+    so it is refused with the reason named. A zero length is not this case: it is one point
+    [adr-0028]."""
     payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
-    payload["edges"][0].update(length=length)
+    payload["edges"][0].update(length=5e-324)
     source = tmp_path / "degenerate.json"
     source.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ClusterizerError, match=discriminator) as raised:
+    with pytest.raises(ClusterizerError, match="finite weight") as raised:
         cluster_tree(source, tmp_path / "out")
     assert raised.value.code == "tree_format_error"
+
+
+def _clusters(result_path: Path) -> list[list[str]]:
+    with result_path.open(encoding="utf-8", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    grouped: dict[str, list[str]] = {}
+    for row in rows:
+        grouped.setdefault(row["cluster"], []).append(row["object_id"])
+    return sorted(sorted(group) for group in grouped.values())
+
+
+def test_leaves_joined_by_zero_branches_are_one_point_in_one_cluster(tmp_path: Path) -> None:
+    """Two objects that no distance separates -- identical columns compressed by PPMd -- reach
+    the tree as two zero branches under one node. They are one point, so they share a cluster,
+    and the rest of the tree is partitioned as if the point were a single leaf."""
+    payload = json.loads(_planted_tree(tmp_path / "planted.json", 1.0).read_text(encoding="utf-8"))
+    for edge in payload["edges"]:
+        if edge["source"] == "i1":
+            edge["length"] = 0.0
+    source = tmp_path / "coincident.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    result = cluster_tree(source, tmp_path / "out")
+    assert _clusters(result.membership_path) == [sorted(group) for group in PLANTED_GROUPS]
+
+
+def test_a_tree_that_is_one_point_is_one_cluster(tmp_path: Path) -> None:
+    """Every branch zero leaves a single point and no edge for FastGreedy to weigh, which is
+    one community, not a division by an empty spread."""
+    payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
+    for edge in payload["edges"]:
+        edge["length"] = 0.0
+    source = tmp_path / "point.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    result = cluster_tree(source, tmp_path / "out")
+    assert (result.community_count, result.cluster_count, result.modularity) == (1, 1, 0.0)
+    assert _clusters(result.membership_path) == [["a", "b", "c", "d"]]
+
+
+def test_more_requested_clusters_than_points_is_rejected(tmp_path: Path) -> None:
+    """Joining zero branches can leave fewer points than leaves, and FastGreedy cannot cut a
+    dendrogram into more communities than it has points, so the count is refused by name."""
+    payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
+    for edge in payload["edges"]:
+        edge["length"] = 0.0
+    source = tmp_path / "point.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ClusterizerError, match="1 distinct point") as raised:
+        cluster_tree(source, tmp_path / "out", config=ClusterConfig(num_clusters=2))
+    assert raised.value.code == "configuration_error"
 
 
 def test_equal_branch_lengths_give_every_edge_the_same_weight(tmp_path: Path) -> None:
@@ -430,6 +471,7 @@ def _planted_tree(path: Path, shortest: float) -> Path:
         pytest.param(1e-1, id="short"),
         pytest.param(1e-3, id="very-short"),
         pytest.param(1e-6, id="near-zero"),
+        pytest.param(0.0, id="zero"),
         pytest.param(-1e-3, id="slightly-negative"),
         pytest.param(-1.0, id="far-below-zero"),
     ],

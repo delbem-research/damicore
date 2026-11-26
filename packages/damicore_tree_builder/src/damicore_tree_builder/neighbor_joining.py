@@ -39,6 +39,9 @@ References
 .. [adr-0017] Which pair joins when two Q scores tie, and the relative band that makes the
    tie visible in float64. Neither work above states a tie rule, so this one is this
    project's and changes the tree a run reports from the same matrix.
+.. [adr-0028] That a branch inside the same band around zero is written as exactly zero.
+   Neither work above addresses rounding, so this is this project's, and it changes the
+   tree a run reports wherever a branch is zero in exact arithmetic.
 """
 
 from __future__ import annotations
@@ -69,6 +72,17 @@ _TIE_RELATIVE_TOLERANCE = 1e-9
 def _tie_band(score: float) -> float:
     """Half-width of the tie band around `score`, scaled to its magnitude."""
     return _TIE_RELATIVE_TOLERANCE * max(1.0, abs(score))
+
+
+def _zero_within_band(length: float, distance: float) -> float:
+    """`length`, or exactly 0.0 when it lies inside the band around zero.
+
+    A branch that is zero in exact arithmetic -- the one between two joins that draw a star
+    of identical distance profiles -- comes out of float64 as a residue of either sign, for
+    the reason the tie band exists. The band is scaled to the distance the branch was split
+    from, and the result is positive zero so no artifact prints a signed residue [adr-0028].
+    """
+    return 0.0 if abs(length) <= _tie_band(distance) else length
 
 
 def validate_matrix(
@@ -179,7 +193,8 @@ def build_neighbor_joining(
         distance = float(work[left_slot, right_slot])
         delta = (row_sums[left] - row_sums[right]) / (count - 2)
         left_length = 0.5 * (distance + delta)
-        right_length = distance - left_length
+        right_length = _zero_within_band(distance - left_length, distance)
+        left_length = _zero_within_band(left_length, distance)
         internal = f"nj_{internal_index:06d}"
         internal_index += 1
         nodes.append(TreeNode(id=internal, kind="internal"))
@@ -205,7 +220,8 @@ def build_neighbor_joining(
 
     active.sort()
     left, right = active
-    final_length = float(work[slots[left], slots[right]]) / 2.0
+    final_distance = float(work[slots[left], slots[right]])
+    final_length = _zero_within_band(final_distance / 2.0, final_distance)
     root = "nj_root"
     nodes.append(TreeNode(id=root, kind="internal"))
     edges.extend(
