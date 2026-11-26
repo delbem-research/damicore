@@ -628,6 +628,38 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
     assert "matrix:" not in blocks["publish-pypi"]
 
 
+def test_notebook_kernels_install_what_the_notebooks_install() -> None:
+    """Every lane that executes the notebooks builds its kernel from one list, and that list
+    covers what the notebooks' own `install` cells ask for beside `damicore`.
+
+    The suite drops those cells, so a package only they install reaches no kernel unless the
+    lane installs it too. 0.6.0 and 0.6.1 stopped at the release smoke that way: ci.yml's
+    kernel had matplotlib and release.yml's, a second hand-written list, did not.
+    """
+    declared = re.search(
+        r"^NOTEBOOK_EXTRAS\s*:=\s*(.+)$",
+        (ROOT / "Makefile").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert declared is not None, "Makefile declares no NOTEBOOK_EXTRAS"
+
+    requested: set[str] = set()
+    for path in sorted((ROOT / "notebooks").glob("*.ipynb")):
+        cells = cast(list[dict[str, object]], json.loads(path.read_text(encoding="utf-8"))["cells"])
+        for cell in cells:
+            metadata = cast(dict[str, list[str]], cell.get("metadata", {}))
+            if "install" not in metadata.get("tags", []):
+                continue
+            for line in "".join(cast(list[str], cell["source"])).splitlines():
+                if line.startswith("%pip install"):
+                    requested |= {word for word in line.split()[2:] if not word.startswith("-")}
+    assert requested - {"damicore"} <= set(declared.group(1).split()), requested
+
+    for workflow in ("ci.yml", "release.yml"):
+        text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+        assert "make -s print-notebook-extras" in text, workflow
+
+
 def test_the_changelog_carries_one_unreleased_section_at_the_top() -> None:
     """`release.yml` reads a version's section up to the next `## `, so a second
     `## Unreleased` below a released heading truncates that release's notes.
