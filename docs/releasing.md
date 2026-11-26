@@ -6,8 +6,10 @@ execute it; this file states the procedure and the facts that live outside the r
 ## Position
 
 Which version is published is not restated here, because a number written in prose goes
-stale and nothing checks it. `git tag -l 'v*'` lists what has been released, and
-`packages/damicore/pyproject.toml` declares what `main` currently says it is.
+stale and nothing checks it. `git tag -l 'v*'` lists the versions the release workflow ran
+for, not the ones it published: v0.6.0 and v0.6.1 are tagged and never reached PyPI. What
+was published is what PyPI lists, and `packages/damicore/pyproject.toml` declares what
+`main` currently says it is.
 
 A version on PyPI is immutable and its number can never be reused, so a release is always a
 new version, never a rebuild of one already there.
