@@ -252,7 +252,9 @@ jobs:
           SMOKE_VENV: /tmp/damicore-release-smoke
           DAMICORE_NOTEBOOK_KERNEL: damicore-release
         run: |
-          uv pip install --python "$SMOKE_VENV/bin/python" ipykernel
+          # matplotlib is the self-analysis notebook's own install, not a damicore dependency;
+          # ci.yml's notebook lane installs the same set.
+          uv pip install --python "$SMOKE_VENV/bin/python" ipykernel matplotlib
           "$SMOKE_VENV/bin/python" -m ipykernel install --user \
             --name "$DAMICORE_NOTEBOOK_KERNEL" --display-name "$DAMICORE_NOTEBOOK_KERNEL"
           uv run pytest tests/notebooks -m notebook
