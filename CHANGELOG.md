@@ -19,8 +19,9 @@ before PyPI. The code is 0.6.1's, so upgrading from 0.5.0 brings every change li
 - **The release check now installs what the self-analysis notebook needs.** The release ran
   the notebooks against the TestPyPI publication without `matplotlib`, which
   `damicore_self_analysis.ipynb` imports, so 0.6.0's check failed. 0.6.1 stopped one step
-  earlier, when TestPyPI did not yet serve the files uploaded seconds before; its notebook
-  check would have failed the same way. No package code changed.
+  earlier, when TestPyPI did not yet serve the files uploaded seconds before, which the
+  release now waits out; its notebook check would have failed the same way. No package code
+  changed.
 
 ## 0.6.1
 
