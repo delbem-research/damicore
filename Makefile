@@ -1,5 +1,5 @@
 .PHONY: help install check test coverage-critical build wheels clean ref references docs docs-check
-.PHONY: print-public-packages print-stage-packages print-aggregate-package
+.PHONY: print-public-packages print-stage-packages print-aggregate-package print-notebook-extras
 
 # The publish allowlist. Deliberately explicit rather than derived from the workspace, so a
 # new package cannot become publishable by accident. tests/architecture asserts this list
@@ -12,6 +12,11 @@ STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 # The aggregate, derived rather than restated: it is the public package that is not a stage.
 # It publishes last, because it depends on the four that are.
 AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
+
+# What a notebook kernel needs beside damicore: ipykernel to be one, and what the notebooks'
+# `install` cells add (matplotlib, for the self-analysis notebook). ci.yml and release.yml
+# both build their kernels from it; tests/architecture asserts it covers those cells.
+NOTEBOOK_EXTRAS := ipykernel matplotlib
 
 # Modules held to the 95% critical-coverage floor. This list is also the repository's census
 # of scientific code: a module here decides what a run reports, so it owes a basis, which
@@ -109,6 +114,9 @@ print-stage-packages:
 
 print-aggregate-package:
 	@echo $(AGGREGATE_PACKAGE)
+
+print-notebook-extras:
+	@echo $(NOTEBOOK_EXTRAS)
 
 clean:
 	@echo "Remove .venv, dist, coverage, and test caches explicitly when needed."
