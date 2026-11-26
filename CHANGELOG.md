@@ -8,16 +8,19 @@ carries anything else, a date included, matches neither and fails the release.
 ## 0.6.2
 
 The first release since 0.5.0 to reach PyPI and GitHub Releases. Neither 0.6.0 nor 0.6.1 was
-published: both passed TestPyPI, and the release's notebook check then stopped them before
-PyPI. The code is 0.6.1's, so upgrading from 0.5.0 brings every change in the 0.6.0 and 0.6.1
-sections below, including 0.6.0's breaking changes.
+published: both reached TestPyPI, and the release's checks of that publication stopped them
+before PyPI. The code is 0.6.1's, so upgrading from 0.5.0 brings every change listed under
+[0.6.0](https://github.com/delbem-research/damicore/blob/v0.6.2/CHANGELOG.md#060) and
+[0.6.1](https://github.com/delbem-research/damicore/blob/v0.6.2/CHANGELOG.md#061), including
+0.6.0's breaking changes.
 
 ### Fixed
 
 - **The release check now installs what the self-analysis notebook needs.** The release ran
   the notebooks against the TestPyPI publication without `matplotlib`, which
-  `damicore_self_analysis.ipynb` imports, so the check failed and nothing was published to
-  PyPI. No package code changed.
+  `damicore_self_analysis.ipynb` imports, so 0.6.0's check failed. 0.6.1 stopped one step
+  earlier, when TestPyPI did not yet serve the files uploaded seconds before; its notebook
+  check would have failed the same way. No package code changed.
 
 ## 0.6.1
 
