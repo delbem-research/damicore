@@ -16,12 +16,17 @@ import itertools
 import json
 import lzma
 import random
+import re
 import subprocess
 import sys
 import textwrap
+import threading
+import time
 import tracemalloc
 import zlib
+from collections.abc import Callable
 from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any, Literal
 
@@ -774,6 +779,268 @@ def test_the_second_look_runs_on_the_pool_and_agrees_with_one_worker(tmp_path: P
     assert measured("pool", 2) == measured("serial", 1)
 
 
+# --- Shards on a pool finish in any order, issue 141 --------------------------------------
+
+
+class _ShardTimeline:
+    """Stands in for the worker processes and decides when each pair shard finishes.
+
+    Every task runs in the test process as it is submitted. Any other task's future is
+    resolved at once; a pair shard's future is held, and `release` -- run on its own thread
+    until the stage returns -- resolves the held ones in whatever order the test needs. That
+    order is what a pool of real processes leaves to the shards' costs.
+    """
+
+    def __init__(self, release: Callable[[_ShardTimeline], None]) -> None:
+        self.lock = threading.Condition()
+        self.held: list[tuple[int, Future[Any], Any]] = []
+        self.submitted: list[int] = []
+        self.stopped = False
+        self._release = release
+
+    def executor(self) -> type:
+        timeline = self
+
+        class Executor:
+            def __init__(self, **_options: Any) -> None:
+                pass
+
+            def submit(self, function: Callable[[Any], Any], argument: Any) -> Future[Any]:
+                future: Future[Any] = Future()
+                result = function(argument)
+                if function is not distance_api._worker:
+                    future.set_result(result)
+                    return future
+                with timeline.lock:
+                    timeline.submitted.append(argument[0])
+                    timeline.held.append((argument[0], future, result))
+                    timeline.lock.notify_all()
+                return future
+
+            def shutdown(self, **_options: Any) -> None:
+                pass
+
+        return Executor
+
+    def resolve(self, position: int) -> None:
+        """Finish the held shard at ``position``; under the lock."""
+        _, future, result = self.held.pop(position)
+        future.set_result(result)
+
+    def run(self, monkeypatch: pytest.MonkeyPatch, call: Callable[[], Any]) -> Any:
+        monkeypatch.setattr(distance_api, "ProcessPoolExecutor", self.executor())
+        releaser = threading.Thread(target=self._release, args=(self,), daemon=True)
+        releaser.start()
+        try:
+            return call()
+        finally:
+            with self.lock:
+                self.stopped = True
+                self.lock.notify_all()
+            releaser.join(timeout=10)
+
+
+def _newest_first(window: int, shards: int) -> Callable[[_ShardTimeline], None]:
+    """Finish the shard submitted last whenever `window` are held, or once all `shards` have
+    been sent: within every window the shards finish in the reverse of the order they were
+    sent, however long each one took to run."""
+
+    def release(timeline: _ShardTimeline) -> None:
+        with timeline.lock:
+            while not timeline.stopped:
+                every_one_sent = len(timeline.submitted) >= shards
+                if timeline.held and (len(timeline.held) >= window or every_one_sent):
+                    timeline.resolve(-1)
+                else:
+                    timeline.lock.wait(timeout=0.01)
+
+    return release
+
+
+def test_a_slow_shard_does_not_hold_back_the_shards_behind_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker that finishes a shard is handed the next one while an earlier shard is still
+    running: the window bounds the shards in flight, not the shards waiting for the slowest
+    one to be read. Shard 0 is held until the stage has sent more shards than the window
+    holds, or for five seconds; under a window that waits on its oldest shard nothing more is
+    sent in that time, and every worker but the one running shard 0 sits idle."""
+    payloads = [random.Random(index).randbytes(400) for index in range(5)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    config = DistanceConfig(compressor=DeflateCompressor(), workers=2, pairs_per_shard=1)
+    window = config.effective_workers * 2
+    sent_while_held: list[int] = []
+    delivered = [0]
+    beyond_window: list[int] = []
+
+    def release(timeline: _ShardTimeline) -> None:
+        deadline = time.monotonic() + 5
+        with timeline.lock:
+            while not timeline.stopped:
+                for position in reversed(range(len(timeline.held))):
+                    if timeline.held[position][0] != 0:
+                        timeline.resolve(position)
+                head = [i for i, (shard, _, _) in enumerate(timeline.held) if shard == 0]
+                if head and (len(timeline.submitted) > window or time.monotonic() > deadline):
+                    sent_while_held.append(len(timeline.submitted))
+                    timeline.resolve(head[0])
+                timeline.lock.wait(timeout=0.01)
+
+    def progress(completed: int, total: int, message: str) -> None:
+        del total, message
+        delivered[0] = completed
+
+    timeline = _ShardTimeline(release)
+    original_submit = distance_api._WorkerPool.submit
+
+    def counted(pool: Any, function: Any, argument: Any, *, streams: int) -> Any:
+        if function is distance_api._worker:
+            # pairs_per_shard=1: a delivered pair is a delivered shard.
+            beyond_window.append(len(timeline.submitted) + 1 - delivered[0])
+        return original_submit(pool, function, argument, streams=streams)
+
+    monkeypatch.setattr(distance_api._WorkerPool, "submit", counted)
+    result = timeline.run(
+        monkeypatch,
+        lambda: compute_distance_matrix(
+            manifest_path, tmp_path / "run", config=config, progress=progress
+        ),
+    )
+    assert sent_while_held and sent_while_held[0] > window, (sent_while_held, window)
+    assert max(beyond_window) <= window, (beyond_window, window)
+    assert sorted(timeline.submitted) == list(range(len(payloads) * (len(payloads) - 1) // 2))
+    monkeypatch.undo()
+    serial = compute_distance_matrix(
+        manifest_path,
+        tmp_path / "serial",
+        config=DistanceConfig(compressor=DeflateCompressor(), workers=1),
+    )
+    assert (
+        np.load(result.matrix_path, allow_pickle=False).tolist()
+        == np.load(serial.matrix_path, allow_pickle=False).tolist()
+    )
+
+
+def test_shards_finishing_in_reverse_give_the_matrix_one_worker_gives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The order shards finish in moves no value: every shard writes its own cells, and a pair
+    the second look admits is admitted whatever finished before it (ADR 0025)."""
+    original = random.Random(12_000).randbytes(12_000)
+    payloads = [
+        original,
+        _near_duplicate(original, 12_000),
+        *(random.Random(index).randbytes(3_000) for index in range(4)),
+    ]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    config = DistanceConfig(
+        compressor=SMALL_MODEL, workers=2, pairs_per_shard=1, max_working_memory_bytes=ROOMY
+    )
+    shards = len(payloads) * (len(payloads) - 1) // 2
+    timeline = _ShardTimeline(_newest_first(config.effective_workers * 2, shards))
+    result = timeline.run(
+        monkeypatch,
+        lambda: compute_distance_matrix(manifest_path, tmp_path / "pool", config=config),
+    )
+    monkeypatch.undo()
+    expected = _matrix(manifest_path, tmp_path / "serial", SMALL_MODEL, allow_model_restart=False)
+    assert np.load(result.matrix_path, allow_pickle=False).tolist() == expected.tolist()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [MemoryError("shard too large"), BrokenProcessPool("worker killed")],
+    ids=["worker-raised", "pool-broke"],
+)
+def test_a_shard_that_fails_while_an_earlier_one_runs_is_reported_typed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException
+) -> None:
+    """A shard taken as it finishes reports its failure as one taken in order did: the typed
+    error with its stable code and the worker's exception as its cause, even while an
+    earlier shard is still running."""
+    payloads = [random.Random(index).randbytes(400) for index in range(4)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    config = DistanceConfig(compressor=DeflateCompressor(), workers=2, pairs_per_shard=1)
+
+    def release(timeline: _ShardTimeline) -> None:
+        # Past this, shard 0 finishes too, so a stage that waits for it fails the test
+        # rather than hanging it.
+        deadline = time.monotonic() + 5
+        with timeline.lock:
+            while not timeline.stopped:
+                if time.monotonic() > deadline:
+                    while timeline.held:
+                        timeline.resolve(-1)
+                failing = [i for i, (shard, _, _) in enumerate(timeline.held) if shard == 1]
+                if failing:
+                    _, future, _ = timeline.held.pop(failing[0])
+                    future.set_exception(failure)
+                for position in reversed(range(len(timeline.held))):
+                    if timeline.held[position][0] > 1:
+                        timeline.resolve(position)
+                timeline.lock.wait(timeout=0.01)
+            # Shard 0 runs on until the stage has given up on the run.
+            while timeline.held:
+                timeline.resolve(-1)
+
+    timeline = _ShardTimeline(release)
+    with pytest.raises(DistanceError) as raised:
+        timeline.run(
+            monkeypatch,
+            lambda: compute_distance_matrix(manifest_path, tmp_path / "run", config=config),
+        )
+    assert raised.value.code == "distance_computation_error"
+    assert raised.value.__cause__ is failure
+
+
+def _refused_pair(error: DistanceError) -> tuple[str, str]:
+    named = re.search(r"The pair '([^']+)' and '([^']+)'", str(error))
+    assert named is not None, str(error)
+    return named.group(1), named.group(2)
+
+
+def test_the_refused_pair_named_does_not_depend_on_the_order_shards_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two pairs in two shards each restart the model, which twice the model shows by coding
+    them otherwise, so either could be the one a refusal names. It names the one a single
+    worker meets first, however the pool's shards finish: which pair a run reports must not
+    depend on how long its shards took."""
+    first = random.Random(16).randbytes(16_000)
+    second = random.Random(17).randbytes(16_000)
+    payloads = [first, _near_duplicate(first, 16), second, _near_duplicate(second, 17)]
+    doubled = PpmdCompressor(ppmd_memory_bytes=2 * SMALL_MODEL.ppmd_memory_bytes)
+    # The scenario, from the codec alone: both pairs restart the model, and twice the model
+    # codes each of them otherwise, which is what refuses a pair (ADR 0025).
+    for left, right in ((payloads[0], payloads[1]), (payloads[2], payloads[3])):
+        pair = sorted((left, right), key=lambda payload: hashlib.sha256(payload).hexdigest())
+        assert _size(SMALL_MODEL, *pair) != _size(UNFILLED_MODEL, *pair)
+        assert _size(doubled, *pair) != _size(SMALL_MODEL, *pair)
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+
+    def refused(name: str, workers: int) -> tuple[str, str]:
+        with pytest.raises(DistanceError) as raised:
+            compute_distance_matrix(
+                manifest_path,
+                tmp_path / name,
+                config=DistanceConfig(
+                    compressor=SMALL_MODEL,
+                    workers=workers,
+                    pairs_per_shard=1,
+                    max_working_memory_bytes=ROOMY,
+                ),
+            )
+        assert raised.value.code == "model_capacity_error"
+        return _refused_pair(raised.value)
+
+    serial = refused("serial", 1)
+    window = DistanceConfig(workers=2).effective_workers * 2
+    timeline = _ShardTimeline(_newest_first(window, len(payloads) * (len(payloads) - 1) // 2))
+    pooled = timeline.run(monkeypatch, lambda: refused("pool", 2))
+    assert timeline.submitted, "no shard went through the pool"
+    assert pooled == serial
+
+
 def test_the_second_look_and_the_residue_workers_hold_fit_the_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -812,14 +1079,16 @@ def test_the_second_look_and_the_residue_workers_hold_fit_the_limit(
     looks: list[tuple[int, int]] = []
     bounded = distance_api._bounded_submit
 
-    def recorded(executor: Any, function: Any, arguments: Any, limit: int, streams: Any) -> Any:
+    def recorded(
+        executor: Any, function: Any, arguments: Any, limit: int, streams: Any, **options: Any
+    ) -> Any:
         if function is distance_api._escalation_worker:
             first = next(arguments, None)
             if first is None:
                 return iter(())
             looks.append((limit, sum(held.values())))
             arguments = itertools.chain([first], arguments)
-        return bounded(executor, function, arguments, limit, streams)
+        return bounded(executor, function, arguments, limit, streams, **options)
 
     monkeypatch.setattr(distance_api, "ProcessPoolExecutor", InlineExecutor)
     monkeypatch.setattr(pyppmd, "Ppmd8Encoder", counted)
@@ -950,10 +1219,12 @@ def test_one_pooled_worker_is_replaced_to_make_room_for_the_second_look(
 
     bounded = distance_api._bounded_submit
 
-    def recorded(executor: Any, function: Any, arguments: Any, limit: int, streams: Any) -> Any:
+    def recorded(
+        executor: Any, function: Any, arguments: Any, limit: int, streams: Any, **options: Any
+    ) -> Any:
         if function is distance_api._escalation_worker:
             slots[0] = limit
-        return bounded(executor, function, arguments, limit, streams)
+        return bounded(executor, function, arguments, limit, streams, **options)
 
     monkeypatch.setattr(distance_api, "ProcessPoolExecutor", InlineExecutor)
     monkeypatch.setattr(pyppmd, "Ppmd8Encoder", counted)

@@ -5,6 +5,20 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## 0.7.1
+
+### Fixed
+
+- **A slow shard no longer leaves the other workers idle.** The distance stage bounded the
+  pair shards in flight by counting results not yet read, and read only the oldest, so a slow
+  shard at the head kept the window full of finished shards waiting behind it and no worker
+  was handed anything new. Shards cost as much as their objects are large, so a columns split
+  can meet this whenever its shards differ widely in cost; on a 76-column, 12.6 GB table a
+  worker sat idle for over an hour at a time. Shards are now taken as they finish, under the
+  same bound. Values, checkpoints and the pair a PPMd refusal names are unchanged; the shard
+  completion log and the progress bar no longer follow shard order
+  ([#141](https://github.com/delbem-research/damicore/issues/141)).
+
 ## 0.7.0
 
 ### Breaking
