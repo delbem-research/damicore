@@ -29,10 +29,10 @@ carried forward, so no drift accumulates across iterations.
 The loop runs while more than two clusters remain, so exactly `n - 2` joins for `n` labels.
 The final two are attached to a synthetic node `nj_root` with equal lengths `D[L][R] / 2`.
 
-Every branch length within `1e-9 * max|D|` of zero, the tie band's relative tolerance applied
-to the matrix's largest distance with no floor, is written as exactly `0.0`, so the result does
-not depend on the unit the matrix is in. Three or more objects with one
-distance profile form a star, which two joins draw with a branch between them that is zero
+Every branch length within `1e-9 * max|D|` of zero, where `max|D|` is the largest entry of
+the input matrix before any join, is written as exactly `0.0`. That is the tie band's
+relative tolerance with no floor, so the result does not depend on the unit the matrix is
+in. Three or more objects with one distance profile form a star, which two joins draw with a branch between them that is zero
 in exact arithmetic and a residue of either sign in float64; that residue, not the data, would
 otherwise decide what the cluster stage does with the branch. See [adr-0028].
 Internal nodes are named `nj_%06d` from 1, zero-padded so their lexicographic order is their

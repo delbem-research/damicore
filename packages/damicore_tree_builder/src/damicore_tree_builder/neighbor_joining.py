@@ -40,8 +40,7 @@ References
 .. [adr-0017] Which pair joins when two Q scores tie, and the relative band that makes the
    tie visible in float64. Neither work above states a tie rule, so this one is this
    project's and changes the tree a run reports from the same matrix.
-.. [adr-0028] That a branch within the same relative tolerance of the matrix's largest
-   distance is written as exactly zero.
+.. [adr-0028] That rounding residue of a zero branch is written as exactly zero.
    Neither work above addresses rounding, so this is this project's, and it changes the
    tree a run reports wherever a branch is zero in exact arithmetic.
 """
@@ -84,7 +83,7 @@ def _zero_band(matrix: np.ndarray[Any, Any], block_size: int) -> float:
     the reason the tie band exists. The residue scales with the distances it was computed
     from, so the band is the same relative tolerance applied to the matrix's largest
     distance, with no floor: a matrix in any unit then has the same branches at zero
-    [adr-0028]. Read in row blocks, so the matrix is never copied whole.
+    [adr-0028]. Read in row blocks.
     """
     largest = 0.0
     for start in range(0, matrix.shape[0], block_size):

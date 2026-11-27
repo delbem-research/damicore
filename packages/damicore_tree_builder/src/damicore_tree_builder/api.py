@@ -61,8 +61,8 @@ def build_tree(
     a rejected tree never survives to block the next run. Ties in the Q criterion are broken
     by label order, which makes the output a function of the matrix and its labels alone.
     Negative branch lengths are written as computed and counted in the result, never
-    clamped. The one exception is a length within ``1e-9`` of the matrix's largest distance,
-    which is rounding residue of a zero and is written as exactly ``0.0`` (ADR 0028).
+    clamped. The one exception is rounding residue of a zero, which is written as exactly
+    ``0.0`` (ADR 0028).
     ``tree.json`` is the input :func:`damicore_clusterizer.cluster_tree` expects.
 
     Raises

@@ -22,12 +22,11 @@ carries anything else, a date included, matches neither and fails the release.
   objects with one distance profile form a star. Neighbor Joining draws it with a branch that
   is zero in exact arithmetic, and float64 left that branch as a residue of either sign:
   `0.0` stopped the run, a negative residue made the branch the weakest edge, and a positive
-  one flattened every other weight toward one. A branch within `1e-9` of the matrix's largest
-  distance, ADR 0017's relative tolerance with no floor, is now `0.0`, in whatever unit the
-  matrix is measured. The manifest records `neighbor-joining-q/v2`. Measured on 75 texts in
-  five languages with three duplicated, the adjusted Rand index against the languages rises
-  from 0.504 to 0.533. A tree with no branch inside the band, and its clusters, are
-  bit-for-bit what 0.6.2 produced.
+  one flattened every other weight toward one. That residue is now written as `0.0`, in
+  whatever unit the matrix is measured (ADR 0028). The manifest records
+  `neighbor-joining-q/v2`. Measured on 75 texts in five languages with three duplicated, the
+  adjusted Rand index against the languages rises from 0.504 to 0.533. A tree with no such
+  residue, and its clusters, are bit-for-bit what 0.6.2 produced.
 
 ### Upgrading
 
