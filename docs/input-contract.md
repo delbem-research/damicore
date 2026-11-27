@@ -23,10 +23,12 @@ because accepting one would drop a cell value or invent one the file never
 contained.
 
 **Delimited text** covers `.csv`, `.tsv`, and `.txt`: the delimiter is any one
-Unicode character and the encoding is declared. Parsing is done with pandas in
-chunks, strict decoding, string values, blank-line preservation, standard
-double-quote rules, and no NA or type inference. A blank line is not a width
-mismatch: it is preserved as a row of empty cells.
+Unicode character and the encoding is declared. Parsing is done with the
+standard library's `csv` reader, one record at a time, with strict decoding,
+string values, blank-line preservation, standard double-quote rules, and no NA
+or type inference. A blank line is not a width mismatch: it is preserved as a
+row of empty cells, whatever line break ends it. A quote that is opened and
+never closed is a dataset format error.
 
 **Spreadsheets** cover `.xlsx` and `.xlsm`, read through openpyxl row by row.
 There is no delimiter and no encoding, so passing either is a configuration

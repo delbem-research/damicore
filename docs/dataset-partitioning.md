@@ -537,10 +537,9 @@ A refusal at steps 1 to 5 leaves no directory behind. A failure at steps 6 to
 8 leaves a directory without `partition.json`, which is the unambiguous
 incomplete state.
 
-Passes A and B read only the target column, by column index: `usecols` with
-the column's position for pandas, whose per-chunk header check then compares
-against the selected names rather than the whole header; one cell per row for
-openpyxl. The three passes are logical, and the seam iterators validate
+Passes A and B read only the target column, by column index: the cell at the
+column's position in each record, after the header record is checked against
+the whole header; one cell per row for openpyxl. The three passes are logical, and the seam iterators validate
 nothing structural: the record-width pass runs once at step 3, and the
 spreadsheet reader bounds the used range once before its first iteration.
 Counting the digest, a delimited partition therefore reads the file six times
@@ -717,7 +716,7 @@ property is the claim.
   and both input models are pinned by equality in the package's tests, as the
   aggregate pins its published schemas, because a field added or renamed is
   a contract change. No aggregate, CLI, or `estimate` exposure. No new
-  runtime dependency: pandas and openpyxl already read the inputs, and
+  runtime dependency: `csv` and openpyxl already read the inputs, and
   `decimal`, `fractions`, `array`, `re`, and `csv` are standard library; the
   exact-dependency test stays green unchanged.
 - **Gates.** The package's 90 percent branch-coverage gate in
