@@ -29,10 +29,11 @@ within 0.05 of one, and the adjusted Rand index against the languages fell from 
 ## The rules
 
 **Neighbor Joining writes a branch inside the band around zero as exactly zero.** The band is
-`1e-9 * max|D|`, where `max|D|` is the largest entry of the input matrix before any join:
-[adr-0017]'s relative tolerance, for [adr-0017]'s reason -- every distance is a ratio of
-integer compressed sizes and has no sixteenth digit. It has no floor, unlike [adr-0017]'s tie band, because a float64 residue
-scales with the distances it was computed from, so the same matrix in any unit has the same
+`1e-9 * max|D|`. The factor is [adr-0017]'s relative tolerance, for [adr-0017]'s reason --
+every distance is a ratio of integer compressed sizes and has no sixteenth digit -- and
+`max|D|` is the largest absolute entry of the input matrix before any join. The band has no
+floor, unlike [adr-0017]'s tie band, because a float64 residue scales with the distances it
+was computed from, so the same matrix in any unit has the same
 branches at zero; with a floor of one, a matrix measured in units of `1e-10` had every branch
 inside it. The zero is positive, so `tree.json` and `tree.nwk` never print a signed residue.
 A branch outside the band is left exactly as the formulas compute it, so the two branches of
