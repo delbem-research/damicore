@@ -22,8 +22,9 @@ result = build_tree("run/distance.npy", "run/labels.json", "run")
 distribution; the call writes `tree.json` plus Newick, and `tree.json` is the
 input the sibling `damicore-clusterizer` distribution consumes. The path API
 copies into a temporary memory map, reuses slots, evaluates Q pairwise without
-materializing it, and preserves negative branches. `neighbor_joining(matrix,
-labels)` is available for small in-memory matrices.
+materializing it, and preserves negative branches; only rounding residue of a zero is
+written as `0.0` (ADR 0028).
+`neighbor_joining(matrix, labels)` is available for small in-memory matrices.
 
 ## Links
 

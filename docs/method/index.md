@@ -31,9 +31,11 @@ value:
 | which compressor, and its window or model | configuration, PPMd variant I by default ([adr-0020], [adr-0021]) | [`ncd.md`](ncd.md) |
 | which pair joins when two Q scores tie | this project | [adr-0017] |
 | how a branch length becomes an edge weight | this project | [adr-0016] |
+| when a branch length is rounding residue of a zero | this project | [adr-0028] |
+| what a zero branch means for the communities | this project | [adr-0028] |
 | how many communities to cut the dendrogram into | igraph, or an explicit count | [`community-detection.md`](community-detection.md) |
 
-Four of the six have no published source at all. That is the reason this section exists:
+Six of the eight have no published source at all. That is the reason this section exists:
 naming the paper a stage comes from does not identify the result a run reports, because the
 result also depends on every choice the paper left open.
 

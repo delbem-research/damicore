@@ -5,6 +5,36 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## 0.7.0
+
+### Breaking
+
+- **A branch of length zero is one point, not a refused weight.** Objects that no distance
+  separates now share a cluster, where the run used to stop at the cluster stage with
+  `tree_format_error: Branch length is zero and has no reciprocal weight` after computing
+  every distance. The typical case is identical columns, such as a marker absent from a
+  month, which measure exactly zero apart under PPMd. The cluster stage joins the two nodes
+  of every zero branch into one vertex before weighting the rest as before. A tree that is a
+  single point is one cluster with modularity 0. `num_clusters` above the number of distinct
+  points is a `configuration_error` that names that number. The manifest records
+  `fastgreedy-modularity/v2`. ADR 0028.
+- **Neighbor Joining writes rounding residue around zero as exactly zero.** Three or more
+  objects with one distance profile form a star. Neighbor Joining draws it with a branch that
+  is zero in exact arithmetic, and float64 left that branch as a residue of either sign:
+  `0.0` stopped the run, a negative residue made the branch the weakest edge, and a positive
+  one flattened every other weight toward one. That residue is now written as `0.0`
+  (ADR 0028). The manifest records `neighbor-joining-q/v2`. Measured on 75 texts in five
+  languages with three duplicated, the adjusted Rand index against the languages rises from
+  0.504 to 0.533.
+
+### Upgrading
+
+A run directory written by 0.6.x is not resumed by 0.7.0, because the release is part of its
+runtime identity. A run stopped by the zero-branch error still holds its finished
+`distance.npy` and `labels.json`. `damicore_tree_builder.build_tree` and
+`damicore_clusterizer.cluster_tree`, called on those files in a new directory, finish it
+without computing the distances again.
+
 ## 0.6.2
 
 The first release since 0.5.0 to reach PyPI and GitHub Releases. Neither 0.6.0 nor 0.6.1 was
