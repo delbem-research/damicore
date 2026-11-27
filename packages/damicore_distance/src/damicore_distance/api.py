@@ -13,7 +13,7 @@ import tempfile
 import time
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from pathlib import Path
@@ -379,22 +379,39 @@ def _bounded_submit(
     arguments: Iterator[ArgumentT],
     limit: int,
     streams: Callable[[ArgumentT], int],
+    *,
+    ordered: bool = True,
 ) -> Iterator[ResultT]:
-    """Yield results in submission order, keeping at most `limit` tasks in flight.
+    """Yield results, keeping at most `limit` tasks submitted and not yet yielded.
 
     ``Executor.map`` cannot be used here: it materialises its whole argument iterable before
     yielding anything, and every shard's tuple carries a full copy of the object paths and
     the compressed sizes. The pending payload would then grow with the pair count rather
     than staying bounded by the worker count, which is what the streaming invariant of this
     stage requires.
+
+    ``ordered`` yields in submission order, for a caller whose answer depends on it. Without
+    it, results come as tasks finish, oldest first among those finished: one slow task then
+    holds back none behind it, where in order the window fills with finished results waiting
+    for it and no worker is handed anything new (issue #141).
     """
     pending: deque[Future[ResultT]] = deque()
     for argument in arguments:
         pending.append(executor.submit(function, argument, streams=streams(argument)))
         if len(pending) >= limit:
-            yield pending.popleft().result()
+            yield _next_result(pending, ordered=ordered)
     while pending:
-        yield pending.popleft().result()
+        yield _next_result(pending, ordered=ordered)
+
+
+def _next_result(pending: deque[Future[ResultT]], *, ordered: bool) -> ResultT:
+    """Take one result from ``pending``: its oldest, or its oldest finished one."""
+    if not ordered:
+        wait(pending, return_when=FIRST_COMPLETED)
+        finished = next(future for future in pending if future.done())
+        pending.remove(finished)
+        return finished.result()
+    return pending.popleft().result()
 
 
 # A spawned worker re-imports the caller's __main__ module, so a module-level call to this
@@ -916,6 +933,8 @@ def compute_distance_matrix(
             if executor is None
             # Two shards per worker: enough that a worker never idles waiting for the next
             # submission, small enough that the queued payload stays proportional to the pool.
+            # Taken as they finish, since shards cost as much as their objects are large and a
+            # slow one must not stop the rest; nothing below depends on the order (issue #141).
             else _bounded_submit(
                 executor,
                 _worker,
@@ -923,6 +942,7 @@ def compute_distance_matrix(
                 settings.effective_workers * 2,
                 # Each pair opens one stream, and a second under the model check.
                 lambda shard: len(shard[1]) * (1 if _model_check(settings) is None else 2),
+                ordered=False,
             )
         )
 
@@ -946,8 +966,10 @@ def compute_distance_matrix(
         # Shards holding a pair half the model coded otherwise wait, written but not completed,
         # for the second look once no pair is in flight: interrupted before it, they are
         # computed again rather than resumed unchecked. Their pairs wait on disk, so the
-        # coordinator holds only the waiting shards' indices [adr-0025].
-        waiting: set[int] = set()
+        # coordinator holds only where each waiting shard's pairs start and how many there are
+        # [adr-0025]. They are read back shard by shard in index order, not in the order shards
+        # finished, so the pair a refusal names does not depend on which shard was slower.
+        waiting: dict[int, tuple[int, int]] = {}
         with tempfile.TemporaryFile(dir=checkpoints) as flagged_file:
             for shard_index, left, right, values, flagged in _typed_results(results):
                 if len(left) != len(values) or not all(math.isfinite(value) for value in values):
@@ -962,7 +984,7 @@ def compute_distance_matrix(
                 shard = list(zip(left, right, strict=True))
                 _validate_completed_shard(matrix, shard)
                 if flagged:
-                    waiting.add(shard_index)
+                    waiting[shard_index] = (flagged_file.tell(), len(flagged))
                     for i, j, coded in flagged:
                         flagged_file.write(_FLAGGED_RECORD.pack(i, j, coded))
                 else:
@@ -972,13 +994,17 @@ def compute_distance_matrix(
                     progress(completed_pairs, pair_count, "distance")
             (doubled_size,) = _typed_results(self_size)
             if waiting:
-                flagged_file.seek(0)
 
                 def waiting_pairs() -> Iterator[Look]:
-                    while record := flagged_file.read(_FLAGGED_RECORD.size):
-                        i, j, coded = _FLAGGED_RECORD.unpack(record)
-                        first, second = (i, j) if digests[i] <= digests[j] else (j, i)
-                        yield i * len(paths) + j, (paths[first], paths[second]), coded
+                    for shard_index in sorted(waiting):
+                        start, count = waiting[shard_index]
+                        for record in range(count):
+                            flagged_file.seek(start + record * _FLAGGED_RECORD.size)
+                            i, j, coded = _FLAGGED_RECORD.unpack(
+                                flagged_file.read(_FLAGGED_RECORD.size)
+                            )
+                            first, second = (i, j) if digests[i] <= digests[j] else (j, i)
+                            yield i * len(paths) + j, (paths[first], paths[second]), coded
 
                 # In the calling process: every object's size, checks and at most one look,
                 # two checks per pair and the largest object's self-pair, at most.
