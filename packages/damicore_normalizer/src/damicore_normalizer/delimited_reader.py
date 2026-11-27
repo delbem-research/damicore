@@ -93,8 +93,8 @@ def validate_record_widths(path: Path, source: DelimitedSource, width: int) -> N
 
     A quote opened and never closed is the fourth. It runs to the end of the file, so only the
     last record can end inside one -- the header, when no data row follows it -- and
-    ``csv.reader`` returns what it holds as a last field
-    where pandas refused the file; that record is refused here.
+    ``csv.reader`` returns what it holds as a last field where pandas refused the file; that
+    record is refused here.
     """
     lines: list[str] = []
 
