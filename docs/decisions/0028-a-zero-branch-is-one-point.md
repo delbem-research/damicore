@@ -48,9 +48,8 @@ remain. Joining along the edges of a tree never closes a cycle, so the graph sta
 
 Two consequences are fixed with it:
 
-- A tree whose branches are all zero is one point: one cluster, modularity 0, which is the
-  modularity of a single community by definition. igraph would report NaN, which no JSON
-  artifact can carry.
+- A tree whose branches are all zero is one point: one cluster, modularity 0. igraph would
+  report NaN, which no JSON artifact can carry.
 - `num_clusters` above the number of distinct points is a `configuration_error` naming that
   number, because a dendrogram over fewer points cannot be cut into more communities.
 
