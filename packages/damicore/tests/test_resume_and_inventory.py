@@ -685,6 +685,15 @@ def test_a_run_records_the_rule_in_force_at_every_stage(tmp_path: Path) -> None:
     method = manifest["method"]
     assert set(method) == {"objects", "distance", "tree", "clusters"}
     assert method["distance"] == {"name": "ncd-max/v2", "refs": ["cilibrasi2005", "adr-0024"]}
+    # v2 since ADR 0028: residue around zero is written as zero, and a zero branch is one point.
+    assert method["tree"] == {
+        "name": "neighbor-joining-q/v2",
+        "refs": ["saitou1987", "studier1988", "adr-0017", "adr-0028"],
+    }
+    assert method["clusters"] == {
+        "name": "fastgreedy-modularity/v2",
+        "refs": ["clauset2004", "newman2004", "csardi2006", "adr-0016", "adr-0028"],
+    }
     assert all(rule["refs"] for rule in method.values())
 
 
