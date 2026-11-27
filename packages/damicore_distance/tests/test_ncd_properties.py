@@ -822,11 +822,10 @@ class _ShardTimeline:
 
         return Executor
 
-    def resolve(self, position: int) -> int:
-        """Finish the held shard at ``position`` and return its index; under the lock."""
-        shard_index, future, result = self.held.pop(position)
+    def resolve(self, position: int) -> None:
+        """Finish the held shard at ``position``; under the lock."""
+        _, future, result = self.held.pop(position)
         future.set_result(result)
-        return shard_index
 
     def run(self, monkeypatch: pytest.MonkeyPatch, call: Callable[[], Any]) -> Any:
         monkeypatch.setattr(distance_api, "ProcessPoolExecutor", self.executor())
@@ -1035,7 +1034,8 @@ def test_the_refused_pair_named_does_not_depend_on_the_order_shards_finish(
         return _refused_pair(raised.value)
 
     serial = refused("serial", 1)
-    timeline = _ShardTimeline(_newest_first(4, len(payloads) * (len(payloads) - 1) // 2))
+    window = DistanceConfig(workers=2).effective_workers * 2
+    timeline = _ShardTimeline(_newest_first(window, len(payloads) * (len(payloads) - 1) // 2))
     pooled = timeline.run(monkeypatch, lambda: refused("pool", 2))
     assert timeline.submitted, "no shard went through the pool"
     assert pooled == serial
