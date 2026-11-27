@@ -5,6 +5,27 @@ style: `.github/scripts/version_guard.py` refuses to tag a version whose section
 and `release.yml` extracts the section verbatim as the GitHub Release body. A heading that
 carries anything else, a date included, matches neither and fails the release.
 
+## 0.7.2
+
+### Fixed
+
+- **Normalizing a delimited file holds one record, not a chunk of them.** The reader read the
+  file through `pandas.read_csv` in chunks of `chunk_rows` rows, and each chunk held a Python
+  string per cell: up to 13 times the chunk's serialized size, which preflight charges at 6,
+  so a run admitted under `max_working_memory_bytes` could pass it while normalizing. Records
+  now stream one at a time through Python's `csv` reader. On 125,000 rows of 80 cells of
+  eight characters the pandas reader grew peak memory by 595 MB and the new one by nothing
+  measurable. The cells read are the ones 0.7.1 read, held to that reader by a property test
+  over generated files, so object bytes and digests are unchanged. The partition reads
+  through the same reader. `partition_dataset` still validates `chunk_rows` but no longer
+  reads in chunks ([#136](https://github.com/delbem-research/damicore/issues/136)).
+- **A quote never closed is refused when the records are checked.** It runs to the end of
+  the file. 0.7.1 refused it when pandas met it; the record-width pass now refuses it with
+  `dataset_format_error` before any object is written.
+- **A run of blank lines ended by a bare CR reads as empty rows.** pandas' tokenizer refused
+  some of these files with a buffer overrun while it read the same lines elsewhere; each
+  blank line is now a full-width row of empty cells, as the input contract defines it.
+
 ## 0.7.1
 
 ### Fixed
