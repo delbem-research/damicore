@@ -51,6 +51,10 @@ second of those is a consequence of the division, not of the shift.
 
 ## A zero length fails rather than being repaired
 
+Replaced by [adr-0028]: a zero branch joins its two nodes into one point before any weight is
+computed, so no zero reaches this mapping. A nonzero length whose reciprocal overflows is still
+refused as below. The paragraphs that follow are the reasoning as it stood.
+
 A zero length has no reciprocal, and a length small enough for its reciprocal to overflow has
 none that is usable. Both raise rather than being clamped, substituted or dropped.
 

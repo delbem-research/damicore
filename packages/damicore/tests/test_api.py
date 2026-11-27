@@ -288,6 +288,33 @@ def test_every_compressor_completes_a_run(tmp_path: Path, compressor: str) -> No
         result.close()
 
 
+def test_identical_columns_are_one_point_and_share_a_cluster(tmp_path: Path) -> None:
+    """Three columns that hold the same value in every row -- a marker absent from a month --
+    compress under PPMd to a distance of exactly zero from one another. They are one point,
+    so the run completes and puts them in one cluster, where it used to stop at the cluster
+    stage on a branch of length zero [adr-0028]."""
+    generator = random.Random(1)
+    rows = 200
+    columns = {
+        f"v{index}": [f"{generator.gauss(index * 3, 1 + index):.4f}" for _ in range(rows)]
+        for index in range(5)
+    }
+    columns.update({name: ["0"] * rows for name in ("z1", "z2", "z3")})
+    source = tmp_path / "markers.csv"
+    lines = [",".join(columns)]
+    lines += [",".join(values[row] for values in columns.values()) for row in range(rows)]
+    source.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    result = run(
+        source, output_dir=tmp_path / "run", progress=False, execution=ExecutionConfig(workers=1)
+    )
+    try:
+        assert result.report.status == "completed"
+        clusters = dict(zip(result.membership["label"], result.membership["cluster"], strict=True))
+        assert clusters["z1"] == clusters["z2"] == clusters["z3"]
+    finally:
+        result.close()
+
+
 @pytest.mark.parametrize(
     ("chosen", "recorded"),
     [

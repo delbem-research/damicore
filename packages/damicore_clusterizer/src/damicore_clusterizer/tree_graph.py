@@ -1,8 +1,8 @@
 """Turn the tree into the weighted graph FastGreedy partitions.
 
 The root is dropped and its two edges become one joining its children with their lengths
-summed, so the graph is the unrooted form of the tree. Branch lengths become strictly
-positive weights.
+summed, so the graph is the unrooted form of the tree. Nodes joined by a zero branch are one
+point and become one vertex; every other branch length becomes a strictly positive weight.
 
 References
 ----------
@@ -11,6 +11,9 @@ References
    tree, so the record is its basis. What this unit does not take from the record is any
    claim about the method downstream: the record fixes the weights, and the objective they
    are fed into is cited where that objective is computed.
+.. [adr-0028] A zero branch joins its two nodes into one point instead of being refused, and
+   replaces the section of [adr-0016] that refused it. No published work specifies this
+   either; the record is its basis.
 """
 
 from __future__ import annotations
@@ -55,10 +58,13 @@ class _TreeArtifact(BaseModel):
 class GraphInput:
     graph: ig.Graph
     # Vertex order as igraph holds it. Exposed here so callers never read graph.vs
-    # themselves: this module is the only place that touches igraph's attribute API.
+    # themselves: this module is the only place that touches igraph's attribute API. A vertex
+    # that is several nodes joined by zero branches is named after the first of them.
     vertex_names: tuple[str, ...]
     object_ids: tuple[str, ...]
     labels: dict[str, str]
+    # The vertex each object sits at. Several objects share one where zero branches join them.
+    vertex_of: dict[str, int]
 
 
 def _edge_weights(lengths: list[float]) -> list[float]:
@@ -85,20 +91,19 @@ def _edge_weights(lengths: list[float]) -> list[float]:
     The result is at least one everywhere and is unchanged by rescaling every length, the
     second being a consequence of the division. See [adr-0016].
 
+    No length here is zero: a zero branch joins its nodes into one point before any weight is
+    computed [adr-0028]. An empty list, the tree that is a single point, has no weights.
+
     Raises
     ------
     ClusterizerError
-        If a length is zero, which has no reciprocal, or so small that its reciprocal
-        overflows. Neither is repaired here: a repair would be the unbounded weight this
-        function exists to avoid.
+        If a length is so small that its reciprocal overflows. That is not repaired here: a
+        repair would be the unbounded weight this function exists to avoid.
     """
+    if not lengths:
+        return []
     reciprocals: list[float] = []
     for length in lengths:
-        if length == 0.0:
-            raise ClusterizerError(
-                "Branch length is zero and has no reciprocal weight",
-                code="tree_format_error",
-            )
         value = 1.0 / length
         if not math.isfinite(value):
             raise ClusterizerError(
@@ -168,16 +173,41 @@ def _load_tree_graph(path: Path) -> GraphInput:
         raise ClusterizerError("Branch lengths must be finite", code="tree_format_error")
     if len(graph_edges) != len(retained_nodes) - 1:
         raise ClusterizerError("Unrooted tree must have n-1 edges", code="tree_format_error")
-    graph = ig.Graph(n=len(retained_nodes), edges=graph_edges, directed=False)
-    if not graph.is_connected():
+    if not ig.Graph(n=len(retained_nodes), edges=graph_edges, directed=False).is_connected():
         raise ClusterizerError("Tree graph is disconnected", code="tree_format_error")
-    graph.vs["name"] = retained_nodes
-    graph.es["weight"] = _edge_weights(lengths)
+
+    # A zero branch says its two nodes are one point, so they become one vertex [adr-0028].
+    # The graph is a tree, so joining along its edges never closes a cycle: no kept edge can
+    # end where it starts, and no two kept edges join the same pair of points.
+    point = list(range(len(retained_nodes)))
+
+    def find(node: int) -> int:
+        while point[node] != node:
+            point[node] = point[point[node]]
+            node = point[node]
+        return node
+
+    for (source, target), length in zip(graph_edges, lengths, strict=True):
+        if length == 0.0:
+            # The smaller index represents the point, so its name is the first node's.
+            low, high = sorted((find(source), find(target)))
+            point[high] = low
+    representatives = sorted({find(node) for node in range(len(retained_nodes))})
+    vertex = {representative: index for index, representative in enumerate(representatives)}
+    kept = [
+        ((vertex[find(source)], vertex[find(target)]), length)
+        for (source, target), length in zip(graph_edges, lengths, strict=True)
+        if length != 0.0
+    ]
+    graph = ig.Graph(n=len(representatives), edges=[edge for edge, _ in kept], directed=False)
+    graph.vs["name"] = [retained_nodes[representative] for representative in representatives]
+    graph.es["weight"] = _edge_weights([length for _, length in kept])
     return GraphInput(
         graph=graph,
-        vertex_names=tuple(retained_nodes),
+        vertex_names=tuple(retained_nodes[representative] for representative in representatives),
         object_ids=leaves,
         labels=labels,
+        vertex_of={leaf: vertex[find(index[leaf])] for leaf in leaves},
     )
 
 

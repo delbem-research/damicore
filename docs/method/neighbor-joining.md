@@ -28,6 +28,14 @@ carried forward, so no drift accumulates across iterations.
 
 The loop runs while more than two clusters remain, so exactly `n - 2` joins for `n` labels.
 The final two are attached to a synthetic node `nj_root` with equal lengths `D[L][R] / 2`.
+
+Every branch length within `1e-9 * max|D|` of zero, where `max|D|` is the largest absolute
+entry of the input matrix before any join, is written as exactly `0.0`. That is the tie band's
+relative tolerance with no floor, so the result does not depend on the unit the matrix is in.
+Three or more objects with one distance profile form a star, which two joins draw with a branch
+between them that is zero in exact arithmetic and a residue of either sign in float64; that
+residue, not the data, would otherwise decide what the cluster stage does with the branch. See
+[adr-0028].
 Internal nodes are named `nj_%06d` from 1, zero-padded so their lexicographic order is their
 creation order.
 
@@ -91,7 +99,9 @@ produces is the tree the formulas yield for the matrix it was given.
 - **It does not clamp a negative branch length.** Neighbor Joining emits one where the
   matrix contradicts the split being made. The length is written as computed and the count
   is reported on the result; [adr-0016] records that such a branch becomes the weakest edge
-  downstream rather than the strongest.
+  downstream rather than the strongest. The one exception is a length inside the band around
+  zero described above, negative or positive, which is rounding residue of a zero and is
+  written as `0.0` [adr-0028].
 - **It produces one tree, not a distribution.** No resampling, no consensus, no support
   values.
 - **The root is synthetic.** `nj_root` is a degree-2 node at the midpoint of the last

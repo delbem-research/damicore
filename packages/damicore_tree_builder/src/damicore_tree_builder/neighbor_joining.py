@@ -3,9 +3,10 @@
 Each round joins the pair with the smallest Q score, gives the joined pair its two branch
 lengths, and replaces it with one cluster whose distance to every remaining node is
 ``0.5 * (D[i][k] + D[j][k] - D[i][j])``. That reduction is the one [studier1988] states and
-is deliberately *not* the average [saitou1987] gives. The split is written as one length
+is deliberately *not* the average [saitou1987] gives. The split is computed as one length
 plus its complement, ``right = D(i,j) - left``, which is [studier1988]'s symmetric pair of
-branch lengths rearranged.
+branch lengths rearranged; either side inside the band around zero is then written as
+``0.0`` [adr-0028], so the two sum to ``D(i,j)`` except where one of them was.
 
 Both formulas are pinned numerically rather than by prose: Neighbor Joining is exact on an
 additive matrix, so the five-taxon fixture in ``tests/test_neighbor_joining.py`` fails on
@@ -39,6 +40,9 @@ References
 .. [adr-0017] Which pair joins when two Q scores tie, and the relative band that makes the
    tie visible in float64. Neither work above states a tie rule, so this one is this
    project's and changes the tree a run reports from the same matrix.
+.. [adr-0028] That rounding residue of a zero branch is written as exactly zero.
+   Neither work above addresses rounding, so this is this project's, and it changes the
+   tree a run reports wherever a branch is zero in exact arithmetic.
 """
 
 from __future__ import annotations
@@ -69,6 +73,28 @@ _TIE_RELATIVE_TOLERANCE = 1e-9
 def _tie_band(score: float) -> float:
     """Half-width of the tie band around `score`, scaled to its magnitude."""
     return _TIE_RELATIVE_TOLERANCE * max(1.0, abs(score))
+
+
+def _zero_band(matrix: np.ndarray[Any, Any], block_size: int) -> float:
+    """Half-width of the band around zero inside which a branch length is written as 0.0.
+
+    A branch that is zero in exact arithmetic -- the one between two joins that draw a star
+    of identical distance profiles -- comes out of float64 as a residue of either sign, for
+    the reason the tie band exists. The residue scales with the distances it was computed
+    from, so the band is the same relative tolerance applied to the matrix's largest
+    distance, with no floor: a matrix in any unit then has the same branches at zero
+    [adr-0028]. Read in row blocks.
+    """
+    largest = 0.0
+    for start in range(0, matrix.shape[0], block_size):
+        largest = max(largest, float(np.abs(matrix[start : start + block_size]).max()))
+    return _TIE_RELATIVE_TOLERANCE * largest
+
+
+def _zero_within_band(length: float, band: float) -> float:
+    """`length`, or positive zero when it lies inside `band`, so no artifact prints a signed
+    residue."""
+    return 0.0 if abs(length) <= band else length
 
 
 def validate_matrix(
@@ -138,6 +164,7 @@ def build_neighbor_joining(
     ]
     edges: list[TreeEdge] = []
     internal_index = 1
+    zero_band = _zero_band(work, q_block_size)
 
     while len(active) > 2:
         active.sort()
@@ -179,7 +206,8 @@ def build_neighbor_joining(
         distance = float(work[left_slot, right_slot])
         delta = (row_sums[left] - row_sums[right]) / (count - 2)
         left_length = 0.5 * (distance + delta)
-        right_length = distance - left_length
+        right_length = _zero_within_band(distance - left_length, zero_band)
+        left_length = _zero_within_band(left_length, zero_band)
         internal = f"nj_{internal_index:06d}"
         internal_index += 1
         nodes.append(TreeNode(id=internal, kind="internal"))
@@ -205,7 +233,8 @@ def build_neighbor_joining(
 
     active.sort()
     left, right = active
-    final_length = float(work[slots[left], slots[right]]) / 2.0
+    final_distance = float(work[slots[left], slots[right]])
+    final_length = _zero_within_band(final_distance / 2.0, zero_band)
     root = "nj_root"
     nodes.append(TreeNode(id=root, kind="internal"))
     edges.extend(

@@ -1,6 +1,6 @@
 [project]
 name = "damicore-normalizer"
-version = "0.6.3"
+version = "0.7.1"
 description = "Object materialization stage for the DAMICORE pipeline: delimited text, spreadsheets, and file corpora."
 readme = "README.md"
 license = "Apache-2.0"

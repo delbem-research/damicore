@@ -31,8 +31,14 @@ A shorter branch joins a closer pair, so it carries a larger weight. The branch 
 exactly one is whichever has the smallest reciprocal: the longest, while every length is
 positive, and otherwise a negative one. The division by the standard deviation is what
 bounds the result and what makes it independent of the unit the lengths are measured in;
-[adr-0016] records that mapping, its measurements and why a zero length raises rather than
-being repaired.
+[adr-0016] records that mapping and its measurements.
+
+**Zero branches.** Before any weight is computed, the two nodes of every branch of length
+zero become one vertex: a zero branch says they are one point, so there is nothing between
+them to weigh. FastGreedy partitions the points, and every object takes its point's
+community, so objects at one point share a cluster. A tree whose branches are all zero is one
+cluster with modularity 0. [adr-0028] records why, and why neither a weight of zero nor a
+small substitute length is used.
 
 **The partition.** `fastgreedy.py` calls `graph.community_fastgreedy(weights="weight")` and
 then `as_clustering()`, or `as_clustering(n=num_clusters)` when a count is requested. It
@@ -79,4 +85,4 @@ runs the agglomeration; `fastgreedy.py` builds the graph and reads the result.
 |---|---|
 | Available | greedy modularity maximization on the weighted unrooted tree, via igraph |
 | Not available | any other community detection method; any criterion for the number of groups beyond igraph's cut or an explicit count |
-| Guarded | a root that is not internal, a root without exactly two children, an edge naming an unknown node, a zero or non-finite branch length, and an edge count other than `n - 1`, each raising `ClusterizerError` with code `tree_format_error` |
+| Guarded | a root that is not internal, a root without exactly two children, an edge naming an unknown node, a non-finite branch length or a nonzero one too small for a finite reciprocal, and an edge count other than `n - 1`, each raising `ClusterizerError` with code `tree_format_error`; a cluster count above the number of distinct points, raising `configuration_error` |

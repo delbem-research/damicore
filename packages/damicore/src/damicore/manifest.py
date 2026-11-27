@@ -165,10 +165,13 @@ DISTANCE_RULES = {
 RUN_METHOD = RunMethod(
     objects=MethodRule(name="canonical-json-lines/v1", refs=("adr-0001", "adr-0008", "adr-0010")),
     distance=DISTANCE_RULES["concat"],
-    tree=MethodRule(name="neighbor-joining-q/v1", refs=("saitou1987", "studier1988", "adr-0017")),
+    tree=MethodRule(
+        name="neighbor-joining-q/v2",
+        refs=("saitou1987", "studier1988", "adr-0017", "adr-0028"),
+    ),
     clusters=MethodRule(
-        name="fastgreedy-modularity/v1",
-        refs=("clauset2004", "newman2004", "csardi2006", "adr-0016"),
+        name="fastgreedy-modularity/v2",
+        refs=("clauset2004", "newman2004", "csardi2006", "adr-0016", "adr-0028"),
     ),
 )
 
