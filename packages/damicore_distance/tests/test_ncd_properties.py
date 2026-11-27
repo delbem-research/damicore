@@ -26,6 +26,7 @@ import tracemalloc
 import zlib
 from collections.abc import Callable
 from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any, Literal
 
@@ -794,7 +795,6 @@ class _ShardTimeline:
         self.lock = threading.Condition()
         self.held: list[tuple[int, Future[Any], Any]] = []
         self.submitted: list[int] = []
-        self.last_submission = time.monotonic()
         self.stopped = False
         self._release = release
 
@@ -814,7 +814,6 @@ class _ShardTimeline:
                 with timeline.lock:
                     timeline.submitted.append(argument[0])
                     timeline.held.append((argument[0], future, result))
-                    timeline.last_submission = time.monotonic()
                     timeline.lock.notify_all()
                 return future
 
@@ -842,15 +841,16 @@ class _ShardTimeline:
             releaser.join(timeout=10)
 
 
-def _newest_first(window: int) -> Callable[[_ShardTimeline], None]:
-    """Finish the shard submitted last whenever `window` are held, or once submissions stop:
-    within every window the shards finish in the reverse of the order they were sent."""
+def _newest_first(window: int, shards: int) -> Callable[[_ShardTimeline], None]:
+    """Finish the shard submitted last whenever `window` are held, or once all `shards` have
+    been sent: within every window the shards finish in the reverse of the order they were
+    sent, however long each one took to run."""
 
     def release(timeline: _ShardTimeline) -> None:
         with timeline.lock:
             while not timeline.stopped:
-                idle = time.monotonic() - timeline.last_submission > 0.05
-                if timeline.held and (len(timeline.held) >= window or idle):
+                every_one_sent = len(timeline.submitted) >= shards
+                if timeline.held and (len(timeline.held) >= window or every_one_sent):
                     timeline.resolve(-1)
                 else:
                     timeline.lock.wait(timeout=0.01)
@@ -937,7 +937,8 @@ def test_shards_finishing_in_reverse_give_the_matrix_one_worker_gives(
     config = DistanceConfig(
         compressor=SMALL_MODEL, workers=2, pairs_per_shard=1, max_working_memory_bytes=ROOMY
     )
-    timeline = _ShardTimeline(_newest_first(config.effective_workers * 2))
+    shards = len(payloads) * (len(payloads) - 1) // 2
+    timeline = _ShardTimeline(_newest_first(config.effective_workers * 2, shards))
     result = timeline.run(
         monkeypatch,
         lambda: compute_distance_matrix(manifest_path, tmp_path / "pool", config=config),
@@ -945,6 +946,52 @@ def test_shards_finishing_in_reverse_give_the_matrix_one_worker_gives(
     monkeypatch.undo()
     expected = _matrix(manifest_path, tmp_path / "serial", SMALL_MODEL, allow_model_restart=False)
     assert np.load(result.matrix_path, allow_pickle=False).tolist() == expected.tolist()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [MemoryError("shard too large"), BrokenProcessPool("worker killed")],
+    ids=["worker-raised", "pool-broke"],
+)
+def test_a_shard_that_fails_while_an_earlier_one_runs_is_reported_typed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException
+) -> None:
+    """A shard taken as it finishes reports its failure as one taken in order did: the typed
+    error with its stable code and the worker's exception as its cause, even while an
+    earlier shard is still running."""
+    payloads = [random.Random(index).randbytes(400) for index in range(4)]
+    manifest_path = _normalization_manifest(tmp_path / "normalized", payloads)
+    config = DistanceConfig(compressor=DeflateCompressor(), workers=2, pairs_per_shard=1)
+
+    def release(timeline: _ShardTimeline) -> None:
+        # Past this, shard 0 finishes too, so a stage that waits for it fails the test
+        # rather than hanging it.
+        deadline = time.monotonic() + 5
+        with timeline.lock:
+            while not timeline.stopped:
+                if time.monotonic() > deadline:
+                    while timeline.held:
+                        timeline.resolve(-1)
+                failing = [i for i, (shard, _, _) in enumerate(timeline.held) if shard == 1]
+                if failing:
+                    _, future, _ = timeline.held.pop(failing[0])
+                    future.set_exception(failure)
+                for position in reversed(range(len(timeline.held))):
+                    if timeline.held[position][0] > 1:
+                        timeline.resolve(position)
+                timeline.lock.wait(timeout=0.01)
+            # Shard 0 runs on until the stage has given up on the run.
+            while timeline.held:
+                timeline.resolve(-1)
+
+    timeline = _ShardTimeline(release)
+    with pytest.raises(DistanceError) as raised:
+        timeline.run(
+            monkeypatch,
+            lambda: compute_distance_matrix(manifest_path, tmp_path / "run", config=config),
+        )
+    assert raised.value.code == "distance_computation_error"
+    assert raised.value.__cause__ is failure
 
 
 def _refused_pair(error: DistanceError) -> tuple[str, str]:
@@ -988,7 +1035,7 @@ def test_the_refused_pair_named_does_not_depend_on_the_order_shards_finish(
         return _refused_pair(raised.value)
 
     serial = refused("serial", 1)
-    timeline = _ShardTimeline(_newest_first(4))
+    timeline = _ShardTimeline(_newest_first(4, len(payloads) * (len(payloads) - 1) // 2))
     pooled = timeline.run(monkeypatch, lambda: refused("pool", 2))
     assert timeline.submitted, "no shard went through the pool"
     assert pooled == serial
