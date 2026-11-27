@@ -13,7 +13,7 @@ carries anything else, a date included, matches neither and fails the release.
   pair shards in flight by counting results not yet read, and read only the oldest, so a slow
   shard at the head kept the window full of finished shards waiting behind it and no worker
   was handed anything new. Shards cost as much as their objects are large, so a columns split
-  whose columns differ widely in size met this on every run; on a 76-column, 12.6 GB table a
+  can meet this whenever its shards differ widely in cost; on a 76-column, 12.6 GB table a
   worker sat idle for over an hour at a time. Shards are now taken as they finish, under the
   same bound. Values, checkpoints and the pair a PPMd refusal names are unchanged; the shard
   completion log and the progress bar no longer follow shard order
