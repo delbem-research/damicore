@@ -29,10 +29,14 @@ within 0.05 of one, and the adjusted Rand index against the languages fell from 
 ## The rules
 
 **Neighbor Joining writes a branch inside the band around zero as exactly zero.** The band is
-[adr-0017]'s, `1e-9 * max(1.0, abs(d))`, with `d` the distance the branch was split from, for
-[adr-0017]'s reason: every distance is a ratio of integer compressed sizes and has no
-sixteenth digit. The zero is positive, so `tree.json` and `tree.nwk` never print a signed
-residue. A branch outside the band is left exactly as the formulas compute it.
+`1e-9 * max|D|`: [adr-0017]'s relative tolerance, for [adr-0017]'s reason -- every distance
+is a ratio of integer compressed sizes and has no sixteenth digit -- applied to the matrix's
+largest distance. It has no floor, unlike [adr-0017]'s tie band, because a float64 residue
+scales with the distances it was computed from, so the same matrix in any unit has the same
+branches at zero; with a floor of one, a matrix measured in units of `1e-10` had every branch
+inside it. The zero is positive, so `tree.json` and `tree.nwk` never print a signed residue.
+A branch outside the band is left exactly as the formulas compute it, so the two branches of
+a join sum to their distance except where one of them was written as zero.
 
 **The cluster stage joins the two nodes of a zero branch into one vertex.** A zero branch
 says the nodes are one point, which is neither a weak link nor a strong one but no link: there
@@ -79,13 +83,15 @@ distance rule does not change.
 
 The band is a threshold with a magnitude, and the assumption behind it is that no real branch
 is that short. The shortest real branch measured on the five-language corpus was `1.3e-4`,
-against a residue of `2.2e-16`. A branch's resolution is roughly the inverse of a compressed
-size times the number of objects. A corpus large enough on both counts to bring that near
-`1e-9` is the condition to revise this record.
+against a residue of `2.2e-16`, with a largest distance near one. A branch's resolution is
+roughly the inverse of a compressed size times the number of objects, relative to the largest
+distance. A corpus large enough on both counts to bring that near `1e-9` is the condition to
+revise this record.
 
 ## Status
 
 Replaces the section "A zero length fails rather than being repaired" of [adr-0016]. A nonzero
-length whose reciprocal overflows is still refused. Extends [adr-0017]'s band to branch
-lengths, with the same constant. A change to either rule is a new record, because each
+length whose reciprocal overflows is still refused. Applies [adr-0017]'s relative tolerance to
+branch lengths, scaled to the matrix rather than floored at one; [adr-0017]'s own tie band is
+unchanged. A change to either rule is a new record, because each
 changes the clusters a run reports.

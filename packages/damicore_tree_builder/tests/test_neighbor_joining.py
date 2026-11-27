@@ -471,11 +471,22 @@ NOISY_STARS = [
 ]
 
 
+# The unit a matrix is measured in must not decide which branches are zero: the residue scales
+# with the distances, so the band has to scale with them too. The same stars are checked from
+# far below one to far above it.
+UNIT_SCALES = [
+    pytest.param(1e-10, id="unit-1e-10"),
+    pytest.param(1.0, id="unit-1"),
+    pytest.param(1e6, id="unit-1e6"),
+]
+
+
+@pytest.mark.parametrize("scale", UNIT_SCALES)
 @pytest.mark.parametrize("values", NOISY_STARS)
 def test_a_branch_is_zero_exactly_when_its_exact_length_is_zero(
-    values: tuple[float, float, float, float],
+    values: tuple[float, float, float, float], scale: float
 ) -> None:
-    between, within, from_a, from_b = values
+    between, within, from_a, from_b = (value * scale for value in values)
     labels = ["a", "b", "z1", "z2", "z3"]
     matrix = np.array(
         [
