@@ -3,9 +3,10 @@
 Each round joins the pair with the smallest Q score, gives the joined pair its two branch
 lengths, and replaces it with one cluster whose distance to every remaining node is
 ``0.5 * (D[i][k] + D[j][k] - D[i][j])``. That reduction is the one [studier1988] states and
-is deliberately *not* the average [saitou1987] gives. The split is written as one length
+is deliberately *not* the average [saitou1987] gives. The split is computed as one length
 plus its complement, ``right = D(i,j) - left``, which is [studier1988]'s symmetric pair of
-branch lengths rearranged.
+branch lengths rearranged; either side inside the band around zero is then written as
+``0.0`` [adr-0028], so the two sum to ``D(i,j)`` except where one of them was.
 
 Both formulas are pinned numerically rather than by prose: Neighbor Joining is exact on an
 additive matrix, so the five-taxon fixture in ``tests/test_neighbor_joining.py`` fails on

@@ -98,7 +98,9 @@ produces is the tree the formulas yield for the matrix it was given.
 - **It does not clamp a negative branch length.** Neighbor Joining emits one where the
   matrix contradicts the split being made. The length is written as computed and the count
   is reported on the result; [adr-0016] records that such a branch becomes the weakest edge
-  downstream rather than the strongest.
+  downstream rather than the strongest. The one exception is a length inside the band around
+  zero described above, negative or positive, which is rounding residue of a zero and is
+  written as `0.0` [adr-0028].
 - **It produces one tree, not a distribution.** No resampling, no consensus, no support
   values.
 - **The root is synthetic.** `nj_root` is a degree-2 node at the midpoint of the last
