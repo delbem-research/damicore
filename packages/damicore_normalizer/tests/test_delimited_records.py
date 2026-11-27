@@ -128,12 +128,15 @@ def _written_file(draw: st.DrawFn) -> tuple[str, str]:
 def _raw_file(draw: st.DrawFn) -> tuple[str, str]:
     """A file assembled from raw pieces, quotes and line breaks where no writer would put
     them: text after a closing quote, a quote in mid-field, a bare CR, a missing final line
-    break. Whatever its widths, both readers must agree on it or both refuse it."""
+    break -- in the header too, which is a record like any other. Whatever its widths, both
+    readers must agree on it or both refuse it."""
     delimiter = draw(_DELIMITER)
     width = draw(st.integers(min_value=1, max_value=3))
+    pieces = st.lists(st.sampled_from([*_PIECES, '""', "\r\n"]), max_size=24).map("".join)
     header = delimiter.join(f"c{index}" for index in range(width)) + "\n"
-    body = draw(st.lists(st.sampled_from([*_PIECES, '""', "\r\n"]), max_size=24))
-    return delimiter, header + "".join(body)
+    if draw(st.booleans()):
+        header = draw(st.sampled_from(["c0", 'c0,"c1', '"c0'])) + draw(pieces)
+    return delimiter, header + draw(pieces)
 
 
 @settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])

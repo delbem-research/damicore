@@ -92,7 +92,8 @@ def validate_record_widths(path: Path, source: DelimitedSource, width: int) -> N
     and pandas materializes it as one.
 
     A quote opened and never closed is the fourth. It runs to the end of the file, so only the
-    last record can end inside one, and ``csv.reader`` returns what it holds as a last field
+    last record can end inside one -- the header, when no data row follows it -- and
+    ``csv.reader`` returns what it holds as a last field
     where pandas refused the file; that record is refused here.
     """
     lines: list[str] = []
@@ -109,7 +110,9 @@ def validate_record_widths(path: Path, source: DelimitedSource, width: int) -> N
         ):
             reader = csv.reader(kept(stream), delimiter=source.delimiter)
             next(reader, None)
-            last: list[str] = []
+            # The header is the last record of a file with no data rows.
+            last = lines.copy()
+            lines.clear()
             for number, record in enumerate(reader, start=2):
                 if record and len(record) != width:
                     raise NormalizerError(

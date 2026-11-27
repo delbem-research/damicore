@@ -277,6 +277,7 @@ MALFORMED_INPUTS = [
         b"a,b\n1,2\n\xff,4\n", "Could not read a valid delimited header", id="undecodable-data-row"
     ),
     pytest.param(b'a,b\n1,"2\n3,4\n', "never closed", id="quote-never-closed"),
+    pytest.param(b'a,"b\n', "never closed", id="quote-never-closed-in-the-header"),
 ]
 
 
@@ -354,7 +355,7 @@ def test_a_parser_error_while_reading_records_is_translated(
         raise csv.Error("boom")
 
     monkeypatch.setattr(delimited_reader, "_relaxed_records", failing_records)
-    with pytest.raises(NormalizerError) as raised:
+    with pytest.raises(NormalizerError, match="Delimited parsing failed") as raised:
         normalize_csv(source, tmp_path / "out")
     assert raised.value.code == "dataset_format_error"
 
