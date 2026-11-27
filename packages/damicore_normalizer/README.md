@@ -46,9 +46,9 @@ corpus = materialize_objects(
 )
 ```
 
-A delimited source streams through `pandas.read_csv` and a worksheet streams
-through `openpyxl` in read-only mode; both write the column files from a fixed
-8 MiB buffer and never hold more than `max_open_files` of them open. A file corpus is copied in and hashed, so the run directory stays
+A delimited source streams one record at a time through Python's `csv` reader
+and a worksheet streams through `openpyxl` in read-only mode; both write the
+column files from a fixed 8 MiB buffer and never hold more than `max_open_files` of them open. A file corpus is copied in and hashed, so the run directory stays
 self-contained. Every source writes the objects plus a `manifest.json` into the
 output directory, and that manifest is the input the sibling `damicore-distance`
 distribution consumes to compute the NCD matrix.

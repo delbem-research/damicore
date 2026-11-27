@@ -21,8 +21,6 @@ from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
-import pandas as pd
-
 from damicore_normalizer.config import DelimitedSource
 from damicore_normalizer.errors import NormalizerError
 from damicore_normalizer.table_split import TableScan, split_table, validate_table_shape
@@ -37,8 +35,8 @@ _MAX_FIELD_CHARS = 2**31 - 1
 def _strip_bom(header: list[str], encoding: str) -> list[str]:
     """Drop a leading UTF-8 BOM from the first column name, as pandas' C parser does.
 
-    Python's ``utf-8`` codec keeps the BOM, so without this the two readers disagree on the
-    first name and the per-chunk header check rejects a well-formed file. Decoding through
+    Python's ``utf-8`` codec keeps the BOM, so without this the first name would carry it and
+    the header check in :func:`iter_records` would reject a well-formed file. Decoding through
     ``utf-8-sig`` instead would buffer past the header, which would misreport an undecodable
     data row as a header failure.
     """
@@ -49,7 +47,7 @@ def _strip_bom(header: list[str], encoding: str) -> list[str]:
 
 @contextmanager
 def _relaxed_field_size_limit() -> Generator[None]:
-    """Lift csv's field-size cap for the duration of a validation pass.
+    """Lift csv's field-size cap for the duration of a pass, or of one record's read.
 
     The cap is process-global state, so it is restored on exit; the passes it wraps are
     synchronous and do not run user code.
@@ -92,29 +90,65 @@ def validate_record_widths(path: Path, source: DelimitedSource, width: int) -> N
     strips and this codec does not, and the field-size cap, which pandas does not impose. A
     blank line is a third: ``skip_blank_lines=False`` defines it as a full-width empty row,
     and pandas materializes it as one.
+
+    A quote opened and never closed is the fourth. It runs to the end of the file, so only the
+    last record can end inside one -- the header, when no data row follows it -- and
+    ``csv.reader`` returns what it holds as a last field where pandas refused the file; that
+    record is refused here.
     """
+    lines: list[str] = []
+
+    def kept(stream: Iterator[str]) -> Iterator[str]:
+        for line in stream:
+            lines.append(line)
+            yield line
+
     try:
         with (
             _relaxed_field_size_limit(),
             path.open("r", encoding=source.encoding, errors="strict", newline="") as stream,
         ):
-            reader = csv.reader(stream, delimiter=source.delimiter)
+            reader = csv.reader(kept(stream), delimiter=source.delimiter)
             next(reader, None)
+            # The header is the last record of a file with no data rows.
+            last = lines.copy()
+            lines.clear()
             for number, record in enumerate(reader, start=2):
                 if record and len(record) != width:
                     raise NormalizerError(
                         f"Line {number} has {len(record)} fields but the header declares {width}",
                         code="dataset_format_error",
                     )
+                last = lines.copy()
+                lines.clear()
+            if _ends_inside_a_quote(last, source.delimiter):
+                raise NormalizerError(
+                    "A quote opened in the last record is never closed",
+                    code="dataset_format_error",
+                )
     except (OSError, UnicodeError, csv.Error) as exc:
         raise NormalizerError("Delimited parsing failed", code="dataset_format_error") from exc
+
+
+def _ends_inside_a_quote(record_lines: list[str], delimiter: str) -> bool:
+    """Whether the record these lines hold ends inside a quote opened in it.
+
+    A quote read after its last line reads as nothing only there, where it closes the field;
+    anywhere else the record has ended and the quote opens one more. Asked of the reading
+    itself, so text after a closing quote, which ``strict`` would report first, cannot hide
+    it.
+    """
+    if not record_lines:
+        return False
+    closed = [*record_lines, '"']
+    reading = list(csv.reader(record_lines, delimiter=delimiter))
+    return reading == list(csv.reader(closed, delimiter=delimiter))
 
 
 def iter_records(
     path: Path,
     source: DelimitedSource,
     header: list[str],
-    chunk_rows: int,
     *,
     columns: Sequence[int] | None = None,
 ) -> Iterator[tuple[str, ...]]:
@@ -124,46 +158,48 @@ def iter_records(
     comes out of it and the partition ranks and routes it. It validates nothing structural
     itself; the caller runs :func:`validate_record_widths` first, once, so the width rule
     has one pass rather than one per consumer.
+
+    One record is held at a time, so reading costs a row whatever the cells' lengths. Read
+    through pandas in chunks, as it was until 0.7.1, each chunk held a Python string per
+    cell, up to 13 times the chunk's serialized size, which preflight did not charge (issue
+    #136). The cells are the ones that reader yielded: ``csv.reader`` takes the same quoting,
+    decoding and line breaks, and a blank line is a full-width row of empty cells, as pandas
+    materialized it under ``skip_blank_lines=False``.
     """
-    expected = header if columns is None else [header[index] for index in columns]
-    chunks = pd.read_csv(
-        path,
-        sep=source.delimiter,
-        encoding=source.encoding,
-        dtype=str,
-        keep_default_na=False,
-        na_filter=False,
-        skip_blank_lines=False,
-        chunksize=chunk_rows,
-        on_bad_lines="error",
-        quotechar='"',
-        doublequote=True,
-        comment=None,
-        # No inference of any kind, including an index inferred from row width. Records
-        # are already known to match the header, so this only pins the parser's contract.
-        index_col=False,
-        usecols=None if columns is None else list(columns),
-    )
-    for chunk in chunks:
-        if list(chunk.columns) != expected:
+    width = len(header)
+    with path.open("r", encoding=source.encoding, errors="strict", newline="") as stream:
+        records = _relaxed_records(csv.reader(stream, delimiter=source.delimiter))
+        first = next(records, None)
+        if first is None or _strip_bom(first, source.encoding) != header:
             raise NormalizerError("Header changed while parsing", code="dataset_format_error")
-        for values in chunk.itertuples(index=False, name=None):
-            yield tuple(str(value) for value in values)
+        for record in records:
+            cells = record or [""] * width
+            yield tuple(cells) if columns is None else tuple(cells[index] for index in columns)
+
+
+def _relaxed_records(reader: Iterator[list[str]]) -> Iterator[list[str]]:
+    # The field-size cap is lifted for each read only, never across a yield: the consumer
+    # runs between records, and another reader may be open on the same process-global cap.
+    while True:
+        with _relaxed_field_size_limit():
+            record = next(reader, None)
+        if record is None:
+            return
+        yield record
 
 
 @contextmanager
 def translating_parse_failures() -> Generator[None]:
-    """Turn what pandas raises while streaming records into this package's one refusal.
+    """Turn what the reader raises while streaming records into this package's one refusal.
 
     Owned here so every consumer of :func:`iter_records` refuses a malformed file with the
     same code and message rather than each translating the parser's exceptions itself.
-    ``pd.errors.ParserError`` is a ``ValueError`` subclass, so the tuple covers it.
     """
     try:
         yield
     except NormalizerError:
         raise
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError, csv.Error) as exc:
         raise NormalizerError("Delimited parsing failed", code="dataset_format_error") from exc
 
 
@@ -188,7 +224,7 @@ def scan_delimited(
     with translating_parse_failures():
         return split_table(
             header,
-            iter_records(path, source, header, chunk_rows),
+            iter_records(path, source, header),
             split=source.split,
             chunk_rows=chunk_rows,
             max_open_files=max_open_files,
