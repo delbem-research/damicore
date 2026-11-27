@@ -471,13 +471,13 @@ NOISY_STARS = [
 ]
 
 
-# The unit a matrix is measured in must not decide which branches are zero: the residue scales
-# with the distances, so the band has to scale with them too. The same stars are checked from
-# far below one to far above it.
+# Scaling a matrix -- changing the unit it is measured in -- must not decide which branches
+# are zero: the residue scales with the distances, so the band has to scale with them too. The
+# same stars are checked from far below one to far above it.
 UNIT_SCALES = [
-    pytest.param(1e-10, id="unit-1e-10"),
-    pytest.param(1.0, id="unit-1"),
-    pytest.param(1e6, id="unit-1e6"),
+    pytest.param(1e-10, id="scale-1e-10"),
+    pytest.param(1.0, id="scale-1"),
+    pytest.param(1e6, id="scale-1e6"),
 ]
 
 

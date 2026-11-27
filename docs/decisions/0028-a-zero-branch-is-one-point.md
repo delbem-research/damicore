@@ -34,7 +34,7 @@ every distance is a ratio of integer compressed sizes and has no sixteenth digit
 `max|D|` is the largest absolute entry of the input matrix before any join. The band has no
 floor, unlike [adr-0017]'s tie band, because a float64 residue scales with the distances it
 was computed from, so the same matrix in any unit has the same
-branches at zero; with a floor of one, a matrix measured in units of `1e-10` had every branch
+branches at zero; with a floor of one, a matrix scaled by `1e-10` had every branch
 inside it. The zero is positive, so `tree.json` and `tree.nwk` never print a signed residue.
 A branch outside the band is left exactly as the formulas compute it, so the two branches of
 a join sum to their distance except where one of them was written as zero.
@@ -85,9 +85,9 @@ distance rule does not change.
 The band is a threshold with a magnitude, and the assumption behind it is that no real branch
 is that short. The shortest real branch measured on the five-language corpus was `1.3e-4`,
 against a residue of `2.2e-16`, with a largest distance near one. A branch's resolution is
-roughly the inverse of a compressed size times the number of objects, relative to the largest
-distance. A corpus large enough on both counts to bring that near `1e-9` is the condition to
-revise this record.
+roughly `1 / (compressed size × number of objects)`, relative to the largest distance. A
+corpus large enough on both counts to bring that near `1e-9` is the condition to revise this
+record.
 
 ## Status
 

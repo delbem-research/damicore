@@ -20,16 +20,16 @@ def cluster_tree(
     """Cluster every node in an unrooted tree and project communities to leaves.
 
     Takes ``tree.json`` as the tree stage writes it and runs FastGreedy over the whole tree
-    graph, internal nodes included, then keeps only the leaves of each community. Nodes joined
-    by a branch of length zero are one point: they become one vertex, and every object at it
-    lands in the same cluster [adr-0028]. A tree that is a single point is one cluster, with
-    modularity 0. A community
-    made entirely of internal nodes therefore disappears, which is why ``cluster_count`` can
-    be lower than ``community_count``. Cluster numbers are assigned by sorting the groups by
-    their object ids, so the numbering depends on the tree rather than on FastGreedy's
-    internal ordering. Writes ``membership.csv`` and ``clusters.json`` into ``output_dir``;
-    both must be absent, since neither is overwritten. ``output_dir`` is created before that
-    check, so a call rejected for the conflict still leaves the directory behind.
+    graph, internal nodes included, then keeps only the leaves of each community. A
+    community made entirely of internal nodes therefore disappears, which is why
+    ``cluster_count`` can be lower than ``community_count``. Nodes joined by a branch of
+    length zero are one point: they become one vertex, and every object at it lands in the
+    same cluster [adr-0028]. A tree that is a single point is one cluster, reported with
+    modularity 0. Cluster numbers are assigned by sorting the groups by their object ids, so
+    the numbering depends on the tree rather than on FastGreedy's internal ordering. Writes
+    ``membership.csv`` and ``clusters.json`` into ``output_dir``; both must be absent, since
+    neither is overwritten. ``output_dir`` is created before that check, so a call rejected
+    for the conflict still leaves the directory behind.
 
     Raises
     ------
@@ -58,7 +58,7 @@ def cluster_tree(
         )
     if points == 1:
         # Every branch is zero: one point and no edge to weigh. One community holding every
-        # edge has modularity 0 by definition, where igraph would report NaN, which no JSON
+        # edge has modularity 0 by convention, where igraph would report NaN, which no JSON
         # artifact can carry.
         membership, community_count, modularity = [0], 1, 0.0
     else:
