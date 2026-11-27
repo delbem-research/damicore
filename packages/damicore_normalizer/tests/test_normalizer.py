@@ -1,10 +1,10 @@
+import csv
 import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-import pandas as pd
 import pytest
 from pydantic import ValidationError
 
@@ -276,6 +276,7 @@ MALFORMED_INPUTS = [
     pytest.param(
         b"a,b\n1,2\n\xff,4\n", "Could not read a valid delimited header", id="undecodable-data-row"
     ),
+    pytest.param(b'a,b\n1,"2\n3,4\n', "never closed", id="quote-never-closed"),
 ]
 
 
@@ -327,34 +328,32 @@ def test_a_utf8_bom_is_stripped_rather_than_read_as_part_of_the_first_header(
 def test_a_header_change_mid_parse_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Guards an invariant pandas' chunked reader is not expected to break on its own: every
-    chunk must report the same columns as the header _read_header already validated."""
+    """The records are read in a pass of their own, after the header was read and validated;
+    a file whose header is no longer that one by then is refused, not split under names that
+    do not label its columns."""
     source = _csv(tmp_path)
-    chunks = [
-        pd.DataFrame({"name": ["Ana"], "note": ["a,b"]}),
-        pd.DataFrame({"name": ["Bia"], "unexpected": [""]}),
-    ]
+    read_header = delimited_reader.read_header
 
-    def fake_read_csv(*args: object, **kwargs: object) -> list[pd.DataFrame]:
-        return chunks
+    def header_read_earlier(path: Path, settings: DelimitedSource) -> list[str]:
+        return [*read_header(path, settings)[:-1], "unexpected"]
 
-    monkeypatch.setattr(delimited_reader.pd, "read_csv", fake_read_csv)
+    monkeypatch.setattr(delimited_reader, "read_header", header_read_earlier)
     with pytest.raises(NormalizerError, match="Header changed") as raised:
         normalize_csv(source, tmp_path / "out")
     assert raised.value.code == "dataset_format_error"
 
 
-def test_a_pandas_parser_error_is_translated(
+def test_a_parser_error_while_reading_records_is_translated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """pandas can reject a CSV that csv.reader's own width check tolerated; the translation
-    at the bottom of scan_csv is the last line of defense before an unhandled traceback."""
+    """The reader can fail on a record the width pass admitted; the translation around the
+    records is the last line of defense before an unhandled traceback."""
     source = _csv(tmp_path)
 
-    def failing_read_csv(*args: object, **kwargs: object) -> list[pd.DataFrame]:
-        raise pd.errors.ParserError("boom")
+    def failing_records(reader: object) -> list[list[str]]:
+        raise csv.Error("boom")
 
-    monkeypatch.setattr(delimited_reader.pd, "read_csv", failing_read_csv)
+    monkeypatch.setattr(delimited_reader, "_relaxed_records", failing_records)
     with pytest.raises(NormalizerError) as raised:
         normalize_csv(source, tmp_path / "out")
     assert raised.value.code == "dataset_format_error"

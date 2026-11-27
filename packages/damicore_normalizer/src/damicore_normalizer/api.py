@@ -450,7 +450,6 @@ def _partition_reader(
     path: Path,
     settings: DelimitedSource | SpreadsheetSource,
     column: str,
-    chunk_rows: int,
 ) -> _PartitionReader:
     if isinstance(settings, DelimitedSource):
         header = read_header(path, settings)
@@ -460,11 +459,11 @@ def _partition_reader(
         delimited = settings
 
         def delimited_cells() -> Iterator[str]:
-            records = iter_records(path, delimited, header, chunk_rows, columns=[index])
+            records = iter_records(path, delimited, header, columns=[index])
             return _guarded((row[0] for row in records), translating_parse_failures)
 
         def delimited_rows() -> Iterator[tuple[str, ...]]:
-            records = iter_records(path, delimited, header, chunk_rows)
+            records = iter_records(path, delimited, header)
             return _guarded(records, translating_parse_failures)
 
         def describe_delimited(sha256: str, size_bytes: int) -> DelimitedPartitionInput:
@@ -568,6 +567,8 @@ def partition_dataset(
             code="input_validation_error",
         )
     declared = _validated_decimal(decimal)
+    # Still validated, so a call that was refused stays refused; since 0.7.2 the delimited
+    # reader streams one record at a time and no longer reads in chunks (issue #136).
     rows_per_chunk = cast(object, chunk_rows)
     if not isinstance(rows_per_chunk, int) or isinstance(rows_per_chunk, bool) or chunk_rows < 1:
         raise NormalizerError(
@@ -579,7 +580,7 @@ def partition_dataset(
 
     fingerprint = _fingerprints((path,))
     digest = _sha256(path)
-    reader = _partition_reader(path, settings, column, chunk_rows)
+    reader = _partition_reader(path, settings, column)
 
     separator, row_count = resolve_separator(reader.cells(), column, declared)
     _require_unchanged((path,), fingerprint, "partition")
